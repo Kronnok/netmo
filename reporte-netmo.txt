@@ -1,0 +1,106 @@
+REPORTE DEL PROYECTO NETMO
+===========================
+
+Fecha: 26 de agosto de 2026
+
+1. CAMBIOS REALIZADOS
+---------------------
+
+- Se reviso la estructura de la base de datos PostgreSQL.
+- Se agrego la tabla reservation_notebooks para relacionar reservas con notebooks.
+- Se agregaron indices para evitar que una misma notebook sea reservada dos veces.
+- Se agregaron validaciones de año, dias habiles y horarios de retiro.
+- Los horarios permitidos son:
+  - Lunes a jueves: 07:45 a 17:30.
+  - Viernes: 09:30 a 17:30.
+  - Sabados y domingos: no permitidos.
+- Los alumnos solo pueden pedir una notebook.
+- Los profesores pueden pedir varias notebooks hasta la cantidad disponible.
+- Se bloquean nuevas solicitudes cuando hay prestamos, reservas o devoluciones pendientes.
+- El profesor puede escribir el curso y la cantidad de equipos.
+- Las reservas se crean dentro de transacciones para evitar asignaciones duplicadas.
+- Se agregaron endpoints para cancelar reservas y administrar lotes.
+- Se conecto el login de index.html con POST /api/auth/login.
+- La pagina puede cargar notebooks, reservas, prestamos y tickets desde la API.
+- Se conectaron a la API las reservas, cancelaciones, devoluciones, tickets, cambios de inventario y aprobacion de lotes.
+- Se actualizaron las vistas administrativas de tickets, devoluciones y reservas.
+- Se actualizo la documentacion principal sin eliminar la informacion anterior.
+
+2. VALIDACIONES REALIZADAS
+--------------------------
+
+- El editor no detecta errores en index.html.
+- El editor no detecta errores en backend/server.js.
+- El editor no detecta errores en database/schema.sql.
+- El editor no detecta errores en documentacion-netmo.txt.
+- Se revisaron las referencias entre frontend, backend y base de datos.
+- Se verifico la existencia de la tabla reservation_notebooks.
+- Se verificaron las rutas principales de login, reservas, devoluciones y tickets.
+- Se comprobo que Docker no esta disponible en el entorno actual.
+- Se comprobo que el Node local es version 12.12.0.
+
+3. LO QUE FALTA HACER
+---------------------
+
+- Ejecutar el test completo con Docker Compose.
+- Levantar PostgreSQL y el backend con Node 22 dentro de Docker.
+- Probar el endpoint /health.
+- Probar login de alumno, profesor y administrador contra la BDD.
+- Probar creacion y cancelacion de reservas contra PostgreSQL.
+- Probar que el alumno no pueda pedir mas de una notebook.
+- Probar que el profesor pueda pedir varias notebooks.
+- Probar que no se pueda superar el stock disponible.
+- Probar que un usuario con una entrega pendiente no pueda realizar otra solicitud.
+- Probar aprobacion y rechazo de lotes.
+- Probar solicitud y confirmacion administrativa de devoluciones.
+- Probar que una notebook devuelta vuelva a estar disponible.
+- Probar creacion y resolucion de tickets.
+- Probar cambios de estado desde el inventario administrativo.
+- Conectar completamente las preferencias con GET/PATCH /api/preferences.
+- Conectar completamente el registro y el alta de profesores.
+- Conectar completamente las devoluciones tardias y el baneo administrativo.
+- Agregar pruebas automatizadas formales de API.
+- Agregar pruebas visuales automatizadas con un navegador.
+
+4. TEST PENDIENTE DE DOCKER
+---------------------------
+
+Este test debe realizarse en una computadora que tenga Docker instalado.
+
+En PowerShell:
+
+  $env:POSTGRES_PASSWORD="una-clave-segura"
+  docker compose -f database/docker-compose.yml up -d --build
+
+Luego se debe comprobar:
+
+  http://localhost:3000/health
+
+El resultado esperado es una respuesta JSON similar a:
+
+  {"ok":true,"service":"netmo-api"}
+
+Tambien se deben revisar los logs:
+
+  docker compose -f database/docker-compose.yml logs backend
+  docker compose -f database/docker-compose.yml logs postgres
+
+Al finalizar las pruebas, los servicios pueden detenerse con:
+
+  docker compose -f database/docker-compose.yml down
+
+La prueba de Docker es necesaria porque valida la conexion real entre:
+
+  Pagina web -> API Node.js -> PostgreSQL
+
+5. RESULTADO ACTUAL
+-------------------
+
+El proyecto tiene preparada la conexion entre la pagina, el backend y PostgreSQL.
+La integracion principal ya esta implementada en el codigo, pero el funcionamiento
+completo contra la BDD todavia debe verificarse ejecutando Docker Compose.
+
+En el entorno actual no se pudo hacer ese test porque Docker no esta instalado o
+disponible. Tampoco se pudo validar el backend con Node local porque la version
+instalada es Node 12.12.0 y el proyecto utiliza sintaxis moderna compatible con
+Node 22, que es la version definida para el contenedor.

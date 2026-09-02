@@ -1,0 +1,618 @@
+DOCUMENTACION DEL PROYECTO NETMO
+================================
+
+Fecha: 26 de agosto de 2026
+
+este documento resume lo realizado durante la jornada, explica como funciona
+cada parte del sistema y deja indicados los pendientes de la integracion final.
+
+
+1. ESTADO INICIAL DEL PROYECTO
+------------------------------
+
+El proyecto comenzo como una aplicacion web contenida en un unico archivo:
+
+- index.html: contiene HTML, CSS y JavaScript vanilla.
+- No era una aplicacion React, aunque el agente de desarrollo fue definido para
+  trabajar sobre una futura aplicacion React.
+- Inicialmente los datos estaban guardados en variables JavaScript y se perdian
+  al recargar la pagina.
+- Actualmente existe un backend Node.js y una API para las operaciones principales.
+- La interfaz actualmente funciona en modo demo sin depender de PostgreSQL. La API
+  queda preparada para volver a habilitarse cuando se reinstale la BDD.
+
+La pagina permite probar tres roles mediante cuentas demo independientes:
+
+- Alumno.
+- Profesor.
+- Administrador.
+
+Tambien permite iniciar sesion con usuarios demo y cambiar el tema visual entre
+modo claro y oscuro.
+
+
+2. CORRECCIONES REALIZADAS EN LA PAGINA
+---------------------------------------
+
+Archivo modificado: index.html
+
+2.1 Devolucion de una notebook
+
+Antes, cuando un alumno informaba una devolucion, la seccion "Tu actividad"
+seguia mostrando que tenia la notebook y la fecha de vencimiento.
+
+Se corrigio el renderizado para distinguir entre:
+
+- Prestamo activo: la notebook sigue figurando como responsabilidad del usuario.
+- Devolucion pendiente: el usuario informo que entrego el equipo, pero el admin
+  todavia no confirmo la recepcion fisica.
+- Devolucion confirmada: el prestamo deja de estar activo y la notebook vuelve a
+  estar disponible o pasa a mantenimiento.
+
+Ahora "Tu actividad" muestra que la devolucion fue informada y esta esperando la
+confirmacion del administrador. Ya no muestra la notebook como si siguiera en
+poder del alumno.
+
+2.2 Tickets y notebooks habilitadas
+
+En la vista administrativa de fallas reportadas, los tickets resueltos ya no se
+muestran en la cola de tickets activos.
+
+Cuando una notebook se habilita desde mantenimiento:
+
+- El estado de la notebook pasa a "disponible".
+- La ubicacion vuelve a ser "Carro 1".
+- Se limpian los datos de prestamo.
+- Los tickets abiertos relacionados con esa notebook pasan a "resuelto".
+
+Esto evita que el equipo figure disponible mientras su falla continua apareciendo
+como pendiente.
+
+2.3 Baneo de usuarios
+
+La funcion de permabaneo ahora recibe el legajo del usuario seleccionado y busca
+ese usuario en la lista general de usuarios.
+
+El baneo no esta limitado al usuario Teo. Teo es el unico que aparece inicialmente
+con demoras registradas, por eso es el unico candidato visible en los datos demo.
+
+Cuando un usuario es baneado:
+
+- Su propiedad "baneado" pasa a true.
+- La vista administrativa muestra el estado de baneado permanente.
+- El usuario no puede iniciar sesion nuevamente.
+
+2.4 Reservas y año actual
+
+El campo de fecha de reserva se limita al año calendario actual.
+
+La validacion se realiza en dos lugares:
+
+- El input HTML recibe una fecha minima y una fecha maxima.
+- La funcion JavaScript de validacion rechaza cualquier fecha cuyo año no sea el
+  año actual.
+
+Tambien se mantienen las reglas de dias laborales y horario de retiro:
+
+- Lunes a jueves: 07:45 a 17:30.
+- Viernes: 09:30 a 17:30.
+- Sabados y domingos: no permitidos.
+
+2.5 Eliminacion de la espera obligatoria de 30 minutos
+
+Se elimino la validacion que obligaba a reservar una hora como minimo 30 minutos
+posterior al momento actual.
+
+Esto aplica a:
+
+- Reservas individuales de alumnos.
+- Reservas individuales de profesores.
+- Solicitudes de lote de profesores.
+
+La finalidad es facilitar las pruebas. La reserva sigue validando fecha, año,
+dia laboral y horario permitido.
+
+2.6 Preferencias editables
+
+La vista de perfil ya no muestra preferencias fijas sin posibilidad de cambio.
+
+Ahora permite modificar:
+
+- Notificaciones por email: activadas o desactivadas.
+- Recordatorio de devolucion: sin recordatorio, 15, 30 o 60 minutos antes.
+
+Los valores se guardan en el objeto del usuario durante la sesion de la pagina.
+En el backend tambien existe una tabla preparada para persistirlos en PostgreSQL.
+
+2.7 Eliminacion del cierre de sesion duplicado
+
+Se elimino el boton "Cerrar sesion" que aparecia dentro de Preferencias.
+
+El cierre de sesion permanece disponible en la barra lateral izquierda, que es el
+lugar principal para esa accion.
+
+2.8 Cantidad de equipos y entregas pendientes
+----------------------------------------------
+
+- Los alumnos solo pueden solicitar una notebook.
+- Un alumno o profesor no puede crear otra solicitud mientras tenga un prestamo,
+  una devolucion pendiente de confirmacion o una reserva vigente con equipos.
+- Los profesores pueden solicitar varias notebooks escribiendo la cantidad.
+- La cantidad maxima se valida contra el stock disponible en la API y en la
+  interfaz.
+- Las notebooks asignadas a reservas se registran en reservation_notebooks.
+
+2.9 Cambio manual de estado desde Inventario
+
+El administrador ahora puede cambiar el estado de cada notebook mediante un
+selector en la vista Inventario.
+
+Estados disponibles:
+
+- Disponible.
+- Prestada.
+- En mantenimiento.
+- Pendiente de devolucion.
+
+Al cambiar el estado tambien se actualizan los contadores generales y algunos
+datos relacionados, como ubicacion y usuario responsable.
+
+
+3. ESTRUCTURA DE LA BASE DE DATOS
+---------------------------------
+
+Archivos creados dentro de database/:
+
+- database/schema.sql
+- database/seed.sql
+- database/Dockerfile
+- database/docker-compose.yml
+
+3.1 Usuarios
+
+La tabla users almacena:
+
+- Legajo.
+- Nombre.
+- Email institucional.
+- Curso o catedra.
+- Rol.
+- Hash de contraseña.
+- Estado de baneo.
+- Fecha de creacion.
+
+Los roles posibles son alumno, profesor y admin.
+
+Las contraseñas del seed demo se generan usando pgcrypto y crypt(). No se guardan
+como texto plano dentro de la base.
+
+3.2 Preferencias
+
+La tabla user_preferences se relaciona con users y almacena:
+
+- Si recibe notificaciones por email.
+- Cuantos minutos antes quiere recibir el recordatorio de devolucion.
+
+Cada usuario tiene una unica fila de preferencias.
+
+3.3 Notebooks
+
+La tabla notebooks almacena:
+
+- Codigo visible, por ejemplo NB-001.
+- Estado actual.
+- Ubicacion.
+- Usuario que tiene el equipo prestado.
+- Fecha de actualizacion.
+
+Existe una restriccion para que una notebook no pueda tener mas de un prestamo
+abierto al mismo tiempo.
+
+3.4 Reservas
+
+La tabla reservations almacena:
+
+- Codigo de reserva.
+- Usuario solicitante.
+- Tipo individual o lote.
+- Carro, opcional.
+- Curso, cuando el solicitante es profesor.
+- Cantidad de notebooks.
+- Fecha y hora de retiro.
+- Motivo.
+- Estado.
+
+Los lotes requieren al menos tres notebooks y solo pueden ser solicitados por
+profesores. Las reservas individuales pueden tener hasta 40 notebooks para
+soportar solicitudes de profesores.
+
+La tabla reservation_notebooks relaciona cada reserva con sus equipos. Un indice
+unico parcial impide que una notebook tenga dos reservas activas. La asignacion
+se realiza dentro de una transaccion.
+
+Un trigger de PostgreSQL rechaza las reservas cuyo año no sea el año actual.
+Esto protege la regla incluso si una solicitud llega desde otro cliente que no
+sea la pagina actual.
+
+No existe una restriccion de espera de 30 minutos en la base.
+
+3.5 Prestamos
+
+La tabla loans registra:
+
+- Notebook retirada.
+- Usuario responsable.
+- Reserva relacionada, si existe.
+- Fecha de retiro.
+- Fecha limite de devolucion.
+- Fecha efectiva de devolucion.
+- Estado del prestamo.
+
+Los estados son activo, devolucion_pendiente y devuelto.
+
+No se limita a un solo prestamo abierto por usuario porque un profesor puede
+retirar varias notebooks mediante un lote. La unicidad se aplica por notebook.
+
+3.6 Devoluciones
+
+La tabla returns representa la confirmacion de entrega fisica.
+
+El flujo es:
+
+1. El usuario informa la devolucion.
+2. El prestamo pasa a devolucion_pendiente.
+3. La notebook pasa a pendiente_devolucion.
+4. El admin ve la solicitud pendiente.
+5. El admin confirma la recepcion.
+6. El prestamo pasa a devuelto.
+7. La notebook pasa a disponible.
+
+La confirmacion se realiza dentro de una transaccion para evitar estados
+incompletos.
+
+3.7 Tickets
+
+La tabla tickets almacena:
+
+- Codigo del ticket.
+- Notebook afectada, si fue identificada.
+- Usuario que reporto.
+- Motivo corto.
+- Descripcion completa.
+- Estado del ticket.
+- Fechas y usuario de resolucion.
+
+Los estados son abierto, progreso y resuelto.
+
+Cuando un equipo disponible recibe un reporte, pasa automaticamente a
+mantenimiento.
+
+Cuando el admin habilita el equipo, los tickets abiertos de ese equipo se marcan
+como resueltos.
+
+3.8 Devoluciones tardias
+
+La tabla late_returns registra cada devolucion realizada despues de la fecha
+limite.
+
+Un trigger se ejecuta cuando un prestamo pasa a devuelto y compara devuelta_at
+contra vence_at.
+
+La vista user_late_return_summary muestra por usuario:
+
+- Cantidad de demoras.
+- Si tiene tres o mas demoras.
+- Si puede ser considerado para una sancion.
+
+El baneo se guarda en users.baneado y no elimina el historial.
+
+
+4. BACKEND Y API
+----------------
+
+Archivos creados dentro de backend/:
+
+- backend/server.js
+- backend/package.json
+- backend/Dockerfile
+
+El backend esta desarrollado con Node.js usando el modulo HTTP nativo y la
+libreria pg para PostgreSQL.
+
+No se conecta el navegador directamente a la base. La comunicacion correcta es:
+
+  Pagina web -> API Node.js -> PostgreSQL
+
+4.1 Autenticacion
+
+Endpoint:
+
+POST /api/auth/login
+
+Recibe email y password. PostgreSQL compara la contraseña recibida contra el
+hash almacenado usando crypt().
+
+Si las credenciales son validas, la API devuelve:
+
+- Token de sesion.
+- Datos basicos del usuario.
+
+El token se envia luego en el header:
+
+Authorization: Bearer TOKEN
+
+Las sesiones actuales se almacenan en memoria del backend. Si el backend se
+reinicia, los tokens se invalidan y los usuarios deben iniciar sesion otra vez.
+Para produccion convendria usar sesiones persistentes o JWT con una estrategia
+adecuada de expiracion.
+
+4.2 Endpoints principales
+
+GET /health
+
+Comprueba que el backend puede comunicarse con PostgreSQL.
+
+GET /api/me
+
+Devuelve el usuario autenticado.
+
+GET /api/preferences
+PATCH /api/preferences
+
+Consulta y actualiza las preferencias del usuario autenticado.
+
+GET /api/notebooks
+
+Devuelve el inventario de notebooks.
+
+PATCH /api/notebooks/:codigo
+
+Permite al administrador cambiar el estado de una notebook. Si el nuevo estado
+es disponible, tambien resuelve los tickets abiertos de ese equipo.
+
+GET /api/reservations
+POST /api/reservations
+DELETE /api/reservations/:codigo
+
+Consulta y crea reservas. La API valida el año actual, el tipo de reserva, el rol
+del usuario, la cantidad, disponibilidad, dias y horarios. Tambien impide una
+nueva solicitud mientras el usuario tenga equipos pendientes.
+
+GET /api/admin/reservations
+POST /api/admin/reservations/:id/approve
+
+Permite al administrador consultar y aprobar solicitudes de lote. La aprobacion
+actualiza la reserva y convierte sus equipos asignados en prestamos.
+
+GET /api/loans
+
+Devuelve los prestamos abiertos del usuario.
+
+POST /api/loans/:id/return
+
+Informa una devolucion y la deja pendiente de confirmacion administrativa.
+
+GET /api/admin/returns
+POST /api/admin/returns/:id/confirm
+
+Permite al administrador listar devoluciones pendientes y confirmar una entrega.
+
+GET /api/tickets
+POST /api/tickets
+PATCH /api/tickets/:codigo
+
+GET /api/admin/tickets
+
+Consulta, crea y actualiza tickets. Solo el administrador puede cambiar su estado.
+
+GET /api/admin/late-returns
+
+Devuelve el resumen de demoras por usuario.
+
+PATCH /api/admin/users/:legajo
+
+Permite al administrador banear o desbanear un alumno o profesor. No permite
+modificar al usuario admin mediante esta ruta.
+
+
+5. DOCKER
+---------
+
+El archivo database/docker-compose.yml define dos servicios:
+
+5.1 postgres
+
+- Usa PostgreSQL 16 Alpine.
+- Construye una imagen propia con schema.sql y seed.sql.
+- Guarda los datos en la carpeta database/postgres-data del host mediante un bind mount.
+- La carpeta database/postgres-data esta excluida de Git porque contiene los datos reales.
+- Expone el puerto 5432.
+- Tiene un healthcheck con pg_isready.
+
+5.2 backend
+
+- Usa Node.js 22 Alpine.
+- Instala la dependencia pg durante la construccion de la imagen.
+- Expone la API en el puerto 3000.
+- Espera a que PostgreSQL este saludable antes de iniciar.
+
+La contraseña se recibe mediante la variable de entorno POSTGRES_PASSWORD y no
+se guarda en el repositorio.
+
+Si ya existia una instalacion usando el volumen nombrado netmo-postgres-data,
+hay que copiar sus datos a database/postgres-data antes de iniciar este Compose.
+El cambio de montaje no migra automaticamente ese volumen ni sus registros.
+
+Para iniciar el sistema en PowerShell:
+
+  $env:POSTGRES_PASSWORD="una-clave-segura"
+  docker compose -f database/docker-compose.yml up -d --build
+
+La API local queda disponible en:
+
+  http://localhost:3000
+
+Para acceder desde otro dispositivo de la misma red, se debe usar la IP del
+computador que ejecuta Docker, por ejemplo:
+
+  http://192.168.1.100:3000
+
+El firewall debe permitir el puerto 3000. La base de datos no debe exponerse a
+los dispositivos externos; solo el backend debe acceder a PostgreSQL.
+
+
+6. PRUEBAS REALIZADAS
+---------------------
+
+Se ejecutaron las siguientes comprobaciones:
+
+- Diagnosticos del editor para index.html, backend/server.js y database/schema.sql:
+  sin errores.
+- Se revisaron las referencias de fetch y los endpoints usados por la interfaz.
+- Se verifico por lectura de codigo el bloqueo de cantidad y de solicitudes
+  pendientes.
+- Se intento validar server.js con Node local, pero la version instalada es
+  Node 12.12.0 y falla con optional chaining que ya existia en el proyecto.
+- Se intento validar Docker Compose, pero Docker no esta instalado o disponible
+  en el entorno actual.
+
+No se ejecutaron pruebas visuales automatizadas de clicks porque el entorno no
+tenia instalados Playwright, Puppeteer, jsdom ni un navegador automatizable.
+
+
+7. LIMITACIONES ACTUALES
+------------------------
+
+La integracion principal ya usa PostgreSQL despues del login: notebooks, reservas,
+prestamos, devoluciones, tickets, inventario y aprobacion de lotes usan la API.
+
+Pendientes para cerrar la migracion completa:
+
+1. Conectar preferencias, registro, alta de profesores y devoluciones tardias a
+  sus endpoints en todas las acciones de la interfaz.
+2. Agregar rechazo de lotes y carga administrativa completa de sanciones desde
+  la interfaz.
+3. Crear pruebas automatizadas de API y pruebas visuales con navegador.
+4. Ejecutar la suite dentro de Docker con Node 22 y PostgreSQL disponibles.
+
+Cuando se usa el modo demo sin API, index.html conserva datos locales para
+compatibilidad. Ese modo no persiste cambios en PostgreSQL.
+
+El modo demo es el modo predeterminado mientras Docker no esta disponible. Para
+volver a usar la API, se debe definir window.NETMO_API_URL antes de cargar el
+script de index.html, por ejemplo con el valor http://localhost:3000. En modo
+demo se puede iniciar sesion con cualquiera de los usuarios mostrados en la
+pantalla de acceso y probar reservas, prestamos, devoluciones, tickets y vistas
+administrativas con datos en memoria.
+
+
+8. ARQUITECTURA FINAL ESPERADA
+------------------------------
+
+Cuando se complete la integracion, el funcionamiento sera:
+
+  Dispositivo del alumno o profesor
+              |
+              v
+       Frontend NetMO
+       index.html o React
+              |
+              v
+        Backend Node.js
+          puerto 3000
+              |
+              v
+       PostgreSQL Docker
+          puerto interno 5432
+
+Los dispositivos externos solo necesitan acceder a la API y al frontend a traves
+de la red. No necesitan tener Docker ni PostgreSQL instalados.
+
+La base de datos queda centralizada en el equipo o servidor donde se ejecute
+Docker y conserva la informacion en la carpeta database/postgres-data del host.
+Apagar Docker o reiniciar la computadora no elimina esa carpeta. La carpeta debe
+incluirse en las copias de seguridad y no debe versionarse en Git.
+
+
+9. ARCHIVOS PRINCIPALES CREADOS O MODIFICADOS
+---------------------------------------------
+
+- index.html: correcciones de interfaz y logica local.
+- database/schema.sql: modelo relacional, triggers, indices y vista de demoras.
+- database/seed.sql: usuarios, notebooks, reserva, prestamo y ticket demo.
+- database/Dockerfile: imagen PostgreSQL con inicializacion incorporada.
+- database/docker-compose.yml: servicios PostgreSQL y backend.
+- backend/server.js: API HTTP y reglas de negocio.
+- backend/package.json: configuracion y dependencia pg.
+- backend/Dockerfile: imagen de ejecucion del backend.
+- documentacion-netmo.txt: este documento.
+
+
+10. RESUMEN
+-----------
+
+Durante la jornada se paso de una pagina estatica con datos temporales a una
+arquitectura preparada para persistencia real:
+
+- Se corrigieron los errores funcionales indicados.
+- Se diseño una base PostgreSQL acorde a los procesos de NetMO.
+- Se agregaron restricciones para proteger reglas importantes.
+- Se creo una API backend con autenticacion y permisos.
+- Se agregaron servicios Docker para ejecutar todo en conjunto.
+- Se levantaron y probaron PostgreSQL y el backend.
+
+El proximo paso tecnico es conectar las funciones de index.html con los endpoints
+de la API. Una vez hecho eso, los usuarios de otros dispositivos podran trabajar
+contra la misma base de datos centralizada y los cambios dejaran de perderse al
+recargar la pagina.
+
+
+11. ACTUALIZACION DE ESTADO - 26 DE AGOSTO DE 2026
+---------------------------------------------------
+
+Esta seccion se agrega sin reemplazar las secciones anteriores. Indica que se
+hizo y que todavia no se hizo.
+
+11.1 Lo que hicimos
+
+- Se agrego la tabla reservation_notebooks para relacionar reservas y notebooks.
+- Se agregaron validaciones de año, dias habiles, horarios y cantidad.
+- Los alumnos quedan limitados a una notebook por solicitud.
+- Los profesores pueden pedir varias notebooks hasta el stock disponible.
+- Se bloquean nuevas solicitudes cuando hay prestamos, reservas o devoluciones
+  pendientes.
+- Se agregaron transacciones para crear reservas y aprobar lotes.
+- Se agregaron endpoints para cancelar reservas, consultar reservas administrativas
+  y aprobar lotes.
+- Se agrego la consulta administrativa de tickets.
+- El login de index.html usa POST /api/auth/login cuando la API esta disponible.
+- La pagina carga notebooks, reservas, prestamos y tickets desde la API.
+- Crear y cancelar reservas, informar devoluciones, crear tickets, cambiar estados
+  de notebooks, confirmar devoluciones y aprobar lotes ya tienen llamadas a la API.
+- Se actualizo la interfaz para que el profesor escriba el curso y la cantidad.
+- Se corrigio la documentacion para distinguir integracion realizada y pendientes.
+
+11.2 Lo que no hicimos todavia
+
+- No se reemplazo completamente el modo demo local de index.html; sigue disponible
+  como compatibilidad cuando no hay API.
+- Las preferencias todavia no estan conectadas completamente desde la interfaz a
+  GET/PATCH /api/preferences.
+- El registro de alumnos y el alta de profesores siguen usando la logica local.
+- El rechazo de lotes todavia no tiene endpoint conectado en la interfaz.
+- Las devoluciones tardias y el baneo administrativo no estan migrados por completo
+  a la interfaz conectada.
+- No se agrego una suite formal automatizada de tests.
+- No se pudieron ejecutar pruebas reales contra PostgreSQL porque Docker no esta
+  disponible en el entorno usado para esta revision.
+- No se ejecutaron pruebas visuales automatizadas con navegador.
+- La prueba local de sintaxis del backend no pudo completarse con Node 12.12.0,
+  porque el backend usa sintaxis moderna disponible en el Node 22 del contenedor.
+
+11.3 Resultado de las pruebas de esta actualizacion
+
+- Diagnosticos del editor para index.html, backend/server.js, database/schema.sql
+  y este documento: sin errores.
+- Comprobacion estatica de referencias entre frontend, API y esquema: realizada.
+- Comprobacion de Docker Compose: no realizada, Docker no esta instalado.
+- Pruebas de endpoints contra PostgreSQL: no realizadas en este entorno.

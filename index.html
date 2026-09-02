@@ -362,7 +362,10 @@
       <div class="demo-hint">
         <b>Usuarios demo:</b><br>
         Alumno → <b>tprado@ottokrause.edu.ar</b> / clave <b>1234</b><br>
+        Alumna → <b>lfernandez@ottokrause.edu.ar</b> / clave <b>1234</b><br>
+        Alumno → <b>mrodriguez@ottokrause.edu.ar</b> / clave <b>5678</b><br>
         Profesor → <b>agomez@ottokrause.edu.ar</b> / clave <b>1234</b><br>
+        Profesor → <b>dsuarez@ottokrause.edu.ar</b> / clave <b>2468</b><br>
         Admin → <b>admin@ottokrause.edu.ar</b> / clave <b>admin123</b>
       </div>
     </section>
@@ -481,15 +484,10 @@
       <h2 id="pageTitle">¡Hola!</h2>
       <p id="pageSubtitle">Aquí podés consultar la disponibilidad de notebooks y realizar reservas.</p>
       <div class="test-mode-banner" id="testModeBanner" style="display:none;">
-        🧪 Modo de prueba: viendo la interfaz como <span id="testModeRole"></span>
+        🧪 Modo demo sin BDD: viendo la interfaz como <span id="testModeRole"></span>
       </div>
     </div>
     <div class="header-right">
-      <select class="role-switcher" id="roleSwitcherSelect" onchange="switchRole(this.value)" title="Simular vista de otro rol (solo para testear la interfaz)">
-        <option value="alumno">Ver como: Alumno</option>
-        <option value="profesor">Ver como: Profesor</option>
-        <option value="admin">Ver como: Administrador</option>
-      </select>
       <button class="icon-btn theme-toggle-btn" onclick="toggleTheme()" title="Cambiar tema" aria-label="Cambiar tema"></button>
       <button class="icon-btn" onclick="switchView('tickets')" title="Notificaciones">
         <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
@@ -634,20 +632,13 @@
 
         <form id="reservaForm" onsubmit="crearReserva(event)">
           <div class="form-grid">
-            <div class="field">
-              <label for="resCarro">Carro / ubicación</label>
-              <select id="resCarro" required>
-                <option value="Carro 1">Carro 1</option>
-                <option value="Carro 2">Carro 2</option>
-                <option value="Carro 3">Carro 3</option>
-              </select>
-            </div>
             <div class="field" id="resCantidadWrap">
               <label for="resCantidad">Cantidad de equipos</label>
-              <select id="resCantidad" required>
-                <option value="1">1 notebook</option>
-                <option value="2">2 notebooks</option>
-              </select>
+              <input type="number" id="resCantidad" min="1" max="40" step="1" value="1" required>
+            </div>
+            <div class="field" data-roles-el="profesor">
+              <label for="resCursoProfesor">Curso</label>
+              <input type="text" id="resCursoProfesor" placeholder="Ej: 6° Informática A">
             </div>
             <div class="field">
               <label for="resFecha">Fecha</label>
@@ -668,15 +659,7 @@
             <div class="form-grid">
               <div class="field">
                 <label for="loteCurso">Curso / división</label>
-                <select id="loteCurso">
-                  <option>6° Informática "A"</option>
-                  <option>6° Informática "B"</option>
-                  <option>6° Computación "A"</option>
-                  <option>6° Computación "B"</option>
-                  <option>5° Informática "A"</option>
-                  <option>5° Informática "B"</option>
-                  <option>4° Informática "A"</option>
-                </select>
+                <input type="text" id="loteCurso" placeholder="Ej: 6° Informática A">
               </div>
               <div class="field">
                 <label for="loteCantidad">Cantidad de equipos</label>
@@ -765,15 +748,25 @@
         </div>
         <div class="info-row" data-roles-el="admin"><span class="label">Legajo</span><span class="value" id="profileLegajo">—</span></div>
         <div class="info-row"><span class="label">Email institucional</span><span class="value" id="profileEmail">—</span></div>
-        <div class="info-row"><span class="label">Curso</span><span class="value" id="profileCurso">—</span></div>
+        <div class="info-row" data-roles-el="alumno"><span class="label">Curso</span><span class="value" id="profileCurso">—</span></div>
         <p class="hint" style="margin-top:1.3rem;">Tus datos institucionales se cargan desde tu registro y no se pueden modificar desde acá. Si hay un error, contactá a Preceptoría.</p>
       </div>
 
       <div class="card">
         <div class="card-header"><div><h3>Preferencias</h3></div></div>
-        <div class="info-row"><span class="label">Notificaciones por email</span><span class="value">Activadas</span></div>
-        <div class="info-row"><span class="label">Recordatorio de devolución</span><span class="value">30 min antes</span></div>
-        <button class="btn btn-danger-outline btn-block" style="margin-top:1.3rem;" onclick="openModal('logoutModal')">Cerrar sesión</button>
+        <div class="info-row">
+          <label class="label" for="preferenciasEmail">Notificaciones por email</label>
+          <input type="checkbox" id="preferenciasEmail" onchange="actualizarPreferencias()">
+        </div>
+        <div class="info-row">
+          <label class="label" for="preferenciasRecordatorio">Recordatorio de devolución</label>
+          <select id="preferenciasRecordatorio" class="btn btn-sm" onchange="actualizarPreferencias()">
+            <option value="0">Sin recordatorio</option>
+            <option value="15">15 min antes</option>
+            <option value="30">30 min antes</option>
+            <option value="60">1 hora antes</option>
+          </select>
+        </div>
       </div>
     </div>
   </section>
@@ -823,7 +816,7 @@
   <section class="view" id="view-admin-inventario">
     <div class="card">
       <div class="card-header">
-        <div><h3>Inventario completo</h3><p>El estado se actualiza solo con el uso del sistema (reservas, préstamos, devoluciones y fallas). Sólo podés habilitar un equipo que ya terminó su mantenimiento.</p></div>
+        <div><h3>Inventario completo</h3><p>Consultá y actualizá el estado operativo de cada notebook. Las acciones de reservas, préstamos, devoluciones y fallas también actualizan este inventario.</p></div>
         <div class="search-bar-wrap">
           <input type="text" id="adminSearchInput" class="search-bar" placeholder="Buscar por número o estado" oninput="filterAdminNotebooks()">
           <select class="btn btn-sm" id="adminFilterEstado" onchange="filterAdminNotebooks()" style="font-weight:500;">
@@ -987,12 +980,17 @@
 ====================================================================== */
 let estadoUsuarios = [
   {legajo:'2024-0417', nombre:'Teo Prado', email:'tprado@ottokrause.edu.ar', curso:'6° Informática "B"', rol:'alumno', password:'1234', tardanzas:2, baneado:false, retiradas:14, aTiempoPct:92},
+  {legajo:'2024-0528', nombre:'Lucía Fernández', email:'lfernandez@ottokrause.edu.ar', curso:'6° Informática "A"', rol:'alumno', password:'1234', tardanzas:0, baneado:false, retiradas:6, aTiempoPct:100},
+  {legajo:'2024-0639', nombre:'Mateo Rodríguez', email:'mrodriguez@ottokrause.edu.ar', curso:'6° Computación "A"', rol:'alumno', password:'5678', tardanzas:1, baneado:false, retiradas:9, aTiempoPct:97},
   {legajo:'PRF-010', nombre:'Prof. Ana Gómez', email:'agomez@ottokrause.edu.ar', curso:'Profesor · Cátedra Programación', rol:'profesor', password:'1234', tardanzas:0, baneado:false, retiradas:31, aTiempoPct:100},
+  {legajo:'PRF-011', nombre:'Prof. Diego Suárez', email:'dsuarez@ottokrause.edu.ar', curso:'Profesor · Cátedra Redes', rol:'profesor', password:'2468', tardanzas:0, baneado:false, retiradas:18, aTiempoPct:100},
   {legajo:'ADM-001', nombre:'Admin NetMO', email:'admin@ottokrause.edu.ar', curso:'Administración', rol:'admin', password:'admin123', tardanzas:0, baneado:false},
 ];
 
 let currentUser = null;   // usuario realmente logueado
-let rolActivo = null;     // rol que se está viendo (puede diferir del real por el selector de prueba)
+let rolActivo = null;     // rol del usuario autenticado
+let authToken = null;
+const API_BASE = window.NETMO_API_URL || null;
 
 let notebooks = [
   {id:'NB-001', estado:'disponible', ubicacion:'Carro 1', act:'Hace 2 min', prestadoA:null},
@@ -1003,7 +1001,7 @@ let notebooks = [
   {id:'NB-014', estado:'prestada',   ubicacion:'—',       act:'Hace 6 hs', prestadoA:'2024-0417 · Teo Prado'},
 ];
 
-let stats = {disponibles:28, prestadas:42, mantenimiento:8, total:78};
+let stats = {disponibles:0, prestadas:0, mantenimiento:0, total:0};
 
 // Préstamos activos por legajo de alumno. "vencimiento" es la hora límite real de devolución:
 // para la demo la dejamos 2 horas en el pasado para poder mostrar el flujo de entrega tardía.
@@ -1032,8 +1030,8 @@ let tickets = [
 ];
 let ticketSeq = 15;
 
-const badgeClass = {disponible:'badge-disponible', prestada:'badge-prestada', mantenimiento:'badge-mantenimiento', pendiente_devolucion:'badge-pendiente_devolucion'};
-const badgeLabel = {disponible:'Disponible', prestada:'Prestada', mantenimiento:'En mantenimiento', pendiente_devolucion:'Pend. devolución'};
+const badgeClass = {disponible:'badge-disponible', prestada:'badge-prestada', reservada:'badge-pendiente_devolucion', mantenimiento:'badge-mantenimiento', pendiente_devolucion:'badge-pendiente_devolucion'};
+const badgeLabel = {disponible:'Disponible', prestada:'Prestada', reservada:'Reservada', mantenimiento:'En mantenimiento', pendiente_devolucion:'Pend. devolución'};
 const ticketBadgeClass = {abierto:'badge-abierto', progreso:'badge-progreso', resuelto:'badge-resuelto'};
 const ticketBadgeLabel = {abierto:'Abierto', progreso:'En progreso', resuelto:'Resuelto'};
 const rolLabel = {alumno:'Alumno', profesor:'Profesor', admin:'Administrador'};
@@ -1063,24 +1061,90 @@ function switchAuthView(name){
   document.getElementById('registroError').textContent = '';
 }
 
-function login(e){
+async function apiRequest(path, options={}){
+  if(!API_BASE) throw new Error('La API no está habilitada en el modo demo');
+  const headers = {'Content-Type':'application/json', ...(options.headers||{})};
+  if(authToken) headers.Authorization = 'Bearer '+authToken;
+  const response = await fetch(API_BASE+path, {...options, headers});
+  const payload = await response.json().catch(()=>({}));
+  if(!response.ok) throw new Error(payload.error || 'No se pudo completar la operación');
+  return payload;
+}
+
+async function cargarEstadoAPI(){
+  const esAdmin = currentUser.rol==='admin';
+  const [notebooksData, reservationsData, loansData, ticketsData] = await Promise.all([
+    apiRequest('/api/notebooks'), apiRequest(esAdmin ? '/api/admin/reservations' : '/api/reservations'), apiRequest('/api/loans'), apiRequest(esAdmin ? '/api/admin/tickets' : '/api/tickets')
+  ]);
+  notebooks = notebooksData.notebooks.map(notebook=>({
+    id:notebook.id, estado:notebook.estado, ubicacion:notebook.ubicacion,
+    act:notebook.actualizada ? new Date(notebook.actualizada).toLocaleString() : 'Recién',
+    prestadoA:notebook.prestado_a || null
+  }));
+  reservas = reservationsData.reservations.map(reserva=>{
+    const retiro = new Date(reserva.retiro_at);
+    return {
+      id:reserva.id || reserva.codigo, ownerLegajo:reserva.legajo || currentUser.legajo, ownerNombre:reserva.nombre || currentUser.nombre,
+      tipo:reserva.tipo, curso:reserva.curso, cantidad:`${reserva.cantidad} ${reserva.cantidad===1?'notebook':'notebooks'}`,
+      fecha:retiro.toISOString().slice(0,10), hora:retiro.toTimeString().slice(0,5), motivo:reserva.motivo,
+      estado:reserva.estado, notebookIds:reserva.notebook_ids || []
+    };
+  });
+  tickets = ticketsData.tickets.map(ticket=>({
+    id:ticket.id, notebook:ticket.notebook || 'otro', motivo:ticket.motivo, motivoCompleto:ticket.descripcion,
+    estado:ticket.estado, fecha:new Date(ticket.created_at).toLocaleDateString(), ownerLegajo:currentUser.legajo,
+    ownerNombre:ticket.owner_nombre || currentUser.nombre, ownerRol:ticket.owner_rol || currentUser.rol
+  }));
+  if(esAdmin){
+    const returnsData = await apiRequest('/api/admin/returns');
+    notificacionesDevolucion = returnsData.returns.map(item=>({
+      id:item.id, notebookId:item.notebook, alumnoLegajo:item.legajo, alumnoNombre:item.nombre,
+      curso:item.curso, fechaSolicitud:new Date(item.solicitado_at).toLocaleString(), rol:'alumno', returnId:item.id
+    }));
+  }
+  prestamosActivos = {};
+  loansData.loans.forEach(loan=>{
+    prestamosActivos[currentUser.legajo] = {id:loan.notebook, desde:new Date(loan.retirada_at).toLocaleString(), vence:new Date(loan.vence_at).toLocaleString(), pendiente:loan.estado!=='activo', loanId:loan.id};
+  });
+}
+
+async function login(e){
   e.preventDefault();
   const email = document.getElementById('loginEmail').value.trim();
   const pass = document.getElementById('loginPassword').value;
-  const user = estadoUsuarios.find(u=>u.email.toLowerCase()===email.toLowerCase() && u.password===pass);
-  if(!user){
-    document.getElementById('loginError').textContent = 'Correo o contraseña incorrectos.';
+
+  if(!API_BASE){
+    const demoUser = estadoUsuarios.find(u=>u.email.toLowerCase()===email.toLowerCase());
+    if(!demoUser || demoUser.password!==pass){
+      document.getElementById('loginError').textContent = 'Correo o contraseña incorrectos';
+      return;
+    }
+    if(demoUser.baneado){
+      document.getElementById('loginError').textContent = 'Usuario bloqueado por administración';
+      return;
+    }
+    currentUser = {...demoUser};
+    rolActivo = currentUser.rol;
+    document.getElementById('loginForm').reset();
+    document.getElementById('loginError').textContent = '';
+    iniciarSesion();
     return;
   }
-  if(user.baneado){
-    document.getElementById('loginError').textContent = 'Tu cuenta fue suspendida permanentemente por reincidencia en entregas tardías. Contactá a Preceptoría.';
+
+  try{
+    const result = await apiRequest('/api/auth/login', {method:'POST', body:JSON.stringify({email, password:pass})});
+    authToken = result.token;
+    currentUser = {...result.user, password:pass};
+    rolActivo = currentUser.rol;
+    await cargarEstadoAPI();
+    document.getElementById('loginForm').reset();
+    document.getElementById('loginError').textContent = '';
+    iniciarSesion();
+    return;
+  }catch(error){
+    document.getElementById('loginError').textContent = error.message;
     return;
   }
-  currentUser = user;
-  rolActivo = user.rol;
-  document.getElementById('loginForm').reset();
-  document.getElementById('loginError').textContent = '';
-  iniciarSesion();
 }
 
 function registrar(e){
@@ -1151,47 +1215,23 @@ function renderProfesoresTable(){
 function iniciarSesion(){
   document.getElementById('auth-shell').classList.add('hidden');
   document.getElementById('app-root').classList.add('active');
-  document.getElementById('roleSwitcherSelect').value = rolActivo;
+  const testBanner = document.getElementById('testModeBanner');
+  testBanner.style.display = API_BASE ? 'none' : 'inline-flex';
+  document.getElementById('testModeRole').textContent = `sesión de ${rolLabel[rolActivo]}`;
   renderAll();
   applyRoleVisibility();
   switchView('inicio');
 }
 
 function logout(){
+  authToken = null;
   currentUser = null;
   rolActivo = null;
+  document.getElementById('testModeBanner').style.display = 'none';
   document.getElementById('app-root').classList.remove('active');
   document.getElementById('auth-shell').classList.remove('hidden');
   switchAuthView('login');
   showToast('Sesión cerrada correctamente.', 'warn');
-}
-
-/* ======================================================================
-   ROLES: selector de prueba + visibilidad de nav
-====================================================================== */
-function switchRole(newRole){
-  rolActivo = newRole;
-  document.getElementById('roleSwitcherSelect').value = newRole;
-  applyRoleVisibility();
-  renderHeaderUser();
-
-  const testBanner = document.getElementById('testModeBanner');
-  if(currentUser && newRole !== currentUser.rol){
-    testBanner.style.display = 'inline-flex';
-    document.getElementById('testModeRole').textContent = rolLabel[newRole];
-  } else {
-    testBanner.style.display = 'none';
-  }
-
-  // Si la vista actual no es válida para el nuevo rol, volvemos a inicio
-  const activeView = document.querySelector('.view.active');
-  const currentViewName = activeView ? activeView.id.replace('view-','') : 'inicio';
-  const li = document.querySelector(`.nav-item[data-view="${currentViewName}"]`)?.closest('li');
-  const allowed = li ? li.dataset.roles.split(',').includes(newRole) : true;
-  switchView(allowed ? currentViewName : 'inicio');
-
-  renderReservas();
-  toggleProfesorUI();
 }
 
 function applyRoleVisibility(){
@@ -1216,17 +1256,51 @@ function applyRoleVisibility(){
 function toggleProfesorUI(){
   const isProf = rolActivo === 'profesor';
   document.getElementById('loteToggleWrap').style.display = isProf ? 'flex' : 'none';
+  document.getElementById('resCursoProfesor').required = isProf;
   if(!isProf){
     document.getElementById('loteToggle').checked = false;
     toggleLoteBlock();
   }
+  actualizarControlesReserva();
 }
 
 function toggleLoteBlock(){
   const checked = document.getElementById('loteToggle').checked;
   document.getElementById('loteBlock').classList.toggle('show', checked);
   document.getElementById('resCantidadWrap').style.display = checked ? 'none' : 'flex';
+  document.getElementById('loteCurso').required = checked && rolActivo==='profesor';
   document.getElementById('resSubmitBtn').textContent = checked ? 'Enviar solicitud de lote' : 'Confirmar reserva';
+  actualizarControlesReserva();
+}
+
+function tieneEquiposPendientes(legajo){
+  if(prestamosActivos[legajo]) return true;
+  if(notificacionesDevolucion.some(notificacion=>notificacion.alumnoLegajo===legajo)) return true;
+  return reservas.some(reserva=>reserva.ownerLegajo===legajo &&
+    !['rechazada','cancelada'].includes(reserva.estado) &&
+    reserva.notebookIds?.length > 0);
+}
+
+function actualizarControlesReserva(){
+  const cantidadInput = document.getElementById('resCantidad');
+  const loteCantidadInput = document.getElementById('loteCantidad');
+  const submitButton = document.getElementById('resSubmitBtn');
+  if(!cantidadInput || !loteCantidadInput || !submitButton || !currentUser) return;
+
+  const esProfesor = rolActivo==='profesor';
+  const equiposDisponibles = notebooks.filter(nb=>nb.estado==='disponible').length;
+  const bloqueado = tieneEquiposPendientes(currentUser.legajo);
+  const maxIndividual = esProfesor ? Math.max(1, equiposDisponibles) : 1;
+  cantidadInput.max = String(maxIndividual);
+  cantidadInput.value = esProfesor ? Math.min(Math.max(Number(cantidadInput.value)||1, 1), maxIndividual) : 1;
+  loteCantidadInput.max = String(Math.min(40, equiposDisponibles));
+  loteCantidadInput.value = Math.min(Math.max(Number(loteCantidadInput.value)||3, 3), Math.max(3, Math.min(40, equiposDisponibles)));
+
+  cantidadInput.disabled = !esProfesor;
+  document.getElementById('loteToggle').disabled = bloqueado || equiposDisponibles < 3;
+  loteCantidadInput.disabled = equiposDisponibles < 3;
+  document.getElementById('resCursoProfesor').disabled = false;
+  submitButton.disabled = bloqueado || (document.getElementById('loteToggle').checked ? equiposDisponibles < 3 : equiposDisponibles < 1);
 }
 
 /* ======================================================================
@@ -1314,6 +1388,7 @@ document.querySelectorAll('.modal-overlay').forEach(m=>{
 function renderNotebooks(){
   const tbody = document.getElementById('notebookTable');
   tbody.innerHTML = '';
+  actualizarStats();
   notebooks.forEach(nb=>{
     const tr = document.createElement('tr');
     tr.innerHTML = `<td class="mono">${nb.id}</td>
@@ -1327,6 +1402,13 @@ function renderNotebooks(){
   document.getElementById('statMantenimiento').textContent = stats.mantenimiento;
   document.getElementById('statTotal').textContent = stats.total;
   document.getElementById('statDisponiblesUsuario').textContent = stats.disponibles;
+}
+
+function actualizarStats(){
+  stats.total = notebooks.length;
+  stats.disponibles = notebooks.filter(nb=>nb.estado==='disponible').length;
+  stats.prestadas = notebooks.filter(nb=>nb.estado==='prestada' || nb.estado==='pendiente_devolucion').length;
+  stats.mantenimiento = notebooks.filter(nb=>nb.estado==='mantenimiento').length;
 }
 
 /* ---- Home simplificado para alumno/profesor vs. panel completo del admin ---- */
@@ -1356,11 +1438,17 @@ function renderMiActividad(){
 
   let html = '';
 
-  if(prestamo){
+  if(prestamo && !prestamo.pendiente){
     html += `
       <div class="action-card" style="cursor:default;margin-bottom:.8rem;">
         <div class="action-icon" style="background:var(--blue-bg);color:var(--blue-text);">💻</div>
         <div class="action-info"><h4>Tenés ${prestamo.id} en tu poder</h4><p>Vence ${prestamo.vence}</p></div>
+      </div>`;
+  } else if(prestamo && prestamo.pendiente){
+    html += `
+      <div class="action-card" style="cursor:default;margin-bottom:.8rem;">
+        <div class="action-icon" style="background:var(--green-bg);color:var(--green-text);">✅</div>
+        <div class="action-info"><h4>Devolución de ${prestamo.id} informada</h4><p>Esperando confirmación de recepción del Administrador.</p></div>
       </div>`;
   }
 
@@ -1413,9 +1501,13 @@ function renderAdminInventario(){
       <td>${nb.prestadoA || '—'}</td>
       <td>${nb.act}</td>
       <td>
-        ${nb.estado==='mantenimiento'
-          ? `<button class="btn btn-sm btn-success-outline" onclick="habilitarNotebook('${nb.id}')">Habilitar (ya está lista)</button>`
-          : `<span class="hint">Automático</span>`}
+        <select class="btn btn-sm" aria-label="Cambiar estado de ${nb.id}" onchange="adminCambiarEstadoNotebook('${nb.id}', this.value)">
+          <option value="disponible" ${nb.estado==='disponible'?'selected':''}>Disponible</option>
+          <option value="prestada" ${nb.estado==='prestada'?'selected':''}>Prestada</option>
+          <option value="reservada" ${nb.estado==='reservada'?'selected':''}>Reservada</option>
+          <option value="mantenimiento" ${nb.estado==='mantenimiento'?'selected':''}>Mantenimiento</option>
+          <option value="pendiente_devolucion" ${nb.estado==='pendiente_devolucion'?'selected':''}>Pend. devolución</option>
+        </select>
       </td>
     </tr>`).join('');
 }
@@ -1443,11 +1535,55 @@ function habilitarNotebook(id){
   nb.ubicacion = 'Carro 1';
   nb.act = 'Recién';
   nb.marcarMantenimientoAlDevolver = false;
+  tickets.filter(t=>t.notebook===id && t.estado!=='resuelto').forEach(t=>t.estado='resuelto');
 
   renderNotebooks();
   renderAdminInventario();
   renderAdminTickets();
   showToast(`${id} habilitada. Ya figura como disponible.`, 'success');
+}
+
+async function adminCambiarEstadoNotebook(id, nuevoEstado){
+  const nb = notebooks.find(n=>n.id===id);
+  if(!nb || !badgeClass[nuevoEstado] || nb.estado===nuevoEstado) return;
+  if(authToken){
+    try{
+      await apiRequest('/api/notebooks/'+encodeURIComponent(id), {method:'PATCH', body:JSON.stringify({estado:nuevoEstado})});
+      await cargarEstadoAPI();
+      renderAll();
+      showToast(`${id} actualizada a ${badgeLabel[nuevoEstado].toLowerCase()}.`, 'success');
+    }catch(error){ showToast(error.message, 'warn'); }
+    return;
+  }
+
+  if(nb.estado==='disponible') stats.disponibles = Math.max(0, stats.disponibles-1);
+  if(nb.estado==='prestada' || nb.estado==='pendiente_devolucion') stats.prestadas = Math.max(0, stats.prestadas-1);
+  if(nb.estado==='mantenimiento') stats.mantenimiento = Math.max(0, stats.mantenimiento-1);
+  if(nuevoEstado==='disponible') stats.disponibles += 1;
+  if(nuevoEstado==='prestada') stats.prestadas += 1;
+  if(nuevoEstado==='mantenimiento') stats.mantenimiento += 1;
+
+  nb.estado = nuevoEstado;
+  nb.act = 'Recién';
+  if(nuevoEstado==='disponible'){
+    nb.ubicacion = 'Carro 1';
+    nb.prestadoA = null;
+  } else if(nuevoEstado==='mantenimiento'){
+    nb.ubicacion = 'Taller';
+    nb.prestadoA = null;
+  } else if(nuevoEstado==='pendiente_devolucion'){
+    nb.ubicacion = '—';
+  } else {
+    nb.ubicacion = '—';
+    nb.prestadoA = nb.prestadoA || 'Administración';
+  }
+  if(nuevoEstado==='disponible'){
+    tickets.filter(t=>t.notebook===id && t.estado!=='resuelto').forEach(t=>t.estado='resuelto');
+  }
+  renderNotebooks();
+  renderAdminInventario();
+  renderAdminTickets();
+  showToast(`${id} actualizada a ${badgeLabel[nuevoEstado].toLowerCase()}.`, 'success');
 }
 
 function agregarNotebook(e){
@@ -1525,7 +1661,19 @@ function openReturnModal(){
   openModal('returnModal');
 }
 
-function confirmarDevolucion(){
+async function confirmarDevolucion(){
+  if(authToken){
+    const prestamoAPI = prestamosActivos[currentUser.legajo];
+    if(!prestamoAPI?.loanId) return;
+    try{
+      await apiRequest(`/api/loans/${prestamoAPI.loanId}/return`, {method:'POST'});
+      await cargarEstadoAPI();
+      renderAll();
+      closeModal('returnModal');
+      showToast('Devolución solicitada. Queda pendiente de confirmación del Administrador.', 'warn');
+    }catch(error){ showToast(error.message, 'warn'); }
+    return;
+  }
   const prestamo = prestamosActivos[currentUser.legajo];
   if(!prestamo) return;
   const nb = notebooks.find(n=>n.id===prestamo.id);
@@ -1581,9 +1729,18 @@ function renderDevoluciones(){
     </div>`).join('');
 }
 
-function confirmarRecepcion(idx){
+async function confirmarRecepcion(idx){
   const n = notificacionesDevolucion[idx];
   if(!n) return;
+  if(authToken){
+    try{
+      await apiRequest(`/api/admin/returns/${n.returnId || n.id}/confirm`, {method:'POST'});
+      await cargarEstadoAPI();
+      renderAll();
+      showToast(`Recepción de ${n.notebookId} confirmada.`, 'success');
+    }catch(error){ showToast(error.message, 'warn'); }
+    return;
+  }
   const nb = notebooks.find(x=>x.id===n.notebookId);
   delete prestamosActivos[n.alumnoLegajo];
   notificacionesDevolucion.splice(idx,1);
@@ -1619,6 +1776,7 @@ function confirmarRecepcion(idx){
   renderAdminInventario();
   renderDevoluciones();
   renderAdminTickets();
+  actualizarControlesReserva();
   if(currentUser && currentUser.legajo===n.alumnoLegajo) renderPrestamoActivo();
   showToast(aviso, 'success');
 }
@@ -1643,6 +1801,10 @@ function validarFechaHora(fechaStr, horaStr){
   const hoyInicio = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate());
   const fechaSeleccionadaInicio = new Date(y, m-1, d);
 
+  if(y !== ahora.getFullYear()){
+    return {valid:false, msg:`Las reservas solo pueden hacerse durante el año ${ahora.getFullYear()}.`};
+  }
+
   if(fechaSeleccionadaInicio < hoyInicio){
     return {valid:false, msg:'No se pueden reservar fechas pasadas.'};
   }
@@ -1653,30 +1815,57 @@ function validarFechaHora(fechaStr, horaStr){
   }
 
   const minutosDelDia = hh*60+mm;
-  const minInicio = 7*60+30;
-  const minFin = 18*60+30;
+  const minInicio = diaSemana===5 ? 9*60+30 : 7*60+45;
+  const minFin = 17*60+30;
   if(minutosDelDia < minInicio || minutosDelDia > minFin){
-    return {valid:false, msg:'El horario de retiro debe estar entre las 07:30 y las 18:30.'};
-  }
-
-  if(fechaSeleccionadaInicio.getTime() === hoyInicio.getTime()){
-    const minimo = new Date(ahora.getTime() + 30*60000);
-    if(seleccion < minimo){
-      return {valid:false, msg:'Para reservas del mismo día, la hora debe ser al menos 30 minutos posterior a la actual.'};
-    }
+    return {valid:false, msg:diaSemana===5 ? 'Los viernes el retiro debe ser entre las 09:30 y las 17:30.' : 'El horario de retiro debe ser entre las 07:45 y las 17:30.'};
   }
 
   return {valid:true, msg:''};
 }
 
-function crearReserva(e){
+async function crearReservaAPI(e){
+  const fecha = document.getElementById('resFecha').value;
+  const hora = document.getElementById('resHora').value;
+  const esLote = rolActivo==='profesor' && document.getElementById('loteToggle').checked;
+  const cantidad = esLote ? Number(document.getElementById('loteCantidad').value) : (rolActivo==='profesor' ? Number(document.getElementById('resCantidad').value) : 1);
+  const curso = rolActivo==='profesor' ? document.getElementById(esLote ? 'loteCurso' : 'resCursoProfesor').value.trim() : null;
+  const errorBox = document.getElementById('resFechaError');
+  const check = validarFechaHora(fecha, hora);
+  if(!check.valid){ errorBox.textContent = check.msg; showToast(check.msg, 'warn'); return; }
+  try{
+    await apiRequest('/api/reservations', {method:'POST', body:JSON.stringify({
+      tipo:esLote ? 'lote' : 'individual', cantidad, curso, retiroAt:`${fecha}T${hora}:00`, motivo:document.getElementById('resMotivo').value || 'Sin especificar'
+    })});
+    document.getElementById('reservaForm').reset();
+    document.getElementById('loteToggle').checked = false;
+    toggleLoteBlock();
+    await cargarEstadoAPI();
+    renderAll();
+    showToast(esLote ? 'Solicitud de lote enviada.' : 'Reserva confirmada.', 'success');
+  }catch(error){
+    errorBox.textContent = error.message;
+    showToast(error.message, 'warn');
+  }
+}
+
+async function crearReserva(e){
   e.preventDefault();
+  if(authToken){ await crearReservaAPI(e); return; }
   const errBox = document.getElementById('resFechaError');
   const fecha = document.getElementById('resFecha').value;
   const hora = document.getElementById('resHora').value;
-  const carro = document.getElementById('resCarro').value;
+  const equiposDisponibles = notebooks.filter(nb=>nb.estado==='disponible');
   const motivo = document.getElementById('resMotivo').value || 'Sin especificar';
   const esLote = rolActivo==='profesor' && document.getElementById('loteToggle').checked;
+
+  if(tieneEquiposPendientes(currentUser.legajo)){
+    const msg = 'No podés pedir más notebooks hasta devolver las que tenés asignadas.';
+    errBox.textContent = msg;
+    showToast(msg, 'warn');
+    actualizarControlesReserva();
+    return;
+  }
 
   const check = validarFechaHora(fecha, hora);
   if(!check.valid){
@@ -1687,13 +1876,33 @@ function crearReserva(e){
   errBox.textContent = '';
 
   if(esLote){
-    const curso = document.getElementById('loteCurso').value;
+    const curso = document.getElementById('loteCurso').value.trim();
     const cantidad = parseInt(document.getElementById('loteCantidad').value) || 10;
+    if(!curso){
+      const msg = 'Escribí el curso del lote.';
+      errBox.textContent = msg;
+      showToast(msg, 'warn');
+      return;
+    }
+    if(cantidad < 3 || cantidad > equiposDisponibles.length){
+      const msg = `El lote debe tener entre 3 y ${equiposDisponibles.length} equipos.`;
+      errBox.textContent = msg;
+      showToast(msg, 'warn');
+      return;
+    }
+    if(equiposDisponibles.length < cantidad){
+      const msg = `No hay suficientes notebooks disponibles para el lote. Disponibles: ${equiposDisponibles.length}.`;
+      errBox.textContent = msg;
+      showToast(msg, 'warn');
+      return;
+    }
+    const notebookIds = equiposDisponibles.slice(0, cantidad).map(nb=>nb.id);
+    notebookIds.forEach(id=>{ const nb=notebooks.find(item=>item.id===id); nb.estado='reservada'; nb.ubicacion='Reservada'; nb.act='Recién'; });
     reservas.unshift({
       id:'RES-'+String(reservaSeq++).padStart(2,'0'),
       ownerLegajo: currentUser.legajo,
       ownerNombre: currentUser.nombre,
-      tipo:'lote', carro, curso, cantidad, fecha, hora, motivo,
+      tipo:'lote', curso, cantidad, fecha, hora, motivo, notebookIds,
       estado:'pendiente_aprobacion'
     });
     document.getElementById('reservaForm').reset();
@@ -1701,35 +1910,86 @@ function crearReserva(e){
     toggleLoteBlock();
     renderReservas();
     renderLotes();
+    renderNotebooks();
+    renderAdminInventario();
+    actualizarControlesReserva();
     showToast('Solicitud de lote enviada. Queda pendiente de aprobación del Administrador.', 'warn');
     return;
   }
 
-  const cantidad = document.getElementById('resCantidad').selectedOptions[0].textContent;
+  const cantidadNumerica = rolActivo==='profesor' ? Number(document.getElementById('resCantidad').value) : 1;
+  const cantidad = `${cantidadNumerica} ${cantidadNumerica===1 ? 'notebook' : 'notebooks'}`;
+  const curso = rolActivo==='profesor' ? document.getElementById('resCursoProfesor').value.trim() : null;
+  if(rolActivo==='profesor' && !curso){
+    const msg = 'Escribí el curso de la reserva.';
+    errBox.textContent = msg;
+    showToast(msg, 'warn');
+    return;
+  }
+  if(rolActivo!=='profesor' && cantidadNumerica!==1){
+    const msg = 'Los alumnos solo pueden pedir una notebook por vez.';
+    errBox.textContent = msg;
+    showToast(msg, 'warn');
+    return;
+  }
+  if(esLote || (rolActivo==='profesor' && cantidadNumerica > equiposDisponibles.length)){
+    const msg = `No podés pedir más equipos que los disponibles: ${equiposDisponibles.length}.`;
+    errBox.textContent = msg;
+    showToast(msg, 'warn');
+    return;
+  }
+  if(equiposDisponibles.length < cantidadNumerica){
+    const msg = `No hay suficientes notebooks disponibles. Disponibles: ${equiposDisponibles.length}.`;
+    errBox.textContent = msg;
+    showToast(msg, 'warn');
+    return;
+  }
+  const notebookIds = equiposDisponibles.slice(0, cantidadNumerica).map(nb=>nb.id);
+  notebookIds.forEach(id=>{ const nb=notebooks.find(item=>item.id===id); nb.estado='reservada'; nb.ubicacion='Reservada'; nb.act='Recién'; });
   reservas.unshift({
     id:'RES-'+String(reservaSeq++).padStart(2,'0'),
     ownerLegajo: currentUser.legajo,
     ownerNombre: currentUser.nombre,
-    tipo:'individual', carro, cantidad, fecha, hora, motivo,
+    tipo:'individual', curso, cantidad, fecha, hora, motivo, notebookIds,
     estado:'confirmada'
   });
   document.getElementById('reservaForm').reset();
   renderReservas();
+  renderNotebooks();
+  renderAdminInventario();
+  actualizarControlesReserva();
   showToast('Reserva confirmada para el '+formatFecha(fecha)+' a las '+hora+'.', 'success');
 }
 
-function cancelarReserva(id){
+async function cancelarReserva(id){
+  if(authToken){
+    try{
+      await apiRequest('/api/reservations/'+encodeURIComponent(id), {method:'DELETE'});
+      await cargarEstadoAPI();
+      renderAll();
+      showToast('Reserva cancelada.', 'warn');
+    }catch(error){ showToast(error.message, 'warn'); }
+    return;
+  }
   const idx = reservas.findIndex(r=>r.id===id);
   if(idx<0) return;
+  reservas[idx].notebookIds?.forEach(notebookId=>{
+    const nb = notebooks.find(item=>item.id===notebookId);
+    if(nb?.estado==='reservada'){ nb.estado='disponible'; nb.ubicacion='Carro 1'; nb.act='Recién'; }
+  });
   reservas.splice(idx,1);
   renderReservas();
   renderLotes();
+  renderNotebooks();
+  renderAdminInventario();
+  actualizarControlesReserva();
   showToast('Reserva cancelada.', 'warn');
 }
 
 function renderReservas(){
   const wrap = document.getElementById('reservasListWrap');
   if(!wrap || !currentUser) return;
+  actualizarControlesReserva();
   const propias = reservas.filter(r=>r.ownerLegajo===currentUser.legajo);
   if(propias.length===0){
     wrap.innerHTML = `<div class="empty-state">
@@ -1744,7 +2004,7 @@ function renderReservas(){
     <div class="action-card" style="cursor:default;margin-bottom:.8rem;">
       <div class="action-icon">${r.tipo==='lote' ? '👥' : '📅'}</div>
       <div class="action-info">
-        <h4>${r.tipo==='lote' ? (r.curso+' · '+r.cantidad+' equipos') : (r.carro+' · '+r.cantidad)}</h4>
+        <h4>${r.tipo==='lote' || r.curso ? (r.curso+' · '+r.cantidad+' equipos') : r.cantidad}</h4>
         <p>${formatFecha(r.fecha)} · ${r.hora} — ${r.motivo}</p>
       </div>
       <span class="badge badge-${r.estado}" style="margin-right:.5rem;">${estadoLabelMap[r.estado]}</span>
@@ -1778,28 +2038,35 @@ function renderLotes(){
       <div class="action-icon" style="background:var(--purple-bg);color:var(--purple-text);">👥</div>
       <div class="action-info">
         <h4>${r.curso} · ${r.cantidad} equipos</h4>
-        <p>${r.ownerNombre} · ${r.carro} · ${formatFecha(r.fecha)} ${r.hora} — ${r.motivo}</p>
+        <p>${r.ownerNombre} · ${formatFecha(r.fecha)} ${r.hora} — ${r.motivo}</p>
       </div>
       <button class="btn btn-sm btn-success-outline" style="margin-right:.5rem;" onclick="aprobarLote('${r.id}')">Aprobar</button>
       <button class="btn btn-sm btn-danger-outline" onclick="pedirRechazoLote('${r.id}')">Rechazar</button>
     </div>`).join('');
 }
 
-function aprobarLote(id){
+async function aprobarLote(id){
   const r = reservas.find(x=>x.id===id);
   if(!r) return;
+  if(authToken){
+    try{
+      await apiRequest(`/api/admin/reservations/${id}/approve`, {method:'POST'});
+      await cargarEstadoAPI();
+      renderAll();
+      showToast(`Lote de ${r.curso} aprobado.`, 'success');
+    }catch(error){ showToast(error.message, 'warn'); }
+    return;
+  }
   r.estado = 'aprobada';
 
   let asignadas = 0;
-  for(const nb of notebooks){
-    if(asignadas>=r.cantidad) break;
-    if(nb.estado==='disponible'){
+  (r.notebookIds || []).forEach(notebookId=>{
+    const nb = notebooks.find(item=>item.id===notebookId);
+    if(nb && nb.estado==='reservada'){
       nb.estado='prestada'; nb.ubicacion='—'; nb.act='Recién'; nb.prestadoA = r.ownerLegajo+' · '+r.curso;
       asignadas++;
     }
-  }
-  stats.disponibles = Math.max(0, stats.disponibles - asignadas);
-  stats.prestadas += asignadas;
+  });
 
   renderNotebooks();
   renderAdminInventario();
@@ -1830,11 +2097,24 @@ function confirmarRechazoLote(){
 /* ======================================================================
    REPORTAR FALLA / TICKETS
 ====================================================================== */
-function crearTicket(e){
+async function crearTicket(e){
   e.preventDefault();
   const nbSel = document.getElementById('fallaNotebook');
   const desc = document.getElementById('fallaDesc').value.trim();
   if(!nbSel.value || !desc){ showToast('Completá la notebook y la descripción.', 'warn'); return; }
+  if(authToken){
+    try{
+      await apiRequest('/api/tickets', {method:'POST', body:JSON.stringify({
+        notebook:nbSel.value==='otro' ? null : nbSel.value, motivo:desc.slice(0,240), descripcion:desc
+      })});
+      document.getElementById('fallaForm').reset();
+      await cargarEstadoAPI();
+      renderAll();
+      showToast('Reporte enviado al Administrador.', 'success');
+      switchView('tickets');
+    }catch(error){ showToast(error.message, 'warn'); }
+    return;
+  }
 
   const t = {
     id: 'TCK-0'+(ticketSeq++),
@@ -1908,14 +2188,15 @@ function renderTicketsPropios(){
 function renderAdminTickets(){
   const tbody = document.getElementById('adminTicketsTable');
   if(!tbody) return;
-  if(tickets.length===0){
+  const ticketsActivos = tickets.filter(t=>t.estado!=='resuelto');
+  if(ticketsActivos.length===0){
     tbody.innerHTML = `<tr><td colspan="7"><div class="empty-state">
       <div class="glyph">🎫</div><h4>No hay fallas reportadas</h4><p>Los reportes de alumnos y profesores van a aparecer acá.</p>
     </div></td></tr>`;
     updateAdminTicketsBadge();
     return;
   }
-  tbody.innerHTML = tickets.map((t,i)=>{
+  tbody.innerHTML = ticketsActivos.map(t=>{
     const nb = notebooks.find(n=>n.id===t.notebook);
     let equipoCol = '<span class="hint">Sin equipo identificado</span>';
     if(nb){
@@ -1933,7 +2214,7 @@ function renderAdminTickets(){
       <td class="mono">${t.notebook}</td>
       <td>${t.motivo}</td>
       <td>
-        <select class="btn btn-sm" style="font-weight:500;" onchange="adminSetTicketEstado(${i}, this.value)">
+        <select class="btn btn-sm" style="font-weight:500;" onchange="adminSetTicketEstado('${t.id}', this.value)">
           <option value="abierto" ${t.estado==='abierto'?'selected':''}>Abierto</option>
           <option value="progreso" ${t.estado==='progreso'?'selected':''}>En progreso</option>
           <option value="resuelto" ${t.estado==='resuelto'?'selected':''}>Resuelto</option>
@@ -1945,9 +2226,18 @@ function renderAdminTickets(){
   updateAdminTicketsBadge();
 }
 
-function adminSetTicketEstado(idx, nuevoEstado){
-  const t = tickets[idx];
+async function adminSetTicketEstado(idx, nuevoEstado){
+  const t = tickets.find(ticket=>ticket.id===idx);
   if(!t) return;
+  if(authToken){
+    try{
+      await apiRequest('/api/tickets/'+encodeURIComponent(idx), {method:'PATCH', body:JSON.stringify({estado:nuevoEstado})});
+      await cargarEstadoAPI();
+      renderAll();
+      showToast(`Ticket ${t.id} actualizado.`, 'success');
+    }catch(error){ showToast(error.message, 'warn'); }
+    return;
+  }
   t.estado = nuevoEstado;
   renderAdminTickets();
   updateTicketsBadge();
@@ -2006,8 +2296,8 @@ function renderTardanzas(){
           <p>${u.tardanzas} entrega${u.tardanzas===1?'':'s'} tardía${u.tardanzas===1?'':'s'} registrada${u.tardanzas===1?'':'s'}${u.tardanzas>=3 ? ' · candidato a sanción' : ''}</p>
         </div>
         ${u.baneado
-          ? `<span class="badge badge-rechazada">Baneado permanentemente</span>`
-          : `<button class="btn btn-sm btn-danger-outline" onclick="permabanear('${u.legajo}')">Permabanear</button>`}
+          ? `<button class="btn btn-sm btn-success-outline" onclick="cambiarBaneo('${u.legajo}', false)">Quitar baneo</button>`
+          : `<button class="btn btn-sm btn-danger-outline" onclick="cambiarBaneo('${u.legajo}', true)">Banear</button>`}
       </div>`).join('');
   }
 
@@ -2029,11 +2319,15 @@ function renderTardanzas(){
 }
 
 function permabanear(legajo){
+  cambiarBaneo(legajo, true);
+}
+
+function cambiarBaneo(legajo, baneado){
   const u = estadoUsuarios.find(x=>x.legajo===legajo);
   if(!u) return;
-  u.baneado = true;
+  u.baneado = baneado;
   renderTardanzas();
-  showToast(`${u.nombre} fue baneado permanentemente. Ya no va a poder iniciar sesión en NetMO.`, 'error');
+  showToast(baneado ? `${u.nombre} fue baneado permanentemente.` : `Baneo de ${u.nombre} quitado.`, baneado ? 'error' : 'success');
 }
 
 /* ======================================================================
@@ -2047,6 +2341,18 @@ function renderPerfil(){
   document.getElementById('profileLegajo').textContent = currentUser.legajo;
   document.getElementById('profileEmail').textContent = currentUser.email;
   document.getElementById('profileCurso').textContent = currentUser.curso;
+  const preferencias = currentUser.preferencias || {email:true, recordatorio:'30'};
+  document.getElementById('preferenciasEmail').checked = preferencias.email;
+  document.getElementById('preferenciasRecordatorio').value = preferencias.recordatorio;
+}
+
+function actualizarPreferencias(){
+  if(!currentUser) return;
+  currentUser.preferencias = {
+    email: document.getElementById('preferenciasEmail').checked,
+    recordatorio: document.getElementById('preferenciasRecordatorio').value
+  };
+  showToast('Preferencias actualizadas.', 'success');
 }
 
 /* ======================================================================
@@ -2074,6 +2380,7 @@ function toggleTheme(){
 ====================================================================== */
 const today = new Date();
 document.getElementById('resFecha').min = today.toISOString().split('T')[0];
+document.getElementById('resFecha').max = `${today.getFullYear()}-12-31`;
 
 (function initTheme(){
   let saved = null;

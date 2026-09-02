@@ -1,0 +1,51 @@
+NETMO - CAMBIOS Y PLAN DEL PROYECTO
+
+Alcance actual:
+- index.html funciona como demo funcional.
+- Los usuarios y datos están almacenados en memoria.
+- La pérdida de datos al recargar es esperada en esta etapa.
+- Cada usuario demo accede únicamente a las vistas correspondientes a su rol.
+
+Hallazgos para corregir:
+- Posible XSS por uso de innerHTML con datos ingresados.
+- Falta de validación de disponibilidad y conflictos de horarios.
+- Los lotes pueden aprobarse con menos equipos de los solicitados.
+- Estadísticas iniciales inconsistentes con el inventario demo.
+- Accesibilidad incompleta en modales y tablas.
+- Diseño responsive mejorable en móviles.
+
+Arquitectura futura:
+- Hostear la base de datos en Supabase.
+- Usar Supabase Auth para autenticación.
+- Usar PostgreSQL para persistencia.
+- Aplicar Row Level Security según el rol.
+- Usar Edge Functions para operaciones sensibles.
+
+Tablas iniciales:
+- profiles
+- notebooks
+- reservations
+- loans
+- tickets
+- late_returns
+- audit_logs
+
+Plan de migración:
+1. Migrar usuarios a Supabase Auth y profiles.
+2. Migrar notebooks a la base de datos.
+3. Migrar reservas, préstamos y tickets.
+4. Crear políticas RLS.
+5. Conectar la interfaz con Supabase.
+6. Separar modo demo y producción.
+7. Mantener el control de acceso por rol al pasar a producción.
+
+Tests previstos:
+- Login y registro.
+- Permisos por rol.
+- Validación de fechas y horarios.
+- Disponibilidad de notebooks.
+- Reservas y lotes.
+- Devoluciones normales y tardías.
+- Reportes de fallas.
+- Persistencia de datos.
+- Accesibilidad y vista móvil.
