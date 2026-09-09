@@ -1,0 +1,3 @@
+database/.env
+database/postgres-data/
+database/backups/
