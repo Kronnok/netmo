@@ -17,26 +17,6 @@ services:
     volumes:
       - ./postgres-data:/var/lib/postgresql/data
 
-  backup:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: 5432
-      POSTGRES_DB: ${POSTGRES_DB:-netmo}
-      POSTGRES_USER: ${POSTGRES_USER:-netmo}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Definí POSTGRES_PASSWORD antes de iniciar Docker}
-      BACKUP_DATABASE: ${BACKUP_DATABASE:-${POSTGRES_DB:-netmo}}
-      BACKUP_DIR: /backups
-      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
-    command: ["/bin/sh", "/scripts/backup-loop.sh"]
-    volumes:
-      - ./backups:/backups
-      - ./scripts/backup-loop.sh:/scripts/backup-loop.sh:ro
-    depends_on:
-      postgres:
-        condition: service_healthy
-
   backend:
     build:
       context: ../backend
