@@ -18,6 +18,11 @@ La imagen de PostgreSQL ejecuta automáticamente `schema.sql` y `seed.sql` la
 primera vez que el volumen `postgres-data` está vacío. El backend espera a que
 el healthcheck de PostgreSQL sea correcto antes de arrancar.
 
+Si `postgres-data` ya contiene una base, PostgreSQL omite esos scripts. Los
+cambios posteriores de `schema.sql` no son migraciones automáticas. Antes de
+reemplazar o eliminar un volumen existente, genera y valida un backup completo
+en `backups/netmo-latest.dump`; la eliminacion del volumen es destructiva.
+
 Verifica los servicios:
 
 ```sh
@@ -62,7 +67,9 @@ El servicio `backup` usa la imagen `postgres:16-alpine` y ejecuta un backup
 lógico una vez por día. El archivo se guarda en `database/backups/netmo-latest.dump`.
 Cada ejecución valida el archivo con `pg_restore --list` y solo después reemplaza
 el backup anterior. Si falla la conexión o la validación, se conserva la copia
-anterior y el servicio reintenta al día siguiente.
+anterior y el servicio reintenta al día siguiente. En `database/backups` solo
+puede existir un archivo `.dump`: `netmo-latest.dump`; los archivos temporales
+usan otra extensión y se eliminan al terminar.
 
 El servicio se inicia junto con el resto del Compose:
 

@@ -1,35 +1,34 @@
 # Especificación: backups de PostgreSQL de NetMO
 
 ## Estado
- Aprobada para implementación: backup diario dentro de Docker, conservando un
- único archivo válido que reemplaza al anterior después de la validación.
-sistema de backups.
+Implementada. Alcance revisado: backup logico completo diario de PostgreSQL
+dentro de Docker, conservando un unico archivo valido que reemplaza al anterior
+despues de la validacion. Pendiente de validacion con PostgreSQL levantado.
 
 ## Objetivo
- RF-03: cada backup debe generar o reemplazar `netmo-latest.dump` con extensión
- `.dump`.
+Implementar un backup diario de la base PostgreSQL completa de NetMO. Cada
+archivo debe contener los datos existentes en el momento de la ejecucion, no
+solo el esquema ni una seleccion de tablas.
+
 - PostgreSQL se ejecuta en el servicio `postgres` de `database/docker-compose.yml`.
- RF-07: la política de retención debe conservar exactamente un backup válido;
- una ejecución fallida debe mantener el archivo anterior.
-  `database/seed.sql` solo cuando el volumen está vacío.
-- No existen scripts de `pg_dump` o `pg_restore`, tareas programadas, política de
-  retención, cifrado ni procedimiento probado de restauración.
+- Cada backup debe generar o reemplazar `netmo-latest.dump` con extension `.dump`.
+- Solo puede existir un archivo de backup `.dump` en el directorio configurado:
+  `netmo-latest.dump`.
+- La retencion conserva exactamente ese backup valido: el ultimo backup completo
+  aprobado por la validacion.
+- Una ejecucion fallida debe mantener intacto el backup valido anterior.
+- El esquema y `seed.sql` solo se ejecutan automaticamente cuando el volumen esta
+  vacio; un backup nunca debe reconstruir ni sobrescribir la base de produccion.
+- El Compose actual no declara aun el servicio `backup`; el README describe el
+  comportamiento deseado, pero la configuracion versionada debe implementarlo.
 - El volumen `postgres-data` es persistencia operativa, no una copia independiente:
   perder el host o borrar ese directorio también puede perder los datos.
- 2. Añadir un volumen independiente para backups, por ejemplo
-   `./backups:/backups`, sin mezclarlo con `postgres-data`.
- 3. Ejecutar el script desde un servicio Docker basado en la imagen oficial de
-   PostgreSQL, evitando depender de `pg_dump` en la máquina host.
- 4. Incorporar variables documentadas como `BACKUP_DIR`, `BACKUP_INTERVAL_SECONDS`
-   y `BACKUP_DATABASE`, manteniendo `POSTGRES_*` como fuente de conexión.
 - Ejecución manual y automatizable mediante un script versionado.
 - Directorio de destino configurable y excluido de Git.
-- Nombres de archivo con fecha y hora en UTC.
 - Verificación de que el archivo generado no esté vacío y sea legible por la
   herramienta de restauración.
 - Restauración documentada sobre una base de datos de destino y validación
   posterior mediante `/health` y consultas funcionales.
-- Política inicial de retención configurable, con un valor por defecto explícito.
 
 ### Fuera de alcance inicial
 
@@ -39,22 +38,27 @@ sistema de backups.
   sin cambiar el formato local del backup.
 - Backup de archivos estáticos del frontend, imágenes Docker o secretos.
 
-## Decisiones pendientes de aprobación
+## Decisiones aprobadas
 
 1. **Formato:** usar `pg_dump --format=custom` para permitir restauraciones
    selectivas con `pg_restore`.
-2. **Frecuencia:** definir si se ejecutará diariamente, al menos una vez por día,
-   o solo manualmente durante esta primera etapa.
-3. **Retención:** definir cuántas copias conservar. Propuesta inicial: 7 copias
-   diarias y eliminación automática de las más antiguas.
-4. **Destino:** propuesta inicial `database/backups`, configurable mediante
-   `BACKUP_DIR`, y posteriormente un almacenamiento externo para tolerar la
-   pérdida del host.
-5. **Protección:** los archivos pueden contener datos personales y deben tener
-   permisos restrictivos. El cifrado en reposo y fuera del host debe aprobarse
-   antes de usar backups en producción.
-6. **Coordinación:** el backup lógico debe ejecutarse contra una base de datos
-   disponible y reportar un error no silencioso si PostgreSQL no responde.
+2. **Contenido:** el dump sera completo y no excluira tablas, filas, secuencias,
+  extensiones, funciones, triggers ni objetos grandes de la base respaldada.
+  Las credenciales y roles del cluster no se guardan dentro del dump; se
+  administran mediante las variables y el procedimiento de restauracion.
+3. **Frecuencia:** una ejecucion automatica cada 86400 segundos, equivalente a
+  un backup diario. Tambien existira una ejecucion manual para pruebas y
+  recuperacion operativa.
+4. **Retencion:** solo puede existir `netmo-latest.dump`; cada nuevo archivo
+  temporal debe usar una extension que no sea `.dump`, reemplazar al anterior
+  solo despues de validarse y eliminarse siempre al finalizar la ejecucion.
+5. **Destino:** `database/backups`, configurable mediante `BACKUP_DIR`, montado
+  en un volumen independiente de `postgres-data`.
+6. **Proteccion:** los archivos contienen datos personales, deben tener permisos
+  restrictivos y no deben versionarse. El cifrado en reposo o una copia externa
+  quedan fuera de esta primera implementacion.
+7. **Coordinacion:** el backup se ejecuta desde un contenedor compatible con
+  PostgreSQL 16 y falla con un codigo distinto de cero si la base no responde.
 
 ## Requisitos funcionales
 
@@ -63,16 +67,22 @@ sistema de backups.
 - RF-02: el script debe leer host, puerto, base, usuario, contraseña, destino y
   frecuencia desde variables de entorno o el `.env` existente, sin escribir
   credenciales en el repositorio.
-- RF-03: cada backup debe generar un archivo único con fecha/hora UTC y extensión
-  `.dump`.
+- RF-03: cada backup debe generar un archivo temporal que no termine en `.dump`
+  y aprobarlo como `netmo-latest.dump` con extension `.dump`.
+- RF-03a: el dump debe incluir todos los esquemas, tablas, filas, secuencias,
+  extensiones, funciones, triggers y objetos grandes respaldables de la base,
+  sin filtrar las tablas funcionales de NetMO.
+- RF-03b: la ejecucion automatica debe realizarse una vez por dia y el operador
+  debe poder disparar una copia manual sin esperar el intervalo.
 - RF-04: el script debe crear el directorio de destino si no existe y rechazar un
   destino no escribible.
 - RF-05: una ejecución exitosa debe validar que el archivo existe, tiene tamaño
   mayor que cero y puede ser inspeccionado por `pg_restore --list`.
 - RF-06: una ejecución fallida debe devolver un código de salida distinto de cero
   y no debe borrar el último backup válido.
-- RF-07: la limpieza por retención no debe eliminar backups recientes ni superar
-  el número configurado de copias conservadas.
+- RF-07: el directorio configurado debe contener como maximo un archivo `.dump`,
+  exactamente `netmo-latest.dump`; la limpieza nunca debe ejecutarse antes de
+  validar el reemplazo nuevo y debe eliminar temporales ante exito o fallo.
 - RF-08: debe existir un procedimiento de restauración en un entorno de prueba
   que no sobrescriba producción accidentalmente.
 - RF-09: la documentación debe indicar cómo comprobar fecha, tamaño, integridad,
@@ -94,14 +104,16 @@ sistema de backups.
 ## Diseño propuesto
 
 1. Añadir un script versionado, por ejemplo `database/scripts/backup.sh`, que
-   ejecute `pg_dump --format=custom` contra el servicio `postgres`.
-2. Añadir un volumen independiente para backups, por ejemplo
-   `./backups:/backups`, sin mezclarlo con `postgres-data`.
+  ejecute `pg_dump --format=custom` contra el servicio `postgres` sin opciones
+  de exclusion de tablas o datos.
+2. Añadir un servicio `backup` en `database/docker-compose.yml` y un volumen
+  independiente `./backups:/backups`, sin mezclarlo con `postgres-data`.
 3. Ejecutar el script desde un contenedor temporal de la imagen oficial de
    PostgreSQL o desde el contenedor `postgres`, evitando depender de `pg_dump` en
    la máquina host.
-4. Incorporar variables documentadas como `BACKUP_DIR`, `BACKUP_RETENTION` y
-   `BACKUP_DATABASE`, manteniendo `POSTGRES_*` como fuente de conexión.
+4. Incorporar variables documentadas como `BACKUP_DIR`,
+  `BACKUP_INTERVAL_SECONDS=86400`, `BACKUP_DATABASE` y `BACKUP_ONCE`,
+  manteniendo `POSTGRES_*` como fuente de conexion.
 5. Documentar una restauración segura en una base temporal con
    `pg_restore --clean --if-exists`, validando tablas, usuarios y `/health` antes
    de considerar recuperado el servicio.
@@ -110,22 +122,29 @@ sistema de backups.
 
 ## Criterios de aceptación
 
-- CA-01: con PostgreSQL levantado, el comando documentado crea exactamente un
-  backup `.dump` válido y devuelve código 0.
+- CA-01: con PostgreSQL levantado, el servicio o comando documentado ejecuta un
+  backup diario completo, crea exactamente `netmo-latest.dump` valido y devuelve
+  codigo 0.
 - CA-02: `pg_restore --list` puede leer el archivo generado sin error.
+- CA-02a: el listado del dump contiene las tablas y objetos funcionales de
+  NetMO, incluyendo `users`, `notebooks`, `reservations`, `loans`, `tickets`,
+  `returns`, `late_returns` y `user_preferences`.
 - CA-03: si PostgreSQL está detenido o las credenciales son inválidas, el comando
   falla con código distinto de cero y conserva los backups existentes.
 - CA-04: una restauración en una base temporal recupera el esquema y los datos de
   `users`, `notebooks`, `reservations`, `loans` y `tickets`.
 - CA-05: tras restaurar en un entorno de prueba, `GET /health` responde con
   `{"ok":true,"service":"netmo-api"}` y el login de una cuenta seed funciona.
-- CA-06: una prueba de ejecución sucesiva confirma que solo existe
-  `netmo-latest.dump` y que un fallo conserva la copia anterior.
+- CA-06: una prueba de ejecucion sucesiva confirma que solo existe un archivo
+  `.dump`, exactamente `netmo-latest.dump`, que cada archivo contiene los datos
+  completos de la base al momento de la copia y que un fallo conserva la copia
+  anterior sin dejar temporales.
 - CA-07: ningún secreto, backup generado o dato de prueba queda versionado.
 
 ## Plan de implementación
 
-1. Aprobar formato, frecuencia, retención, destino y política de cifrado.
+1. Implementar el formato, frecuencia diaria, retencion, destino y proteccion
+  aprobados en esta especificacion.
 2. Crear el script de backup y su manejo de errores.
 3. Añadir el volumen/configuración Docker y las variables de entorno de ejemplo.
 4. Implementar el reemplazo atómico y la validación con `pg_restore --list`.

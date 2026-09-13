@@ -87,8 +87,8 @@ BEGIN
   IF weekday > 5 THEN
     RAISE EXCEPTION 'Las reservas solo pueden hacerse de lunes a viernes';
   END IF;
-  IF local_time < CASE WHEN weekday = 5 THEN TIME '09:30' ELSE TIME '07:45' END
-     OR local_time > TIME '17:30' THEN
+    IF (weekday = 5 AND (local_time < TIME '09:30' OR local_time > TIME '17:30'))
+      OR (weekday <> 5 AND (local_time < TIME '07:45' OR local_time > TIME '17:30')) THEN
     RAISE EXCEPTION 'El horario de retiro no esta disponible';
   END IF;
   RETURN NEW;

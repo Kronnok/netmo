@@ -20,9 +20,18 @@ esac
 umask 077
 mkdir -p "$BACKUP_DIR"
 
+for existing_dump in "$BACKUP_DIR"/*.dump; do
+  [ -e "$existing_dump" ] || continue
+  if [ "$existing_dump" != "$BACKUP_FILE" ]; then
+    echo "ERROR: el directorio contiene otro backup .dump: $existing_dump" >&2
+    exit 1
+  fi
+done
+
 backup_once() {
-  temp_file=$(mktemp "${BACKUP_DIR}/.netmo-backup.XXXXXX.dump")
-  trap 'rm -f "$temp_file"' EXIT HUP INT TERM
+  temp_file=$(mktemp "${BACKUP_DIR}/.netmo-backup.XXXXXX")
+  cleanup_temp() { rm -f "$temp_file"; }
+  trap 'cleanup_temp' EXIT HUP INT TERM
 
   echo "Iniciando backup de ${BACKUP_DATABASE}..."
   if ! PGPASSWORD="$POSTGRES_PASSWORD" pg_dump \
@@ -33,16 +42,19 @@ backup_once() {
     --dbname="$BACKUP_DATABASE" \
     --file="$temp_file"; then
     echo "ERROR: pg_dump no pudo completar el backup." >&2
+    cleanup_temp
     return 1
   fi
 
   if [ ! -s "$temp_file" ]; then
     echo "ERROR: pg_dump genero un archivo vacio." >&2
+    cleanup_temp
     return 1
   fi
 
   if ! pg_restore --list "$temp_file" >/dev/null; then
     echo "ERROR: pg_restore no pudo validar el backup." >&2
+    cleanup_temp
     return 1
   fi
 

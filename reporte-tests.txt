@@ -1,0 +1,95 @@
+REPORTE DE TESTS NETMO
+======================
+
+Fecha: 13/09/2026
+
+1. TESTS APROBADOS
+------------------
+
+- Sintaxis de backend/server.js.
+- Sintaxis del JavaScript embebido en index.html.
+- Carga de la pagina por HTTP con respuesta 200.
+- La pagina se sirvio correctamente con un tamano aproximado de 118 KB.
+- Se verificaron 57 handlers inline de formularios y botones.
+- Todas las rutas API usadas por el frontend tienen handlers en el backend.
+- Validacion de reservas:
+  - Fecha valida.
+  - Ano anterior rechazado.
+  - Fin de semana rechazado.
+  - Horario fuera de rango rechazado.
+  - No existe espera obligatoria de 30 minutos.
+- Docker Compose valido usando una contrasena de prueba.
+- Imagen PostgreSQL construida correctamente.
+- Script de backup valido.
+- Backup completo generado correctamente.
+- pg_restore --list pudo leer el backup.
+- El backup incluyo tablas como users, tickets, loans, returns y user_preferences.
+- Se mantuvo un unico archivo netmo-latest.dump.
+- Health de API en entorno limpio:
+
+  {"ok":true,"service":"netmo-api"}
+
+- Login de administrador funcionando.
+- Consulta de notebooks funcionando.
+- Preferencias actualizadas correctamente.
+- Reservas de un ano incorrecto rechazadas con estado 400.
+- Usuarios no administradores recibieron 403 al modificar tickets.
+- Estado invalido de notebook rechazado con estado 400.
+
+2. CORRECCION ENCONTRADA DURANTE LAS PRUEBAS
+---------------------------------------------
+
+El arranque limpio de PostgreSQL inicialmente fallaba por un error en el trigger
+validate_reservation_schedule de database/schema.sql.
+
+Se corrigio la condicion SQL y luego PostgreSQL pudo inicializar correctamente:
+
+- Extensiones.
+- Tablas.
+- Indices.
+- Funciones.
+- Triggers.
+- Vista administrativa.
+- Seis usuarios seed.
+- Datos iniciales.
+
+3. PROBLEMAS DEL ENTORNO EXISTENTE
+----------------------------------
+
+La instancia persistente actual tiene un volumen incompleto. Faltan tablas como
+ tickets y loans.
+
+PostgreSQL omite automaticamente schema.sql y seed.sql cuando el volumen ya
+contiene datos. Por ese motivo, cambiar los scripts no reconstruye una base ya
+inicializada.
+
+Los contenedores existentes tambien presentan timeout entre servicios aunque
+comparten la misma red Docker.
+
+No se elimino ni reinicializo el volumen existente para evitar perdida de datos.
+
+4. TESTS PENDIENTES
+-------------------
+
+- Prueba visual real con navegador.
+- Pruebas con Playwright, Puppeteer o un navegador headless.
+- Flujo completo desde clicks en la interfaz.
+- Restauracion completa del backup en una base temporal.
+- Prueba de persistencia sobre la instancia real existente.
+- Prueba del Compose completo usando el archivo .env real.
+- Validacion completa del entorno real despues de reconstruir correctamente la
+  base PostgreSQL.
+
+5. CONCLUSION
+-------------
+
+La pagina, el backend, el esquema limpio y el sistema de backup superaron las
+pruebas automatizadas disponibles.
+
+La principal limitacion actual esta en la instancia PostgreSQL persistente
+existente, que tiene un esquema incompleto y problemas de conectividad entre
+contenedores.
+
+Antes de validar el entorno real completo se debe generar o conservar un backup
+valido y reconstruir cuidadosamente el volumen incompleto, evitando borrar datos
+sin una copia previa.

@@ -51,7 +51,8 @@ Se corrigio el renderizado para distinguir entre:
 
 Ahora "Tu actividad" muestra que la devolucion fue informada y esta esperando la
 confirmacion del administrador. Ya no muestra la notebook como si siguiera en
-poder del alumno.
+poder del alumno. En "Mis prestamos" tampoco muestra el vencimiento como deuda
+activa mientras la devolucion esta pendiente.
 
 2.2 Tickets y notebooks habilitadas
 
@@ -65,13 +66,17 @@ Cuando una notebook se habilita desde mantenimiento:
 - Se limpian los datos de prestamo.
 - Los tickets abiertos relacionados con esa notebook pasan a "resuelto".
 
+La accion de habilitar tambien se persiste en la API, por lo que el ticket no
+vuelve a aparecer al recargar la pagina.
+
 Esto evita que el equipo figure disponible mientras su falla continua apareciendo
 como pendiente.
 
 2.3 Baneo de usuarios
 
-La funcion de permabaneo ahora recibe el legajo del usuario seleccionado y busca
-ese usuario en la lista general de usuarios.
+La funcion de permabaneo recibe el legajo del usuario seleccionado y busca ese
+usuario en la lista general de usuarios. En modo API, el cambio se persiste en
+PostgreSQL.
 
 El baneo no esta limitado al usuario Teo. Teo es el unico que aparece inicialmente
 con demoras registradas, por eso es el unico candidato visible en los datos demo.
@@ -121,8 +126,8 @@ Ahora permite modificar:
 - Notificaciones por email: activadas o desactivadas.
 - Recordatorio de devolucion: sin recordatorio, 15, 30 o 60 minutos antes.
 
-Los valores se guardan en el objeto del usuario durante la sesion de la pagina.
-En el backend tambien existe una tabla preparada para persistirlos en PostgreSQL.
+En modo demo los valores se guardan en el objeto del usuario durante la sesion.
+En modo API se cargan y persisten en la tabla de preferencias de PostgreSQL.
 
 2.7 Eliminacion del cierre de sesion duplicado
 
@@ -156,6 +161,9 @@ Estados disponibles:
 
 Al cambiar el estado tambien se actualizan los contadores generales y algunos
 datos relacionados, como ubicacion y usuario responsable.
+
+"Reservada" no es un estado manual: se muestra solo cuando existe una reserva
+activa y no se puede seleccionar desde Inventario.
 
 
 3. ESTRUCTURA DE LA BASE DE DATOS

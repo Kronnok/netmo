@@ -93,9 +93,11 @@ async function route(request, response) {
     return send(response, 200, { preferences: result.rows[0] || { email: true, recordatorio: 30 } });
   }
   if (request.method === 'PATCH' && url.pathname === '/api/preferences') {
+    const recordatorio = Number(body.recordatorio);
+    if (![0, 15, 30, 60].includes(recordatorio)) return send(response, 400, { error: 'Recordatorio inválido' });
     const result = await pool.query(`INSERT INTO user_preferences (user_id, email_notifications, return_reminder_minutes) VALUES ($1, $2, $3)
       ON CONFLICT (user_id) DO UPDATE SET email_notifications = EXCLUDED.email_notifications, return_reminder_minutes = EXCLUDED.return_reminder_minutes, updated_at = now()
-      RETURNING email_notifications AS email, return_reminder_minutes AS recordatorio`, [user.id, Boolean(body.email), Number(body.recordatorio)]);
+      RETURNING email_notifications AS email, return_reminder_minutes AS recordatorio`, [user.id, Boolean(body.email), recordatorio]);
     return send(response, 200, { preferences: result.rows[0] });
   }
   if (request.method === 'GET' && url.pathname === '/api/notebooks') {
@@ -110,6 +112,7 @@ async function route(request, response) {
   }
   if (request.method === 'PATCH' && url.pathname.startsWith('/api/notebooks/')) {
     if (user.rol !== 'admin') return send(response, 403, { error: 'Solo admin puede cambiar estados' });
+    if (!['disponible', 'prestada', 'mantenimiento', 'pendiente_devolucion'].includes(body.estado)) return send(response, 400, { error: 'Estado de notebook inválido' });
     const code = decodeURIComponent(url.pathname.split('/').pop());
     const result = await pool.query('UPDATE notebooks SET estado = $1, ubicacion = CASE WHEN $1 = \'mantenimiento\' THEN \'Taller\' WHEN $1 = \'disponible\' THEN \'Carro 1\' ELSE ubicacion END, prestado_a = CASE WHEN $1 IN (\'disponible\', \'mantenimiento\') THEN NULL ELSE prestado_a END, updated_at = now() WHERE codigo = $2 RETURNING codigo AS id, estado, ubicacion', [body.estado, code]);
     if (!result.rowCount) return send(response, 404, { error: 'Notebook no encontrada' });
@@ -261,6 +264,7 @@ async function route(request, response) {
   }
   if (request.method === 'PATCH' && url.pathname.startsWith('/api/tickets/')) {
     if (user.rol !== 'admin') return send(response, 403, { error: 'Solo admin puede actualizar tickets' });
+    if (!['abierto', 'progreso', 'resuelto'].includes(body.estado)) return send(response, 400, { error: 'Estado de ticket inválido' });
     const code = decodeURIComponent(url.pathname.split('/').pop());
     const result = await pool.query("UPDATE tickets SET estado = $1, resolved_at = CASE WHEN $1 = 'resuelto' THEN now() ELSE NULL END, resolved_by = CASE WHEN $1 = 'resuelto' THEN $2 ELSE NULL END WHERE codigo = $3 RETURNING codigo AS id, estado", [body.estado, user.id, code]);
     if (!result.rowCount) return send(response, 404, { error: 'Ticket no encontrado' });
@@ -269,7 +273,9 @@ async function route(request, response) {
   }
   if (request.method === 'GET' && url.pathname === '/api/admin/late-returns') {
     if (user.rol !== 'admin') return send(response, 403, { error: 'Solo admin puede consultar demoras' });
-    const result = await pool.query('SELECT * FROM user_late_return_summary ORDER BY tardanzas DESC, nombre');
+    const result = await pool.query(`SELECT summary.*, users.baneado
+      FROM user_late_return_summary summary JOIN users ON users.id = summary.id
+      ORDER BY summary.tardanzas DESC, summary.nombre`);
     return send(response, 200, { users: result.rows });
   }
   if (request.method === 'PATCH' && url.pathname.startsWith('/api/admin/users/')) {

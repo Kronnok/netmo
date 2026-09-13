@@ -1032,6 +1032,7 @@ let ticketSeq = 15;
 
 const badgeClass = {disponible:'badge-disponible', prestada:'badge-prestada', reservada:'badge-pendiente_devolucion', mantenimiento:'badge-mantenimiento', pendiente_devolucion:'badge-pendiente_devolucion'};
 const badgeLabel = {disponible:'Disponible', prestada:'Prestada', reservada:'Reservada', mantenimiento:'En mantenimiento', pendiente_devolucion:'Pend. devolución'};
+const estadosNotebookManuales = ['disponible','prestada','mantenimiento','pendiente_devolucion'];
 const ticketBadgeClass = {abierto:'badge-abierto', progreso:'badge-progreso', resuelto:'badge-resuelto'};
 const ticketBadgeLabel = {abierto:'Abierto', progreso:'En progreso', resuelto:'Resuelto'};
 const rolLabel = {alumno:'Alumno', profesor:'Profesor', admin:'Administrador'};
@@ -1073,9 +1074,13 @@ async function apiRequest(path, options={}){
 
 async function cargarEstadoAPI(){
   const esAdmin = currentUser.rol==='admin';
-  const [notebooksData, reservationsData, loansData, ticketsData] = await Promise.all([
-    apiRequest('/api/notebooks'), apiRequest(esAdmin ? '/api/admin/reservations' : '/api/reservations'), apiRequest('/api/loans'), apiRequest(esAdmin ? '/api/admin/tickets' : '/api/tickets')
+  const [notebooksData, reservationsData, loansData, ticketsData, preferencesData] = await Promise.all([
+    apiRequest('/api/notebooks'), apiRequest(esAdmin ? '/api/admin/reservations' : '/api/reservations'), apiRequest('/api/loans'), apiRequest(esAdmin ? '/api/admin/tickets' : '/api/tickets'), apiRequest('/api/preferences')
   ]);
+  currentUser.preferencias = {
+    email: Boolean(preferencesData.preferences?.email),
+    recordatorio: String(preferencesData.preferences?.recordatorio ?? 30)
+  };
   notebooks = notebooksData.notebooks.map(notebook=>({
     id:notebook.id, estado:notebook.estado, ubicacion:notebook.ubicacion,
     act:notebook.actualizada ? new Date(notebook.actualizada).toLocaleString() : 'Recién',
@@ -1096,11 +1101,21 @@ async function cargarEstadoAPI(){
     ownerNombre:ticket.owner_nombre || currentUser.nombre, ownerRol:ticket.owner_rol || currentUser.rol
   }));
   if(esAdmin){
-    const returnsData = await apiRequest('/api/admin/returns');
+    const [returnsData, lateReturnsData] = await Promise.all([
+      apiRequest('/api/admin/returns'),
+      apiRequest('/api/admin/late-returns')
+    ]);
     notificacionesDevolucion = returnsData.returns.map(item=>({
       id:item.id, notebookId:item.notebook, alumnoLegajo:item.legajo, alumnoNombre:item.nombre,
       curso:item.curso, fechaSolicitud:new Date(item.solicitado_at).toLocaleString(), rol:'alumno', returnId:item.id
     }));
+    lateReturnsData.users.forEach(apiUser=>{
+      const localUser = estadoUsuarios.find(user=>user.legajo===apiUser.legajo);
+      if(localUser){
+        localUser.tardanzas = apiUser.tardanzas;
+        localUser.baneado = apiUser.baneado;
+      }
+    });
   }
   prestamosActivos = {};
   loansData.loans.forEach(loan=>{
@@ -1504,7 +1519,6 @@ function renderAdminInventario(){
         <select class="btn btn-sm" aria-label="Cambiar estado de ${nb.id}" onchange="adminCambiarEstadoNotebook('${nb.id}', this.value)">
           <option value="disponible" ${nb.estado==='disponible'?'selected':''}>Disponible</option>
           <option value="prestada" ${nb.estado==='prestada'?'selected':''}>Prestada</option>
-          <option value="reservada" ${nb.estado==='reservada'?'selected':''}>Reservada</option>
           <option value="mantenimiento" ${nb.estado==='mantenimiento'?'selected':''}>Mantenimiento</option>
           <option value="pendiente_devolucion" ${nb.estado==='pendiente_devolucion'?'selected':''}>Pend. devolución</option>
         </select>
@@ -1526,9 +1540,18 @@ function moverAMantenimiento(nb){
   nb.prestadoA = null;
 }
 
-function habilitarNotebook(id){
+async function habilitarNotebook(id){
   const nb = notebooks.find(n=>n.id===id);
   if(!nb || nb.estado!=='mantenimiento') return;
+  if(authToken){
+    try{
+      await apiRequest('/api/notebooks/'+encodeURIComponent(id), {method:'PATCH', body:JSON.stringify({estado:'disponible'})});
+      await cargarEstadoAPI();
+      renderAll();
+      showToast(`${id} habilitada. Ya figura como disponible.`, 'success');
+    }catch(error){ showToast(error.message, 'warn'); }
+    return;
+  }
   stats.mantenimiento = Math.max(0, stats.mantenimiento-1);
   stats.disponibles += 1;
   nb.estado = 'disponible';
@@ -1545,7 +1568,7 @@ function habilitarNotebook(id){
 
 async function adminCambiarEstadoNotebook(id, nuevoEstado){
   const nb = notebooks.find(n=>n.id===id);
-  if(!nb || !badgeClass[nuevoEstado] || nb.estado===nuevoEstado) return;
+  if(!nb || !estadosNotebookManuales.includes(nuevoEstado) || nb.estado===nuevoEstado) return;
   if(authToken){
     try{
       await apiRequest('/api/notebooks/'+encodeURIComponent(id), {method:'PATCH', body:JSON.stringify({estado:nuevoEstado})});
@@ -1637,11 +1660,11 @@ function renderPrestamoActivo(){
         <div class="action-icon" style="background:var(--red-bg);color:var(--red-text);">⏳</div>
         <div class="action-info">
           <h4>${prestamo.id}</h4>
-          <p>Retirada ${prestamo.desde} · Vence ${prestamo.vence}</p>
+          <p>Retirada ${prestamo.desde} · Devolución informada</p>
         </div>
         <span class="badge badge-pendiente_devolucion">Esperando confirmación del Admin</span>
       </div>
-      <p class="hint" style="margin-top:.8rem;">Seguís figurando como responsable del equipo hasta que un administrador confirme la recepción física.</p>`;
+      <p class="hint" style="margin-top:.8rem;">La devolución fue informada y queda pendiente de recepción física por parte del Administrador.</p>`;
     return;
   }
   wrap.innerHTML = `
@@ -2322,9 +2345,18 @@ function permabanear(legajo){
   cambiarBaneo(legajo, true);
 }
 
-function cambiarBaneo(legajo, baneado){
+async function cambiarBaneo(legajo, baneado){
   const u = estadoUsuarios.find(x=>x.legajo===legajo);
   if(!u) return;
+  if(authToken){
+    try{
+      await apiRequest('/api/admin/users/'+encodeURIComponent(legajo), {method:'PATCH', body:JSON.stringify({baneado})});
+      await cargarEstadoAPI();
+      renderTardanzas();
+      showToast(baneado ? `${u.nombre} fue baneado permanentemente.` : `Baneo de ${u.nombre} quitado.`, baneado ? 'error' : 'success');
+    }catch(error){ showToast(error.message, 'warn'); }
+    return;
+  }
   u.baneado = baneado;
   renderTardanzas();
   showToast(baneado ? `${u.nombre} fue baneado permanentemente.` : `Baneo de ${u.nombre} quitado.`, baneado ? 'error' : 'success');
@@ -2346,12 +2378,27 @@ function renderPerfil(){
   document.getElementById('preferenciasRecordatorio').value = preferencias.recordatorio;
 }
 
-function actualizarPreferencias(){
+async function actualizarPreferencias(){
   if(!currentUser) return;
-  currentUser.preferencias = {
+  const preferencias = {
     email: document.getElementById('preferenciasEmail').checked,
     recordatorio: document.getElementById('preferenciasRecordatorio').value
   };
+  if(authToken){
+    try{
+      const result = await apiRequest('/api/preferences', {method:'PATCH', body:JSON.stringify(preferencias)});
+      currentUser.preferencias = {
+        email: Boolean(result.preferences.email),
+        recordatorio: String(result.preferences.recordatorio)
+      };
+    }catch(error){
+      renderPerfil();
+      showToast(error.message, 'warn');
+      return;
+    }
+  } else {
+    currentUser.preferencias = preferencias;
+  }
   showToast('Preferencias actualizadas.', 'success');
 }
 
