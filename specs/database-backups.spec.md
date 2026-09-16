@@ -2,8 +2,8 @@
 
 ## Estado
 Implementada. Alcance revisado: backup logico completo diario de PostgreSQL
-dentro de Docker, conservando un unico archivo valido que reemplaza al anterior
-despues de la validacion. Pendiente de validacion con PostgreSQL levantado.
+dentro de Docker, conservando hasta 30 archivos validos fechados según el
+horario argentino. Pendiente de validacion con PostgreSQL levantado.
 
 ## Objetivo
 Implementar un backup diario de la base PostgreSQL completa de NetMO. Cada
@@ -11,11 +11,12 @@ archivo debe contener los datos existentes en el momento de la ejecucion, no
 solo el esquema ni una seleccion de tablas.
 
 - PostgreSQL se ejecuta en el servicio `postgres` de `database/docker-compose.yml`.
-- Cada backup debe generar o reemplazar `netmo-latest.dump` con extension `.dump`.
-- Solo puede existir un archivo de backup `.dump` en el directorio configurado:
-  `netmo-latest.dump`.
-- La retencion conserva exactamente ese backup valido: el ultimo backup completo
-  aprobado por la validacion.
+- Cada backup debe generar o reemplazar `backup-YYYY-MM-DD.dump` con extension
+  `.dump`, usando `America/Argentina/Buenos_Aires` para determinar la fecha.
+- El directorio dedicado puede conservar como maximo 30 archivos que cumplan el
+  patron `backup-YYYY-MM-DD.dump`.
+- La retencion conserva las 30 fechas mas recientes; al superar ese limite se
+  elimina la fecha mas antigua despues de validar el nuevo backup.
 - Una ejecucion fallida debe mantener intacto el backup valido anterior.
 - El esquema y `seed.sql` solo se ejecutan automaticamente cuando el volumen esta
   vacio; un backup nunca debe reconstruir ni sobrescribir la base de produccion.
@@ -49,15 +50,17 @@ solo el esquema ni una seleccion de tablas.
 3. **Frecuencia:** una ejecucion automatica cada 86400 segundos, equivalente a
   un backup diario. Tambien existira una ejecucion manual para pruebas y
   recuperacion operativa.
-4. **Retencion:** solo puede existir `netmo-latest.dump`; cada nuevo archivo
-  temporal debe usar una extension que no sea `.dump`, reemplazar al anterior
-  solo despues de validarse y eliminarse siempre al finalizar la ejecucion.
+4. **Retencion:** se conservan hasta 30 archivos `backup-YYYY-MM-DD.dump`; cada
+  nuevo archivo temporal debe usar una extension que no sea `.dump`, reemplazar
+  el archivo de su fecha solo despues de validarse y eliminar los excedentes
+  despues de finalizar correctamente la sustitucion.
 5. **Destino:** `database/backups`, configurable mediante `BACKUP_DIR`, montado
   en un volumen independiente de `postgres-data`.
 6. **Proteccion:** los archivos contienen datos personales, deben tener permisos
   restrictivos y no deben versionarse. El cifrado en reposo o una copia externa
   quedan fuera de esta primera implementacion.
-7. **Coordinacion:** el backup se ejecuta desde un contenedor compatible con
+7. **Zona horaria:** la fecha del nombre usa `America/Argentina/Buenos_Aires`.
+8. **Coordinacion:** el backup se ejecuta desde un contenedor compatible con
   PostgreSQL 16 y falla con un codigo distinto de cero si la base no responde.
 
 ## Requisitos funcionales
@@ -68,7 +71,7 @@ solo el esquema ni una seleccion de tablas.
   frecuencia desde variables de entorno o el `.env` existente, sin escribir
   credenciales en el repositorio.
 - RF-03: cada backup debe generar un archivo temporal que no termine en `.dump`
-  y aprobarlo como `netmo-latest.dump` con extension `.dump`.
+  y aprobarlo como `backup-YYYY-MM-DD.dump` con extension `.dump`.
 - RF-03a: el dump debe incluir todos los esquemas, tablas, filas, secuencias,
   extensiones, funciones, triggers y objetos grandes respaldables de la base,
   sin filtrar las tablas funcionales de NetMO.
@@ -80,8 +83,8 @@ solo el esquema ni una seleccion de tablas.
   mayor que cero y puede ser inspeccionado por `pg_restore --list`.
 - RF-06: una ejecución fallida debe devolver un código de salida distinto de cero
   y no debe borrar el último backup válido.
-- RF-07: el directorio configurado debe contener como maximo un archivo `.dump`,
-  exactamente `netmo-latest.dump`; la limpieza nunca debe ejecutarse antes de
+- RF-07: el directorio configurado debe contener como maximo 30 archivos que
+  cumplan `backup-YYYY-MM-DD.dump`; la limpieza nunca debe ejecutarse antes de
   validar el reemplazo nuevo y debe eliminar temporales ante exito o fallo.
 - RF-08: debe existir un procedimiento de restauración en un entorno de prueba
   que no sobrescriba producción accidentalmente.
@@ -123,7 +126,7 @@ solo el esquema ni una seleccion de tablas.
 ## Criterios de aceptación
 
 - CA-01: con PostgreSQL levantado, el servicio o comando documentado ejecuta un
-  backup diario completo, crea exactamente `netmo-latest.dump` valido y devuelve
+  backup diario completo, crea un `backup-YYYY-MM-DD.dump` valido y devuelve
   codigo 0.
 - CA-02: `pg_restore --list` puede leer el archivo generado sin error.
 - CA-02a: el listado del dump contiene las tablas y objetos funcionales de
@@ -135,10 +138,10 @@ solo el esquema ni una seleccion de tablas.
   `users`, `notebooks`, `reservations`, `loans` y `tickets`.
 - CA-05: tras restaurar en un entorno de prueba, `GET /health` responde con
   `{"ok":true,"service":"netmo-api"}` y el login de una cuenta seed funciona.
-- CA-06: una prueba de ejecucion sucesiva confirma que solo existe un archivo
-  `.dump`, exactamente `netmo-latest.dump`, que cada archivo contiene los datos
-  completos de la base al momento de la copia y que un fallo conserva la copia
-  anterior sin dejar temporales.
+- CA-06: una prueba de ejecucion sucesiva confirma que existen como maximo 30
+  archivos `.dump` fechados, que cada archivo contiene los datos completos de la
+  base al momento de la copia y que un fallo conserva las copias anteriores sin
+  dejar temporales.
 - CA-07: ningún secreto, backup generado o dato de prueba queda versionado.
 
 ## Plan de implementación

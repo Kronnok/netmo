@@ -1,0 +1,89 @@
+REVISION GENERAL DEL PROYECTO - MEJORAS PENDIENTES
+==================================================
+
+Problemas prioritarios detectados:
+
+1. Cancelacion de reservas
+	En backend/server.js, el endpoint DELETE /api/reservations/:codigo usa la
+	variable reservationId sin definir. La reserva puede marcarse como cancelada,
+	pero la API devuelve error y las notebooks relacionadas pueden quedar activas.
+	Solucion: usar el id devuelto por la consulta y realizar ambas operaciones
+	dentro de una transaccion.
+
+2. Aprobacion de lotes
+	Al aprobar un lote, las notebooks pasan a prestada, pero no se crean registros
+	en loans. El profesor no puede devolver correctamente esos equipos ni se
+	registra su vencimiento o demora.
+	Solucion: crear un prestamo por notebook dentro de la misma transaccion.
+
+3. Estado manual prestada
+	El endpoint de notebooks permite cambiar a prestada sin seleccionar un usuario.
+	Esto puede violar la restriccion de database/schema.sql porque prestado_a queda
+	en NULL.
+	Solucion: exigir usuario responsable o quitar prestada de los cambios manuales.
+
+4. Exposicion de PostgreSQL
+	database/docker-compose.yml publica el puerto 5432 en todas las interfaces.
+	Solucion: no publicar PostgreSQL en produccion o enlazarlo solo a 127.0.0.1.
+
+5. Posible XSS en index.html
+	El frontend inserta datos provenientes de usuarios o de la API usando innerHTML.
+	Nombres, emails, motivos, estados y descripciones pueden convertirse en HTML.
+	Solucion: usar textContent, nodos DOM o sanitizacion estricta.
+
+6. Sesiones sin expiracion
+	Las sesiones viven en memoria sin vencimiento ni revocacion real. Un token
+	robado sigue funcionando hasta reiniciar el backend.
+	Solucion: agregar expiracion, logout, almacenamiento persistente seguro o JWT
+	con expiracion y rotacion adecuada.
+
+7. Proteccion de la API
+	Faltan rate limiting para login, limite de tamanio del body y validacion
+	robusta del JSON. CORS usa * por defecto.
+	Solucion: limitar solicitudes, cuerpos y origenes permitidos.
+
+8. Fechas y zona horaria
+	El backend y PostgreSQL calculan el ano y horario con configuraciones que
+	pueden ser diferentes. Esto puede producir diferencias cerca de medianoche.
+	Solucion: usar America/Argentina/Buenos_Aires de forma explicita en backend
+	y PostgreSQL.
+
+9. Documentacion desactualizada
+	Algunos documentos todavia mencionan netmo-latest.dump o indican que existe
+	un unico backup. Tambien hay documentos que describen solo dos servicios,
+	aunque Compose tiene postgres, backup y backend.
+	Solucion: actualizar la documentacion historica o marcarla claramente como
+	obsoleta.
+
+10. Backups simultaneos
+	 Dos procesos de backup pueden competir por el archivo del mismo dia.
+	 Solucion: agregar un mecanismo de bloqueo o garantizar una sola instancia.
+
+11. Intervalo de backup invalido
+	 BACKUP_INTERVAL_SECONDS acepta el valor 0, lo que puede generar un bucle
+	 continuo de backups.
+	 Solucion: exigir un valor entero mayor que cero.
+
+Mejoras recomendadas:
+
+- Crear pruebas de integracion API contra PostgreSQL real.
+- Probar permisos de alumno, profesor y administrador.
+- Probar reservas, cancelaciones, lotes, devoluciones y tickets.
+- Agregar pruebas visuales del frontend con navegador.
+- Implementar migraciones SQL versionadas; modificar schema.sql no actualiza
+  bases existentes.
+- Separar el router HTTP del acceso a PostgreSQL.
+- Agregar logs estructurados sin credenciales ni datos sensibles.
+- Implementar apagado ordenado del pool de PostgreSQL.
+- Validar longitudes maximas de nombres, motivos, descripciones y cursos.
+- Agregar Content-Security-Policy, X-Content-Type-Options y X-Frame-Options.
+- Evitar credenciales demo en la interfaz de produccion.
+
+Orden recomendado:
+
+1. Corregir cancelacion de reservas.
+2. Corregir aprobacion de lotes y creacion de loans.
+3. Corregir el cambio manual a prestada.
+4. Restringir la exposicion de PostgreSQL.
+5. Corregir XSS y seguridad de sesiones.
+6. Crear pruebas de integracion y actualizar documentacion.

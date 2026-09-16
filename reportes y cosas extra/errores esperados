@@ -1,0 +1,21 @@
+- Reserva fuera del ano actual: respuesta `400` con mensaje en espanol.
+- Cambio de estado de notebook no valido: respuesta `400` o rechazo de interfaz sin enviar la solicitud.
+- Preferencias invalidas: respuesta `400` y mensaje visible sin confirmar guardado.
+- Baneo de legajo inexistente o administrador: respuesta `404` o `403` segun el caso.
+- Operacion administrativa sin permisos: respuesta `403`.
+- Ticket o notebook inexistente: respuesta `404`.
+
+- Un backup almacenado en el mismo host que `postgres-data` no protege contra la
+  pérdida física o corrupción del host; para producción debe existir una copia
+  externa.
+- Los dumps contienen información personal y deben tratarse como datos sensibles.
+- Restaurar con `--clean` sobre una base equivocada puede destruir información;
+  el procedimiento debe exigir una base de destino explícita y no usar producción
+  como destino por defecto.
+
+  - Falta de `POSTGRES_PASSWORD`: Compose falla antes de iniciar.
+- Directorio de datos no escribible: PostgreSQL no inicia y el error queda visible en logs.
+- Healthcheck fallido: backend y backup permanecen esperando y no deben intentar operar contra una base no saludable.
+- Esquema invalido: el primer arranque falla y debe requerir correccion antes de reutilizar el volumen.
+- Conexion API fallida: el backend informa el error sin crear una base alternativa en memoria.
+- Restauracion sobre destino no explicito: el procedimiento debe rechazar o requerir una confirmacion clara.

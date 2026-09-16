@@ -64,12 +64,17 @@ No ejecutes el último comando si necesitas conservar la información almacenada
 ## Backups diarios
 
 El servicio `backup` usa la imagen `postgres:16-alpine` y ejecuta un backup
-lógico una vez por día. El archivo se guarda en `database/backups/netmo-latest.dump`.
-Cada ejecución valida el archivo con `pg_restore --list` y solo después reemplaza
-el backup anterior. Si falla la conexión o la validación, se conserva la copia
-anterior y el servicio reintenta al día siguiente. En `database/backups` solo
-puede existir un archivo `.dump`: `netmo-latest.dump`; los archivos temporales
-usan otra extensión y se eliminan al terminar.
+lógico una vez por día. Las copias se guardan en la carpeta dedicada
+`database/backups`, con nombres como `backup-2026-09-16.dump`, usando el horario
+`America/Argentina/Buenos_Aires` para determinar la fecha.
+
+Se conservan como máximo 30 copias fechadas. Al crear una copia nueva cuando ya
+hay 30, se elimina la más antigua después de validar y guardar correctamente la
+nueva. Si se ejecuta otra copia el mismo día, reemplaza solo el archivo de esa
+fecha. Los archivos que no sigan el patrón `backup-YYYY-MM-DD.dump` se conservan
+y no participan de la limpieza automática. Si falla la conexión o la validación,
+se conservan las copias existentes y el servicio reintenta al día siguiente.
+Los archivos temporales usan otra extensión y se eliminan al terminar.
 
 El servicio se inicia junto con el resto del Compose:
 
@@ -85,9 +90,39 @@ Para ejecutar una copia manual sin esperar al intervalo diario:
 docker compose run --rm -e BACKUP_ONCE=1 backup
 ```
 
+## Pruebas del sistema de backup
+
+La suite local verifica el nombre fechado, el horario argentino, el reemplazo
+del backup del mismo día, la retención de 30 copias, la preservación de archivos
+ajenos al patrón y el manejo de errores de `pg_dump`, dumps vacíos y
+`pg_restore`.
+
+Desde la raíz del repositorio, ejecútala con:
+
+```sh
+chmod +x database/scripts/test-backup-loop.sh
+database/scripts/test-backup-loop.sh
+```
+
+La suite usa mocks temporales y no modifica PostgreSQL ni necesita credenciales
+reales. Para validar además la integración real, ejecuta el backup manual con
+Compose y comprueba la copia creada:
+
+```sh
+docker compose run --rm -e BACKUP_ONCE=1 backup
+find backups -maxdepth 1 -type f -name 'backup-*.dump' -printf '%f %s bytes\n'
+```
+
+Después valida una copia concreta con `pg_restore --list` dentro del contenedor:
+
+```sh
+docker compose run --rm -v "$(pwd)/backups:/restore:ro" backup \
+	pg_restore --list /restore/backup-AAAA-MM-DD.dump
+```
+
 La copia local no debe considerarse una protección contra la pérdida del host.
-Para producción, copia `database/backups/netmo-latest.dump` a un almacenamiento
-externo y protege el archivo porque contiene datos de la aplicación.
+Para producción, copia el backup fechado elegido de `database/backups` a un
+almacenamiento externo y protege el archivo porque contiene datos de la aplicación.
 
 ## Restauración de prueba
 
@@ -99,8 +134,10 @@ docker compose exec postgres sh -c 'createdb -U "$POSTGRES_USER" netmo_restore_t
 docker compose run --rm -v "$(pwd)/backups:/restore:ro" backup \
 	sh -c 'pg_restore --clean --if-exists --no-owner \
 	--host=postgres --port=5432 --username="$POSTGRES_USER" \
-	--dbname=netmo_restore_test /restore/netmo-latest.dump'
+	--dbname=netmo_restore_test /restore/backup-AAAA-MM-DD.dump'
 ```
+
+Reemplaza `AAAA-MM-DD` por la fecha del archivo que quieras restaurar.
 
 Después valida las tablas restauradas y levanta una API apuntando a
 `netmo_restore_test`; `GET /health` debe responder correctamente y el login de

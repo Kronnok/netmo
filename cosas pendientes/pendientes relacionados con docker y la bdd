@@ -1,0 +1,96 @@
+PENDIENTES RELACIONADOS CON DOCKER Y LA BASE DE DATOS
+=====================================================
+
+Estado actual:
+
+- La configuracion de Docker Compose es valida.
+- PostgreSQL ya fue detectado como running y healthy.
+- Existen las carpetas persistentes postgres-data y backups.
+- El backend aun no estaba respondiendo en http://localhost:3000/health.
+- No existe un archivo database/.env configurado en este entorno.
+- La base persistente ya contiene datos; no se ejecutaran automaticamente
+	schema.sql ni seed.sql mientras postgres-data no este vacio.
+
+Pasos pendientes:
+
+1. Configurar las variables privadas
+	 - Crear database/.env copiando database/.env.example.
+	 - Definir una contraseña real en POSTGRES_PASSWORD.
+	 - Revisar POSTGRES_DB, POSTGRES_USER, POSTGRES_PORT y API_PORT.
+	 - No subir database/.env a Git.
+
+2. Levantar todos los servicios
+	 Desde la raiz del proyecto ejecutar:
+
+		 cd database
+		 docker compose up -d --build
+
+	 No usar rm -rf postgres-data ni docker compose down -v.
+
+3. Verificar el estado de los contenedores
+
+		 docker compose ps
+		 docker compose logs postgres
+		 docker compose logs backend
+		 docker compose logs backup
+
+	 PostgreSQL debe aparecer healthy y backend/backup deben estar ejecutando.
+
+4. Probar la API
+
+		 curl http://localhost:3000/health
+
+	 Respuesta esperada:
+
+		 {"ok":true,"service":"netmo-api"}
+
+5. Probar la base de datos
+	 - Confirmar que existen las tablas users, notebooks, reservations, loans,
+		 returns, tickets y user_preferences.
+	 - Confirmar que los usuarios seed pueden iniciar sesion.
+	 - Crear un usuario o registro de prueba y comprobar que persiste despues de
+		 reiniciar postgres y backend.
+	 - No borrar postgres-data durante esta prueba.
+
+6. Probar el sistema de backups automaticos
+	 - Ejecutar el backup manual:
+
+		 docker compose run --rm -e BACKUP_ONCE=1 backup
+
+	 - Confirmar que se crea un archivo backup-AAAA-MM-DD.dump dentro de
+		 database/backups.
+	 - Confirmar que el archivo no esta vacio.
+	 - Validarlo con pg_restore --list.
+	 - Probar que una segunda ejecucion del mismo dia reemplaza el archivo sin
+		 crear una segunda copia para esa fecha.
+	 - Probar que al superar 30 copias se elimina la mas antigua.
+	 - Confirmar que un archivo ajeno al patron backup-AAAA-MM-DD.dump no se
+		 elimina.
+	 - Probar un fallo de conexion y confirmar que se conserva el backup anterior.
+
+7. Probar restauracion
+	 - Crear una base temporal llamada netmo_restore_test.
+	 - Restaurar alli un backup fechado, nunca directamente sobre produccion.
+	 - Comprobar tablas, usuarios y datos funcionales.
+	 - Apuntar temporalmente la API a esa base y probar /health y login.
+	 - Eliminar la base temporal solo despues de terminar las comprobaciones.
+
+8. Revisar seguridad antes de usar Docker en produccion
+	 - No publicar PostgreSQL hacia Internet; quitar el puerto 5432 o enlazarlo
+		 solo a 127.0.0.1.
+	 - Mantener CORS_ORIGIN con un origen concreto y no con *.
+	 - Proteger database/.env, postgres-data y database/backups.
+	 - Copiar los backups fuera del equipo para protegerse contra la perdida del
+		 host.
+
+9. Revisar migraciones
+	 - Recordar que modificar schema.sql no actualiza una base ya inicializada.
+	 - Preparar migraciones SQL versionadas antes de cambiar tablas existentes.
+	 - Antes de reconstruir postgres-data, generar y validar un backup externo.
+
+10. Cierre de la validacion Docker
+		- Guardar los resultados de docker compose ps, /health, backup y restauracion.
+		- Actualizar documentacion-netmo.txt y reporte-tests.txt con las pruebas
+			realmente ejecutadas.
+		- Verificar que no se hayan versionado secretos, datos de PostgreSQL ni
+			backups generados.

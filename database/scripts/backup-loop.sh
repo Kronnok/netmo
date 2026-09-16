@@ -4,7 +4,7 @@ set -eu
 BACKUP_DIR=${BACKUP_DIR:-/backups}
 BACKUP_DATABASE=${BACKUP_DATABASE:-${POSTGRES_DB:-netmo}}
 BACKUP_INTERVAL_SECONDS=${BACKUP_INTERVAL_SECONDS:-86400}
-BACKUP_FILE=${BACKUP_DIR}/netmo-latest.dump
+BACKUP_TIMEZONE=${BACKUP_TIMEZONE:-America/Argentina/Buenos_Aires}
 BACKUP_ONCE=${BACKUP_ONCE:-0}
 
 : "${POSTGRES_USER:?POSTGRES_USER es obligatorio}"
@@ -22,13 +22,18 @@ mkdir -p "$BACKUP_DIR"
 
 for existing_dump in "$BACKUP_DIR"/*.dump; do
   [ -e "$existing_dump" ] || continue
-  if [ "$existing_dump" != "$BACKUP_FILE" ]; then
-    echo "ERROR: el directorio contiene otro backup .dump: $existing_dump" >&2
-    exit 1
-  fi
+  case "$(basename "$existing_dump")" in
+    backup-[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].dump)
+      ;;
+    *)
+      echo "ADVERTENCIA: se conserva el archivo ajeno al patron de backups: $existing_dump" >&2
+      ;;
+  esac
 done
 
 backup_once() {
+  backup_date=$(TZ="$BACKUP_TIMEZONE" date '+%Y-%m-%d')
+  backup_file=${BACKUP_DIR}/backup-${backup_date}.dump
   temp_file=$(mktemp "${BACKUP_DIR}/.netmo-backup.XXXXXX")
   cleanup_temp() { rm -f "$temp_file"; }
   trap 'cleanup_temp' EXIT HUP INT TERM
@@ -59,9 +64,30 @@ backup_once() {
   fi
 
   chmod 600 "$temp_file"
-  mv -f "$temp_file" "$BACKUP_FILE"
+  mv -f "$temp_file" "$backup_file"
   trap - EXIT HUP INT TERM
-  echo "Backup valido guardado en ${BACKUP_FILE}."
+
+  dated_backups=''
+  for candidate in "$BACKUP_DIR"/backup-????-??-??.dump; do
+    [ -f "$candidate" ] || continue
+    case "$(basename "$candidate")" in
+      backup-[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].dump)
+        dated_backups=$(printf '%s\n%s' "$dated_backups" "$(basename "$candidate")")
+        ;;
+    esac
+  done
+
+  if [ -n "$dated_backups" ]; then
+    backup_count=$(printf '%s\n' "$dated_backups" | awk 'NF > 0 {count++} END {print count + 0}')
+    backups_to_remove=$((backup_count - 30))
+    printf '%s\n' "$dated_backups" | sort | awk -v limit="$backups_to_remove" 'NF > 0 && ++count <= limit {print}' |
+      while IFS= read -r old_backup; do
+        rm -f "$BACKUP_DIR/$old_backup"
+        echo "Backup antiguo eliminado: ${BACKUP_DIR}/${old_backup}."
+      done
+  fi
+
+  echo "Backup valido guardado en ${backup_file}."
 }
 
 if [ "$BACKUP_ONCE" = "1" ]; then
