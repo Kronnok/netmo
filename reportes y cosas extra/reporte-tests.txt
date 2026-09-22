@@ -1,95 +1,101 @@
 REPORTE DE TESTS NETMO
 ======================
 
-Fecha: 13/09/2026
+Fecha: 17/09/2026
+Entorno: Windows, Docker Desktop, Node.js 24, Compose
 
-1. TESTS APROBADOS
-------------------
+1. PRUEBAS EJECUTADAS Y APROBADAS
+----------------------------------
 
-- Sintaxis de backend/server.js.
-- Sintaxis del JavaScript embebido en index.html.
-- Carga de la pagina por HTTP con respuesta 200.
-- La pagina se sirvio correctamente con un tamano aproximado de 118 KB.
-- Se verificaron 57 handlers inline de formularios y botones.
-- Todas las rutas API usadas por el frontend tienen handlers en el backend.
-- Validacion de reservas:
-  - Fecha valida.
-  - Ano anterior rechazado.
-  - Fin de semana rechazado.
-  - Horario fuera de rango rechazado.
-  - No existe espera obligatoria de 30 minutos.
-- Docker Compose valido usando una contrasena de prueba.
-- Imagen PostgreSQL construida correctamente.
-- Script de backup valido.
-- Backup completo generado correctamente.
-- pg_restore --list pudo leer el backup.
-- El backup incluyo tablas como users, tickets, loans, returns y user_preferences.
-- Se mantuvo un unico archivo netmo-latest.dump.
-- Health de API en entorno limpio:
+- `node --check backend/server.js`: aprobado.
+- `sh -n database/scripts/backup-loop.sh`: aprobado.
+- Suite `database/scripts/test-backup-loop.sh`: aprobada. Resultado:
+  "Todas las pruebas de backup pasaron."
+- `docker compose --env-file database/.env.example config --quiet`: aprobado.
+- Scripts JavaScript embebidos en `index.html`: válidos con `vm.Script`.
+- Carga HTTP temporal de `index.html`: HTTP 200.
+- Tamaño de `index.html`: 118.975 bytes.
+- El backend Docker se construyó correctamente durante la integración aislada.
+- La imagen PostgreSQL se construyó correctamente durante la integración aislada.
+
+2. INTEGRACION DOCKER AISLADA APROBADA
+--------------------------------------
+
+Se creó un proyecto Compose temporal con un volumen nombrado independiente.
+No se usaron ni modificaron los datos persistentes existentes del proyecto.
+
+- PostgreSQL 16: saludable.
+- Backend Node.js: saludable.
+- Puerto temporal de PostgreSQL: 127.0.0.1:55432.
+- Puerto temporal de API: 3010.
+- `GET /health`:
 
   {"ok":true,"service":"netmo-api"}
 
-- Login de administrador funcionando.
-- Consulta de notebooks funcionando.
-- Preferencias actualizadas correctamente.
-- Reservas de un ano incorrecto rechazadas con estado 400.
-- Usuarios no administradores recibieron 403 al modificar tickets.
-- Estado invalido de notebook rechazado con estado 400.
+- Login seed de administrador: aprobado.
+- Tablas verificadas: users, user_preferences, notebooks, reservations, loans,
+  returns y tickets.
+- Usuarios seed: 6.
+- Backup real generado: `backup-2026-09-17.dump`.
+- Tamaño del backup: 37.537 bytes.
+- `pg_restore --list`: aprobado.
+- El listado del dump incluyó extensiones, tipos, tablas, datos, secuencias,
+  índices, restricciones, triggers y funciones.
+- El Compose temporal, su volumen, su red y sus contenedores fueron eliminados
+  al finalizar la prueba.
 
-2. CORRECCION ENCONTRADA DURANTE LAS PRUEBAS
----------------------------------------------
+3. RESULTADOS DEL ENTORNO ACTUAL
+--------------------------------
 
-El arranque limpio de PostgreSQL inicialmente fallaba por un error en el trigger
-validate_reservation_schedule de database/schema.sql.
+El contenedor `database-backend-1` ya estaba ejecutándose en el puerto 3000,
+pero su red solo contiene el backend. Sus variables indican `DB_HOST=postgres`,
+pero no existe un servicio PostgreSQL accesible con ese nombre.
 
-Se corrigio la condicion SQL y luego PostgreSQL pudo inicializar correctamente:
+- `GET http://127.0.0.1:3000/health`: falló.
+- Error observado: `getaddrinfo ENOTFOUND postgres`.
+- No se reinició ni se eliminó el contenedor existente para evitar afectar datos
+  persistentes no controlados.
+- Los contenedores ajenos observados (MySQL de otra aplicación y Jellyfin) no
+  fueron modificados.
 
-- Extensiones.
-- Tablas.
-- Indices.
-- Funciones.
-- Triggers.
-- Vista administrativa.
-- Seis usuarios seed.
-- Datos iniciales.
+Este fallo pertenece al entorno Compose activo, no a la integración aislada que
+fue levantada y validada correctamente.
 
-3. PROBLEMAS DEL ENTORNO EXISTENTE
-----------------------------------
+4. HALLAZGOS Y RIESGOS
+----------------------
 
-La instancia persistente actual tiene un volumen incompleto. Faltan tablas como
- tickets y loans.
+- El directorio local antiguo `database/postgres-data` no debe reutilizarse como
+  bind mount en Docker Desktop para Windows: PostgreSQL rechazó sus permisos.
+- La configuración actual usa el volumen nombrado `postgres-data`, que resolvió
+  el problema en la integración aislada.
+- La instancia persistente antigua puede tener un esquema incompleto. Cambiar
+  `schema.sql` no ejecuta migraciones sobre un volumen ya inicializado.
+- La API activa usa `CORS_ORIGIN=*`; para un servidor real debe configurarse un
+  origen concreto.
+- El reporte no considera restauración sobre producción ni borrado de datos.
 
-PostgreSQL omite automaticamente schema.sql y seed.sql cuando el volumen ya
-contiene datos. Por ese motivo, cambiar los scripts no reconstruye una base ya
-inicializada.
+5. PRUEBAS PENDIENTES
+---------------------
 
-Los contenedores existentes tambien presentan timeout entre servicios aunque
-comparten la misma red Docker.
+- Levantar el Compose del proyecto con un `database/.env` autorizado y validar
+  el entorno operativo real.
+- Decidir si los datos del directorio antiguo deben migrarse mediante un backup
+  y restauración explícitos.
+- Probar persistencia reiniciando el volumen nombrado, sin eliminarlo.
+- Restaurar el dump en una base temporal y comprobar nuevamente la API contra
+  esa base.
+- Prueba visual con navegador y flujo completo mediante clicks.
+- Pruebas funcionales completas de reservas, devoluciones, tickets,
+  preferencias y permisos contra PostgreSQL activo.
 
-No se elimino ni reinicializo el volumen existente para evitar perdida de datos.
-
-4. TESTS PENDIENTES
--------------------
-
-- Prueba visual real con navegador.
-- Pruebas con Playwright, Puppeteer o un navegador headless.
-- Flujo completo desde clicks en la interfaz.
-- Restauracion completa del backup en una base temporal.
-- Prueba de persistencia sobre la instancia real existente.
-- Prueba del Compose completo usando el archivo .env real.
-- Validacion completa del entorno real despues de reconstruir correctamente la
-  base PostgreSQL.
-
-5. CONCLUSION
+6. CONCLUSION
 -------------
 
-La pagina, el backend, el esquema limpio y el sistema de backup superaron las
-pruebas automatizadas disponibles.
+El código, el frontend, Compose, el esquema limpio, el backend integrado y el
+sistema de backups superaron las pruebas reproducibles disponibles. La
+integración aislada Docker quedó validada de extremo a extremo.
 
-La principal limitacion actual esta en la instancia PostgreSQL persistente
-existente, que tiene un esquema incompleto y problemas de conectividad entre
-contenedores.
-
-Antes de validar el entorno real completo se debe generar o conservar un backup
-valido y reconstruir cuidadosamente el volumen incompleto, evitando borrar datos
-sin una copia previa.
+El entorno actualmente activo sigue incompleto porque el backend apunta a
+`postgres` sin tener un PostgreSQL accesible en su red. No se debe borrar ni
+recrear la instancia persistente antigua sin conservar primero un backup válido
+y contar con una decisión explícita sobre la migración de sus datos.

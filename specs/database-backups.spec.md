@@ -20,8 +20,8 @@ solo el esquema ni una seleccion de tablas.
 - Una ejecucion fallida debe mantener intacto el backup valido anterior.
 - El esquema y `seed.sql` solo se ejecutan automaticamente cuando el volumen esta
   vacio; un backup nunca debe reconstruir ni sobrescribir la base de produccion.
-- El Compose actual no declara aun el servicio `backup`; el README describe el
-  comportamiento deseado, pero la configuracion versionada debe implementarlo.
+- El Compose actual declara el servicio `backup` y la configuración versionada
+  debe mantener su comportamiento alineado con esta especificación.
 - El volumen `postgres-data` es persistencia operativa, no una copia independiente:
   perder el host o borrar ese directorio también puede perder los datos.
 - Ejecución manual y automatizable mediante un script versionado.

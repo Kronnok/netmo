@@ -426,7 +426,7 @@ modificar al usuario admin mediante esta ruta.
 5. DOCKER
 ---------
 
-El archivo database/docker-compose.yml define dos servicios:
+El archivo database/docker-compose.yml define tres servicios:
 
 5.1 postgres
 
@@ -437,12 +437,19 @@ El archivo database/docker-compose.yml define dos servicios:
 - Expone el puerto 5432.
 - Tiene un healthcheck con pg_isready.
 
-5.2 backend
+5.2 backup
+
+- Usa PostgreSQL 16 Alpine para ejecutar pg_dump.
+- Guarda hasta 30 backups fechados en database/backups.
+- Espera a que PostgreSQL este saludable y valida cada dump con pg_restore.
+
+5.3 backend
 
 - Usa Node.js 22 Alpine.
 - Instala la dependencia pg durante la construccion de la imagen.
 - Expone la API en el puerto 3000.
 - Espera a que PostgreSQL este saludable antes de iniciar.
+- Tiene un healthcheck propio sobre /health.
 
 La contraseña se recibe mediante la variable de entorno POSTGRES_PASSWORD y no
 se guarda en el repositorio.

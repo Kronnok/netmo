@@ -11,13 +11,28 @@ const pool = new Pool({
   password: process.env.POSTGRES_PASSWORD
 });
 const sessions = new Map();
+const corsOrigins = new Set((process.env.CORS_ORIGIN || 'http://localhost:5500')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean));
+
+function corsHeaders(request) {
+  const origin = request.headers.origin;
+  const headers = {
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS'
+  };
+  if (origin && (corsOrigins.has('*') || corsOrigins.has(origin))) {
+    headers['Access-Control-Allow-Origin'] = origin;
+    headers.Vary = 'Origin';
+  }
+  return headers;
+}
 
 function send(response, status, payload) {
   response.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
-    'Access-Control-Allow-Origin': process.env.CORS_ORIGIN || '*',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS'
+    ...corsHeaders(response.req)
   });
   response.end(JSON.stringify(payload));
 }
@@ -165,7 +180,7 @@ async function route(request, response) {
     const result = await pool.query(`UPDATE reservations SET estado = 'cancelada'
       WHERE codigo = $1 AND owner_id = $2 AND estado IN ('confirmada', 'pendiente_aprobacion') RETURNING id`, [reservationCode, user.id]);
     if (!result.rowCount) return send(response, 404, { error: 'Reserva no encontrada o no cancelable' });
-    await pool.query('UPDATE reservation_notebooks SET active = FALSE WHERE reservation_id = $1 AND active', [reservationId]);
+    await pool.query('UPDATE reservation_notebooks SET active = FALSE WHERE reservation_id = $1 AND active', [result.rows[0].id]);
     return send(response, 200, { message: 'Reserva cancelada' });
   }
   if (request.method === 'GET' && url.pathname === '/api/admin/reservations') {

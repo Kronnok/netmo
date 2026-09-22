@@ -13,7 +13,7 @@ Definir y dejar reproducible el contenedor Docker que aloja la base de datos Pos
 - PostgreSQL se construye desde `database/Dockerfile` usando `postgres:16-alpine`.
 - El Dockerfile copia `schema.sql` y `seed.sql` al directorio de inicializacion de PostgreSQL.
 - `database/docker-compose.yml` ya define los servicios `postgres`, `backend` y `backup`.
-- El volumen `./postgres-data:/var/lib/postgresql/data` conserva los datos fuera del contenedor.
+- El volumen nombrado `postgres-data` conserva los datos fuera del ciclo de vida del contenedor.
 - PostgreSQL ejecuta `schema.sql` y `seed.sql` solo cuando el directorio de datos esta vacio.
 - El backend se conecta usando el host interno `postgres` y espera el healthcheck del servicio.
 - El servicio `backup` usa PostgreSQL 16, espera a que `postgres` este saludable y guarda el backup en `./backups`.
@@ -44,14 +44,14 @@ Fuera de alcance:
 ## Decisiones aprobadas
 
 1. **Version:** PostgreSQL 16 sobre `postgres:16-alpine`, alineado con el Dockerfile actual.
-2. **Persistencia:** usar `./postgres-data:/var/lib/postgresql/data` como volumen operativo independiente del contenedor.
+2. **Persistencia:** usar el volumen nombrado `postgres-data` como volumen operativo independiente del contenedor. Esta decisión evita incompatibilidades de permisos en Docker Desktop para Windows. El directorio local `database/postgres-data`, si existe, no se migra ni se borra automáticamente.
 3. **Inicializacion:** ejecutar `schema.sql` y `seed.sql` automaticamente solo en un volumen vacio; nunca ejecutar seed en cada reinicio.
 4. **Red:** backend y backup se conectan a `postgres:5432` dentro de la red de Compose.
 5. **Puerto host:** publicar PostgreSQL en `${POSTGRES_PORT:-5432}`. Esta opcion queda aprobada para desarrollo y diagnostico local; en despliegues donde no se requiera acceso desde el host, debe poder deshabilitarse sin cambiar el backend.
 6. **Credenciales:** exigir `POSTGRES_PASSWORD`; permitir configurar `POSTGRES_DB`, `POSTGRES_USER` y puertos mediante `.env` o variables del entorno.
 7. **Healthcheck:** usar `pg_isready` con la base y usuario configurados, con reintentos antes de iniciar backend y backup.
 8. **Backup:** mantener el servicio diario separado del volumen operativo. El backup completo y el requisito de unico `.dump` se rigen por `database-backups.spec.md`.
-9. **Destruccion:** `docker compose down` no debe borrar datos; eliminar `postgres-data` debe documentarse como una operacion destructiva que exige confirmacion manual.
+9. **Destruccion:** `docker compose down` no debe borrar datos; eliminar el volumen `postgres-data` mediante `docker compose down -v` debe documentarse como una operacion destructiva que exige confirmacion manual.
 
 ## Comportamiento esperado
 
@@ -125,7 +125,7 @@ Fuera de alcance:
 - CA-04: un volumen vacio crea las extensiones, tablas, vistas, funciones, triggers y datos seed definidos por el esquema.
 - CA-05: despues de crear un registro de prueba, reiniciar PostgreSQL y backend sin eliminar `postgres-data` conserva ese registro.
 - CA-06: el backend resuelve `postgres` por la red interna y puede responder `/health` y autenticar una cuenta seed.
-- CA-07: el backup diario se conecta solo despues del healthcheck, genera el dump completo y mantiene el unico `netmo-latest.dump` definido en la especificacion de backups.
+- CA-07: el backup diario se conecta solo despues del healthcheck, genera el dump completo y mantiene hasta 30 archivos `backup-YYYY-MM-DD.dump` definidos en la especificacion de backups.
 - CA-08: `docker compose down` no elimina `postgres-data`; la eliminacion del directorio solo ocurre mediante una accion manual documentada.
 - CA-09: una restauracion de prueba en una base temporal recupera datos de `users`, `user_preferences`, `notebooks`, `reservations`, `loans`, `returns` y `tickets`.
 - CA-10: con una variable obligatoria ausente o una configuracion invalida, el arranque falla de forma visible y no crea una base parcial silenciosa.

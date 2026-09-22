@@ -1,10 +1,10 @@
 INSERT INTO users (legajo, nombre, email, curso, rol, password_hash, baneado) VALUES
-  ('2024-0417', 'Teo Prado', 'tprado@ottokrause.edu.ar', '6° Informática "B"', 'alumno', crypt('1234', gen_salt('bf')), FALSE),
-  ('2024-0528', 'Lucía Fernández', 'lfernandez@ottokrause.edu.ar', '6° Informática "A"', 'alumno', crypt('1234', gen_salt('bf')), FALSE),
-  ('2024-0639', 'Mateo Rodríguez', 'mrodriguez@ottokrause.edu.ar', '6° Computación "A"', 'alumno', crypt('5678', gen_salt('bf')), FALSE),
-  ('PRF-010', 'Prof. Ana Gómez', 'agomez@ottokrause.edu.ar', 'Profesor · Cátedra Programación', 'profesor', crypt('1234', gen_salt('bf')), FALSE),
-  ('PRF-011', 'Prof. Diego Suárez', 'dsuarez@ottokrause.edu.ar', 'Profesor · Cátedra Redes', 'profesor', crypt('2468', gen_salt('bf')), FALSE),
-  ('ADM-001', 'Admin NetMO', 'admin@ottokrause.edu.ar', 'Administración', 'admin', crypt('admin123', gen_salt('bf')), FALSE);
+  ('2024-0417', 'Teo Prado', 'tprado@ottokrause.edu.ar', '6° Informática "B"', 'alumno', crypt(:'student_password', gen_salt('bf')), FALSE),
+  ('2024-0528', 'Lucía Fernández', 'lfernandez@ottokrause.edu.ar', '6° Informática "A"', 'alumno', crypt(:'student_password', gen_salt('bf')), FALSE),
+  ('2024-0639', 'Mateo Rodríguez', 'mrodriguez@ottokrause.edu.ar', '6° Computación "A"', 'alumno', crypt(:'student_password', gen_salt('bf')), FALSE),
+  ('PRF-010', 'Prof. Ana Gómez', 'agomez@ottokrause.edu.ar', 'Profesor · Cátedra Programación', 'profesor', crypt(:'teacher_password', gen_salt('bf')), FALSE),
+  ('PRF-011', 'Prof. Diego Suárez', 'dsuarez@ottokrause.edu.ar', 'Profesor · Cátedra Redes', 'profesor', crypt(:'network_teacher_password', gen_salt('bf')), FALSE),
+  ('ADM-001', 'Admin NetMO', 'admin@ottokrause.edu.ar', 'Administración', 'admin', crypt(:'admin_password', gen_salt('bf')), FALSE);
 
 INSERT INTO user_preferences (user_id, email_notifications, return_reminder_minutes)
 SELECT id, TRUE, 30 FROM users;

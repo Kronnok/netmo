@@ -13,8 +13,8 @@ archivo debe identificarse mediante la fecha en la que se creó.
 
 - `database/scripts/backup-loop.sh` ejecuta `pg_dump --format=custom` cada
   `BACKUP_INTERVAL_SECONDS`, cuyo valor por defecto es 86400 segundos.
-- El archivo válido siempre se llama `netmo-latest.dump`.
-- Solo se admite un archivo `.dump` en `database/backups`.
+- El archivo válido usa el patrón `backup-YYYY-MM-DD.dump`.
+- Se admiten hasta 30 archivos `.dump` fechados en `database/backups`.
 - El archivo nuevo se valida con tamaño mayor que cero y `pg_restore --list`
   antes de reemplazar el anterior.
 - Si falla la conexión o la validación, se conserva el backup anterior.

@@ -359,7 +359,7 @@
         <button type="submit" class="btn btn-primary btn-block" style="margin-top:.6rem;">Ingresar</button>
       </form>
       <p class="auth-switch">¿No tenés cuenta? <button class="link-btn" onclick="switchAuthView('registro')">Registrate acá</button></p>
-      <div class="demo-hint">
+      <div class="demo-hint" id="demoHint">
         <b>Usuarios demo:</b><br>
         Alumno → <b>tprado@ottokrause.edu.ar</b> / clave <b>1234</b><br>
         Alumna → <b>lfernandez@ottokrause.edu.ar</b> / clave <b>1234</b><br>
@@ -990,7 +990,8 @@ let estadoUsuarios = [
 let currentUser = null;   // usuario realmente logueado
 let rolActivo = null;     // rol del usuario autenticado
 let authToken = null;
-const API_BASE = window.NETMO_API_URL || null;
+const API_BASE = window.NETMO_API_URL === null ? null : (window.NETMO_API_URL || 'http://localhost:3000');
+document.getElementById('demoHint').style.display = API_BASE ? 'none' : '';
 
 let notebooks = [
   {id:'NB-001', estado:'disponible', ubicacion:'Carro 1', act:'Hace 2 min', prestadoA:null},
@@ -1164,6 +1165,10 @@ async function login(e){
 
 function registrar(e){
   e.preventDefault();
+  if(API_BASE){
+    document.getElementById('registroError').textContent = 'El registro de usuarios se gestiona desde la administración.';
+    return;
+  }
   const nombre = document.getElementById('regNombre').value.trim();
   const email = document.getElementById('regEmail').value.trim();
   const curso = document.getElementById('regCurso').value;
@@ -1188,6 +1193,10 @@ function registrar(e){
 ====================================================================== */
 function crearProfesor(e){
   e.preventDefault();
+  if(API_BASE){
+    document.getElementById('crearProfesorError').textContent = 'La gestión de profesores requiere un endpoint de administración.';
+    return;
+  }
   const nombre = document.getElementById('profNombre').value.trim();
   const email = document.getElementById('profEmail').value.trim();
   const catedra = document.getElementById('profCatedra').value.trim();
@@ -1232,6 +1241,7 @@ function iniciarSesion(){
   document.getElementById('app-root').classList.add('active');
   const testBanner = document.getElementById('testModeBanner');
   testBanner.style.display = API_BASE ? 'none' : 'inline-flex';
+  document.getElementById('demoHint').style.display = API_BASE ? 'none' : '';
   document.getElementById('testModeRole').textContent = `sesión de ${rolLabel[rolActivo]}`;
   renderAll();
   applyRoleVisibility();

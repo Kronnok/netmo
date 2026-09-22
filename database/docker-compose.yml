@@ -7,15 +7,17 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-netmo}
       POSTGRES_USER: ${POSTGRES_USER:-netmo}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Definí POSTGRES_PASSWORD antes de iniciar Docker}
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      NETMO_SEED_STUDENT_PASSWORD: ${NETMO_SEED_STUDENT_PASSWORD:?Definí NETMO_SEED_STUDENT_PASSWORD antes de inicializar la base}
+      NETMO_SEED_TEACHER_PASSWORD: ${NETMO_SEED_TEACHER_PASSWORD:?Definí NETMO_SEED_TEACHER_PASSWORD antes de inicializar la base}
+      NETMO_SEED_NETWORK_TEACHER_PASSWORD: ${NETMO_SEED_NETWORK_TEACHER_PASSWORD:?Definí NETMO_SEED_NETWORK_TEACHER_PASSWORD antes de inicializar la base}
+      NETMO_SEED_ADMIN_PASSWORD: ${NETMO_SEED_ADMIN_PASSWORD:?Definí NETMO_SEED_ADMIN_PASSWORD antes de inicializar la base}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 12
     volumes:
-      - ./postgres-data:/var/lib/postgresql/data
+      - postgres-data:/var/lib/postgresql/data
 
   backup:
     image: postgres:16-alpine
@@ -26,11 +28,15 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-netmo}
       POSTGRES_USER: ${POSTGRES_USER:-netmo}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Definí POSTGRES_PASSWORD antes de iniciar Docker}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Definí POSTGRES_PASSWORD antes de iniciar Docker}
       BACKUP_DIR: /backups
       BACKUP_DATABASE: ${BACKUP_DATABASE:-${POSTGRES_DB:-netmo}}
       BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
       BACKUP_TIMEZONE: ${BACKUP_TIMEZONE:-America/Argentina/Buenos_Aires}
       BACKUP_ONCE: ${BACKUP_ONCE:-0}
+      BACKUP_CONNECTION_RETRIES: ${BACKUP_CONNECTION_RETRIES:-15}
+      BACKUP_RETRY_DELAY_SECONDS: ${BACKUP_RETRY_DELAY_SECONDS:-2}
+      BACKUP_LOCK_MAX_AGE_SECONDS: ${BACKUP_LOCK_MAX_AGE_SECONDS:-7200}
     depends_on:
       postgres:
         condition: service_healthy
@@ -50,10 +56,18 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-netmo}
       POSTGRES_USER: ${POSTGRES_USER:-netmo}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Definí POSTGRES_PASSWORD antes de iniciar Docker}
-      CORS_ORIGIN: ${CORS_ORIGIN:-*}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5500}
     depends_on:
       postgres:
         condition: service_healthy
     ports:
       - "${API_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres-data:
 

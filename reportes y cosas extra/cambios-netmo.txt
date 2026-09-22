@@ -1,10 +1,18 @@
 NETMO - CAMBIOS Y PLAN DEL PROYECTO
 
-Alcance actual:
-- index.html funciona como demo funcional.
-- Los usuarios y datos están almacenados en memoria.
-- La pérdida de datos al recargar es esperada en esta etapa.
-- Cada usuario demo accede únicamente a las vistas correspondientes a su rol.
+Estado actual (2026-09-22):
+- index.html usa la API de Docker por defecto en http://localhost:3000.
+- El login, el usuario autenticado, notebooks, reservas, prestamos, tickets y preferencias se cargan desde PostgreSQL mediante la API.
+- El modo demo queda disponible solo si se define window.NETMO_API_URL = null antes del script de la pagina.
+- La interfaz se sirve con un servidor estatico en http://localhost:5500.
+
+Cambios recientes:
+- Se agrego package-lock.json y el backend se construye con npm ci.
+- PostgreSQL se ejecuta con un volumen nombrado y el puerto solo se publica mediante docker-compose.dev.yml.
+- Las contrasenas seed se reciben por variables de entorno durante la inicializacion de un volumen nuevo.
+- El servicio de backup valida dumps, reintenta conexiones, recupera locks abandonados y conserva hasta 30 copias fechadas.
+- Se corrigio la cancelacion de reservas y se parametrizo CORS.
+- La documentacion operativa esta en database/README.md.
 
 Hallazgos para corregir:
 - Posible XSS por uso de innerHTML con datos ingresados.
