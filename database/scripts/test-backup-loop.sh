@@ -23,6 +23,11 @@ output=''
 for argument in "$@"; do
   case "$argument" in
     --file=*) output=${argument#--file=} ;;
+    --dbname=*)
+      if [ -n "${MOCK_EXPECT_DATABASE_URL:-}" ] && [ "${argument#--dbname=}" != "$MOCK_EXPECT_DATABASE_URL" ]; then
+        exit 1
+      fi
+      ;;
   esac
 done
 if [ "${MOCK_PG_DUMP_MODE:-success}" = "empty" ]; then
@@ -45,11 +50,11 @@ run_backup() {
   BACKUP_DIR="$BACKUP_DIR" \
   BACKUP_ONCE=1 \
   BACKUP_TIMEZONE=America/Argentina/Buenos_Aires \
-  POSTGRES_USER=test \
-  POSTGRES_PASSWORD=test \
   MOCK_PG_DUMP_MODE=${MOCK_PG_DUMP_MODE:-success} \
   MOCK_PG_RESTORE_MODE=${MOCK_PG_RESTORE_MODE:-success} \
   MOCK_DUMP_CONTENT=${MOCK_DUMP_CONTENT:-test-dump} \
+  DATABASE_URL=${MOCK_DATABASE_URL:-postgresql://db.example.invalid/netmo?sslmode=require} \
+  MOCK_EXPECT_DATABASE_URL=${MOCK_DATABASE_URL:-postgresql://db.example.invalid/netmo?sslmode=require} \
   PATH="$MOCK_BIN:$PATH" \
   "$BACKUP_SCRIPT" >/dev/null 2>&1
 }
@@ -74,6 +79,9 @@ current_backup=${BACKUP_DIR}/backup-${current_date}.dump
 run_backup
 assert_file "$current_backup"
 test "$(find "$BACKUP_DIR" -maxdepth 1 -type f -name 'backup-????-??-??.dump' | wc -l)" -eq 1
+
+MOCK_DATABASE_URL='postgresql://db.example.invalid/netmo?sslmode=require' run_backup
+assert_file "$current_backup"
 
 test -f "$BACKUP_DIR/backup-${current_date}.dump"
 first_content=$(cat "$current_backup")

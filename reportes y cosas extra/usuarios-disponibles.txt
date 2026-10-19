@@ -1,0 +1,102 @@
+USUARIOS DISPONIBLES DE NETMO
+==============================
+
+Fecha de referencia: 23 de septiembre de 2026
+
+Este documento lista las cuentas de prueba creadas por el seed de la base de
+ datos para probar el login y los permisos de la aplicacion.
+
+IMPORTANTE
+----------
+
+- Estas credenciales son solo para desarrollo y pruebas locales.
+- No utilizar estas contrasenas en un entorno productivo.
+- Las cuentas se crean automaticamente cuando PostgreSQL se inicializa con un
+  volumen nuevo.
+- Si el volumen ya existia, modificar las variables NETMO_SEED_* no cambia las
+  contrasenas de las cuentas existentes.
+
+CUENTAS DE LA APLICACION
+------------------------
+
+1. ALUMNOS
+
+Nombre: Teo Prado
+Legajo: 2024-0417
+Correo: tprado@ottokrause.edu.ar
+Rol: alumno
+Contrasena de desarrollo: 1234
+
+Nombre: Lucia Fernandez
+Legajo: 2024-0528
+Correo: lfernandez@ottokrause.edu.ar
+Rol: alumno
+Contrasena de desarrollo: 1234
+
+Nombre: Mateo Rodriguez
+Legajo: 2024-0639
+Correo: mrodriguez@ottokrause.edu.ar
+Rol: alumno
+Contrasena de desarrollo: 1234
+
+2. PROFESORES
+
+Nombre: Prof. Ana Gomez
+Legajo: PRF-010
+Correo: agomez@ottokrause.edu.ar
+Rol: profesor
+Contrasena de desarrollo: 1234
+
+Nombre: Prof. Diego Suarez
+Legajo: PRF-011
+Correo: dsuarez@ottokrause.edu.ar
+Rol: profesor
+Contrasena de desarrollo: 2468
+
+3. ADMINISTRADOR
+
+Nombre: Admin NetMO
+Legajo: ADM-001
+Correo: admin@ottokrause.edu.ar
+Rol: admin
+Contrasena de desarrollo: admin123
+
+RESUMEN RAPIDO PARA LOGIN
+-------------------------
+
+Correo                         Contrasena   Rol
+-------------------------------------------------
+tprado@ottokrause.edu.ar       1234          alumno
+lfernandez@ottokrause.edu.ar   1234          alumno
+mrodriguez@ottokrause.edu.ar   1234          alumno
+agomez@ottokrause.edu.ar       1234          profesor
+dsuarez@ottokrause.edu.ar      2468          profesor
+admin@ottokrause.edu.ar        admin123      admin
+
+DATOS DE LA BASE DE DATOS
+-------------------------
+
+Las cuentas de la aplicacion utilizan estas variables del archivo
+ database/.env o database/.env.example:
+
+NETMO_SEED_STUDENT_PASSWORD=[configure in a private environment]
+NETMO_SEED_TEACHER_PASSWORD=[configure in a private environment]
+NETMO_SEED_NETWORK_TEACHER_PASSWORD=[configure in a private environment]
+NETMO_SEED_ADMIN_PASSWORD=[configure in a private environment]
+
+La contrasena de PostgreSQL es independiente de las contrasenas de login:
+
+POSTGRES_DB=netmo
+POSTGRES_USER=netmo
+POSTGRES_PASSWORD=[configure in a private environment]
+
+UBICACION DE LA FUENTE
+----------------------
+
+Los usuarios se definen en:
+
+- database/seed.sql
+- database/.env.example
+
+La API almacena las contrasenas como hashes. Este documento contiene las
+contrasenas de desarrollo porque esta destinado a pruebas locales.

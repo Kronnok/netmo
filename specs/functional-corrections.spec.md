@@ -19,6 +19,10 @@ Incluye:
 7. Cambio de estados validos de notebooks desde Inventario.
 8. Eliminacion de la espera obligatoria de 30 minutos para reservas individuales y lotes.
 9. Paridad de comportamiento entre modo demo y modo API.
+10. Registro persistente de alumnos sin curso permanente en `users`.
+11. Listado administrativo de profesores con búsqueda.
+12. Asociación del curso a reservas y préstamos, no a la identidad del usuario.
+13. Registro transaccional del retiro de reservas como préstamos activos.
 
 Fuera de alcance:
 
@@ -27,6 +31,7 @@ Fuera de alcance:
 - Crear un sistema de notificaciones nuevo.
 - Modificar la politica de backups de PostgreSQL.
 - Agregar nuevas categorias de estado no definidas en el esquema.
+- Crear cuentas de profesor desde la interfaz administrativa.
 
 ## Hechos observados
 
@@ -44,6 +49,25 @@ Fuera de alcance:
 - La lista demo de tardanzas solo muestra usuarios con al menos una tardanza; Teo es el principal caso inicial, pero la implementacion no debe quedar hardcodeada a su legajo.
 
 ## Comportamiento esperado
+
+### 0. Registro y curso de la operación
+
+- El registro de alumnos debe persistir mediante `POST /api/auth/register`.
+- Toda cuenta creada desde el registro debe persistir con rol `profesor`.
+- Las cuentas nuevas deben aparecer en el listado administrativo de profesores.
+- Una cuenta nueva no debe guardar curso en `users`.
+- El curso se conserva en la reserva y se copia al préstamo cuando se crea.
+- La vista administrativa de profesores solo lista cuentas existentes y permite buscarlas por nombre, email o legajo.
+- No se deben devolver hashes ni contraseñas desde ningún endpoint.
+
+### 0.1 Retiro de reservas
+
+- Una reserva confirmada o un lote aprobado debe poder registrarse como retiro físico por un administrador.
+- El retiro debe crear un préstamo por cada notebook asignada, conservando `reservation_id` y el curso operativo.
+- Las notebooks retiradas deben quedar en estado `prestada` y asociadas al usuario responsable.
+- La operación debe ejecutarse en una transacción y ser idempotente: repetirla no debe duplicar préstamos.
+- Una reserva no retirada no debe aparecer como préstamo activo.
+- El usuario debe poder ver y solicitar la devolución de los préstamos creados.
 
 ### 1. Devoluciones pendientes
 
