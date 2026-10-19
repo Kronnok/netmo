@@ -1,3 +1,10 @@
-database/.env
+.env
+node_modules/
+**/node_modules/
 database/postgres-data/
 database/backups/
+**/backups/
+*.dump
+*.backup
+*.bak
+*.sql.gz

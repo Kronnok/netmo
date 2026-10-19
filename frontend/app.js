@@ -1,997 +1,21 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>NetMO · Gestión de notebooks</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
-<style>
-  :root{
-    --bg:#f4f6fb;
-    --surface:#ffffff;
-    --surface-2:#fbfcfe;
-    --border:#e4e8f1;
-    --text:#111a2e;
-    --text-muted:#667085;
-    --text-faint:#98a2b3;
-
-    --brand:#1e4fd8;
-    --brand-dark:#15379e;
-    --brand-tint:#eaf0ff;
-
-    --green-bg:#e3f8ec; --green-text:#0f7a45;
-    --blue-bg:#e7eefe;  --blue-text:#1e4fd8;
-    --orange-bg:#fff1e0; --orange-text:#a15c07;
-    --red-bg:#fde8e8;   --red-text:#b42318;
-    --purple-bg:#f1eaff; --purple-text:#6d28d9;
-
-    --radius-lg:18px;
-    --radius-md:12px;
-    --radius-sm:8px;
-    --shadow-sm:0 1px 2px rgba(16,24,40,.04);
-    --shadow-md:0 8px 24px -8px rgba(16,24,40,.12);
-    --font-display:'Sora',sans-serif;
-    --font-body:'Inter',sans-serif;
-    --font-mono:'JetBrains Mono',monospace;
-  }
-
-  html[data-theme="dark"]{
-    --bg:#0e1320;
-    --surface:#161c2c;
-    --surface-2:#1b2233;
-    --border:#2b3350;
-    --text:#eef1f8;
-    --text-muted:#9aa4c0;
-    --text-faint:#6d7796;
-
-    --brand:#5b86ff;
-    --brand-dark:#7ea0ff;
-    --brand-tint:#1c2846;
-
-    --green-bg:#0f2f22; --green-text:#4ade95;
-    --blue-bg:#152a4d;  --blue-text:#7ea0ff;
-    --orange-bg:#3a2711; --orange-text:#f5a742;
-    --red-bg:#3a1616;   --red-text:#ff7a72;
-    --purple-bg:#26193f; --purple-text:#b294f5;
-
-    --shadow-sm:0 1px 2px rgba(0,0,0,.25);
-    --shadow-md:0 8px 24px -8px rgba(0,0,0,.5);
-  }
-
-  html, body, .sidebar, .card, .stat-card, .action-card, .auth-card, .modal, input, select, textarea{
-    transition:background-color .2s ease, border-color .2s ease, color .2s ease;
-  }
-
-  *{margin:0;padding:0;box-sizing:border-box;font-family:var(--font-body);}
-  html{scroll-behavior:smooth;}
-  body{background:var(--bg);color:var(--text);min-height:100vh;}
-  h1,h2,h3,h4{font-family:var(--font-display);letter-spacing:-0.01em;}
-  button{cursor:pointer;font-family:var(--font-body);}
-  :focus-visible{outline:2px solid var(--brand);outline-offset:2px;}
-
-  #app-root{display:none;min-height:100vh;}
-  #app-root.active{display:flex;}
-
-  /* ---------- Sidebar ---------- */
-  .sidebar{
-    width:264px;flex-shrink:0;background:var(--surface);
-    border-right:1px solid var(--border);
-    display:flex;flex-direction:column;padding:1.5rem 1rem;
-    position:sticky;top:0;height:100vh;
-  }
-  .logo{display:flex;align-items:center;gap:12px;margin-bottom:1.5rem;padding:0 .5rem;}
-  .logo-mark{
-    width:38px;height:38px;border-radius:10px;background:linear-gradient(155deg,var(--brand),var(--brand-dark));
-    display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:var(--shadow-sm);
-  }
-  .logo h1{font-size:.92rem;line-height:1.25;color:var(--text);font-weight:700;}
-  .logo h1 span{display:block;font-family:var(--font-body);font-weight:500;font-size:.72rem;color:var(--text-muted);letter-spacing:.04em;text-transform:uppercase;}
-
-  .role-pill-wrap{margin:0 .5rem 1.25rem;}
-  .role-pill{
-    display:flex;align-items:center;gap:6px;background:var(--brand-tint);color:var(--brand-dark);
-    font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;
-    padding:.4rem .7rem;border-radius:20px;
-  }
-  .role-pill.role-profesor{background:var(--purple-bg);color:var(--purple-text);}
-  .role-pill.role-admin{background:var(--red-bg);color:var(--red-text);}
-
-  .nav-menu{list-style:none;display:flex;flex-direction:column;gap:2px;flex-grow:1;}
-  .nav-section-label{font-size:.68rem;font-weight:700;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;padding:.9rem .9rem .3rem;}
-  .nav-item{
-    padding:.68rem .9rem;border-radius:var(--radius-sm);cursor:pointer;
-    display:flex;align-items:center;gap:11px;color:var(--text-muted);font-weight:500;font-size:.92rem;
-    border:none;background:none;width:100%;text-align:left;transition:background .15s,color .15s;
-  }
-  .nav-item svg{flex-shrink:0;opacity:.85;}
-  .nav-item.active{background:var(--brand-tint);color:var(--brand-dark);font-weight:600;}
-  .nav-item.active svg{opacity:1;}
-  .nav-item:hover:not(.active){background:var(--surface-2);color:var(--text);}
-  .nav-badge{margin-left:auto;background:var(--red-bg);color:var(--red-text);font-size:.7rem;font-weight:700;padding:1px 7px;border-radius:20px;}
-  li[data-roles]{display:none;}
-  li[data-roles].role-visible{display:block;}
-
-  .logout{margin-top:1rem;border-top:1px solid var(--border);padding-top:1rem;}
-
-  /* ---------- Main ---------- */
-  .main-content{flex-grow:1;padding:2.25rem 2.75rem;max-width:1400px;}
-  .view{display:none;animation:fade .25s ease;}
-  .view.active{display:block;}
-  @keyframes fade{from{opacity:0;transform:translateY(4px);}to{opacity:1;transform:none;}}
-
-  .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:2rem;gap:1rem;flex-wrap:wrap;}
-  .welcome-text h2{font-size:1.85rem;margin-bottom:.35rem;}
-  .welcome-text p{color:var(--text-muted);font-size:.95rem;}
-  .test-mode-banner{
-    display:inline-flex;align-items:center;gap:6px;margin-top:.6rem;background:var(--orange-bg);color:var(--orange-text);
-    font-size:.76rem;font-weight:600;padding:.35rem .7rem;border-radius:20px;
-  }
-
-  .header-right{display:flex;align-items:center;gap:.9rem;flex-wrap:wrap;}
-  .role-switcher{
-    padding:.5rem .8rem;border:1px solid var(--border);border-radius:20px;font-size:.78rem;font-weight:600;
-    background:var(--surface);color:var(--text-muted);outline:none;
-  }
-  .icon-btn{
-    width:40px;height:40px;border-radius:50%;border:1px solid var(--border);background:var(--surface);
-    display:flex;align-items:center;justify-content:center;color:var(--text-muted);position:relative;
-  }
-  .icon-btn:hover{background:var(--surface-2);color:var(--text);}
-  .dot-alert{position:absolute;top:8px;right:9px;width:7px;height:7px;border-radius:50%;background:#e14f4f;border:1.5px solid var(--surface);}
-
-  .user-profile{display:flex;align-items:center;gap:.7rem;cursor:pointer;padding:.3rem .5rem;border-radius:var(--radius-sm);}
-  .user-profile:hover{background:var(--surface-2);}
-  .avatar{
-    width:40px;height:40px;background:linear-gradient(155deg,var(--brand),var(--brand-dark));color:#fff;border-radius:50%;
-    display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.85rem;flex-shrink:0;
-  }
-  .user-profile h4{font-size:.88rem;font-weight:600;}
-  .user-profile p{font-size:.76rem;color:var(--text-muted);}
-
-  /* ---------- Stats ---------- */
-  .stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:1.1rem;margin-bottom:2rem;}
-  .stat-card{
-    background:var(--surface);padding:1.3rem 1.4rem;border-radius:var(--radius-lg);border:1px solid var(--border);
-    display:flex;align-items:center;gap:1rem;transition:box-shadow .15s,transform .15s;
-  }
-  .stat-card:hover{box-shadow:var(--shadow-md);transform:translateY(-1px);}
-  .stat-icon{width:48px;height:48px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:1.3rem;flex-shrink:0;}
-  .icon-green{background:var(--green-bg);color:var(--green-text);}
-  .icon-blue{background:var(--blue-bg);color:var(--blue-text);}
-  .icon-orange{background:var(--orange-bg);color:var(--orange-text);}
-  .icon-purple{background:var(--purple-bg);color:var(--purple-text);}
-  .icon-red{background:var(--red-bg);color:var(--red-text);}
-  .stat-info span{font-weight:600;font-size:.82rem;color:var(--text-muted);}
-  .stat-info h3{font-size:1.7rem;margin:.15rem 0;font-family:var(--font-mono);}
-  .stat-info p{color:var(--text-faint);font-size:.78rem;}
-
-  /* ---------- Grid / Card blocks ---------- */
-  .content-grid{display:grid;grid-template-columns:2.3fr 1fr;gap:1.75rem;align-items:start;}
-  .card{background:var(--surface);border-radius:var(--radius-lg);border:1px solid var(--border);padding:1.5rem;}
-  .card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:1.3rem;gap:1rem;flex-wrap:wrap;}
-  .card-header h3{font-size:1.1rem;}
-  .card-header p{font-size:.82rem;color:var(--text-muted);margin-top:.15rem;}
-
-  .search-bar-wrap{display:flex;gap:.6rem;}
-  .search-bar{
-    padding:.6rem .9rem;border:1px solid var(--border);border-radius:var(--radius-sm);width:230px;outline:none;
-    font-size:.87rem;background:var(--surface-2);
-  }
-  .search-bar:focus{border-color:var(--brand);background:var(--surface);}
-  .btn{
-    padding:.6rem 1.1rem;border-radius:var(--radius-sm);font-size:.87rem;font-weight:600;border:1px solid var(--border);
-    background:var(--surface);color:var(--text);display:inline-flex;align-items:center;gap:6px;transition:background .15s;
-  }
-  .btn:hover{background:var(--surface-2);}
-  .btn-primary{background:var(--brand);color:#fff;border-color:var(--brand);}
-  .btn-primary:hover{background:var(--brand-dark);}
-  .btn-sm{padding:.4rem .8rem;font-size:.8rem;}
-  .btn-danger-outline{border-color:var(--red-bg);color:var(--red-text);}
-  .btn-danger-outline:hover{background:var(--red-bg);}
-  .btn-success-outline{border-color:var(--green-bg);color:var(--green-text);}
-  .btn-success-outline:hover{background:var(--green-bg);}
-  .btn-block{width:100%;justify-content:center;}
-  .btn:disabled{opacity:.55;cursor:not-allowed;}
-
-  table{width:100%;border-collapse:collapse;}
-  th,td{padding:.85rem .6rem;text-align:left;border-bottom:1px solid var(--border);font-size:.88rem;}
-  th{color:var(--text-faint);font-weight:600;font-size:.76rem;text-transform:uppercase;letter-spacing:.04em;}
-  tbody tr:last-child td{border-bottom:none;}
-  tbody tr:hover{background:var(--surface-2);}
-  td.mono{font-family:var(--font-mono);font-size:.83rem;}
-
-  .badge{padding:.28rem .7rem;border-radius:20px;font-size:.78rem;font-weight:600;display:inline-flex;align-items:center;gap:5px;white-space:nowrap;}
-  .badge::before{content:'';width:6px;height:6px;border-radius:50%;background:currentColor;}
-  .badge-disponible{background:var(--green-bg);color:var(--green-text);}
-  .badge-prestada{background:var(--blue-bg);color:var(--blue-text);}
-  .badge-mantenimiento{background:var(--orange-bg);color:var(--orange-text);}
-  .badge-pendiente_devolucion{background:var(--red-bg);color:var(--red-text);}
-  .badge-abierto{background:var(--orange-bg);color:var(--orange-text);}
-  .badge-progreso{background:var(--blue-bg);color:var(--blue-text);}
-  .badge-resuelto{background:var(--green-bg);color:var(--green-text);}
-  .badge-vencido{background:var(--red-bg);color:var(--red-text);}
-  .badge-pendiente_aprobacion{background:var(--orange-bg);color:var(--orange-text);}
-  .badge-aprobada{background:var(--green-bg);color:var(--green-text);}
-  .badge-rechazada{background:var(--red-bg);color:var(--red-text);}
-
-  .empty-state{text-align:center;padding:2.5rem 1rem;color:var(--text-muted);}
-  .empty-state .glyph{font-size:1.8rem;margin-bottom:.6rem;}
-  .empty-state h4{color:var(--text);margin-bottom:.3rem;font-size:.95rem;}
-  .empty-state p{font-size:.85rem;}
-
-  /* ---------- Actions sidebar (Inicio) ---------- */
-  .actions-section{display:flex;flex-direction:column;gap:.9rem;}
-  .actions-section > h3{margin-bottom:-.2rem;font-size:1rem;}
-  .action-card{
-    background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-md);padding:.95rem 1.1rem;
-    display:flex;align-items:center;gap:.9rem;transition:border-color .15s,box-shadow .15s;text-align:left;width:100%;
-    color:var(--text);
-  }
-  .action-card:hover{border-color:var(--brand);box-shadow:var(--shadow-sm);}
-  .action-icon{width:38px;height:38px;border-radius:9px;display:flex;align-items:center;justify-content:center;background:var(--brand-tint);color:var(--brand-dark);font-size:1.05rem;flex-shrink:0;}
-  .action-info h4{font-size:.9rem;margin-bottom:1px;color:var(--text);}
-  .action-info p{font-size:.78rem;color:var(--text-muted);}
-  .action-arrow{margin-left:auto;color:var(--text-faint);}
-
-  .alert-box{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:1.3rem;margin-top:.3rem;}
-  .alert-box h4{margin-bottom:.7rem;display:flex;align-items:center;gap:.5rem;font-size:.92rem;}
-  .alert-box li{font-size:.83rem;color:var(--text-muted);margin-bottom:.5rem;padding-left:.9rem;position:relative;list-style:none;}
-  .alert-box li::before{content:'';position:absolute;left:0;top:.5em;width:4px;height:4px;border-radius:50%;background:var(--text-faint);}
-
-  /* ---------- Forms ---------- */
-  .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:1.1rem;}
-  .field{display:flex;flex-direction:column;gap:.4rem;}
-  .field.full{grid-column:1/-1;}
-  .field label{font-size:.82rem;font-weight:600;color:var(--text);}
-  .field .hint{font-size:.76rem;color:var(--text-faint);}
-  .hint{font-size:.76rem;color:var(--text-faint);}
-  select,input[type=text],input[type=date],input[type=time],input[type=email],input[type=password],input[type=number],textarea{
-    padding:.65rem .8rem;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:.88rem;
-    background:var(--surface-2);color:var(--text);outline:none;font-family:var(--font-body);width:100%;
-  }
-  select:focus,input:focus,textarea:focus{border-color:var(--brand);background:var(--surface);}
-  textarea{resize:vertical;min-height:90px;}
-  .field-error{font-size:.76rem;color:var(--red-text);min-height:1em;}
-  .severity-group{display:flex;gap:.6rem;}
-  .severity-opt{
-    flex:1;border:1px solid var(--border);border-radius:var(--radius-sm);padding:.6rem;text-align:center;
-    font-size:.82rem;font-weight:600;color:var(--text-muted);background:var(--surface-2);
-  }
-  .severity-opt input{display:none;}
-  .severity-opt.checked-baja{border-color:var(--green-text);background:var(--green-bg);color:var(--green-text);}
-  .severity-opt.checked-media{border-color:var(--orange-text);background:var(--orange-bg);color:var(--orange-text);}
-  .severity-opt.checked-alta{border-color:var(--red-text);background:var(--red-bg);color:var(--red-text);}
-
-  .toggle-row{display:flex;align-items:center;gap:.6rem;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:.7rem .9rem;}
-  .toggle-row input{width:auto;}
-  .lote-block{display:none;border:1px dashed var(--purple-text);background:var(--purple-bg);border-radius:var(--radius-md);padding:1rem;margin-top:.9rem;}
-  .lote-block.show{display:block;}
-  .lote-block h4{color:var(--purple-text);font-size:.88rem;margin-bottom:.8rem;}
-
-  /* ---------- Two column view layout ---------- */
-  .view-grid{display:grid;grid-template-columns:1.1fr 1fr;gap:1.75rem;align-items:start;}
-  @media (max-width:1050px){.view-grid,.content-grid{grid-template-columns:1fr;}}
-
-  /* ---------- Profile ---------- */
-  .profile-hero{display:flex;align-items:center;gap:1.3rem;padding-bottom:1.3rem;margin-bottom:1.3rem;border-bottom:1px solid var(--border);}
-  .avatar-lg{width:72px;height:72px;font-size:1.4rem;background:linear-gradient(155deg,var(--brand),var(--brand-dark));color:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;}
-  .profile-hero h3{font-size:1.2rem;}
-  .profile-hero p{color:var(--text-muted);font-size:.87rem;margin-top:2px;}
-  .info-row{display:flex;justify-content:space-between;padding:.8rem 0;border-bottom:1px solid var(--border);font-size:.87rem;}
-  .info-row:last-child{border-bottom:none;}
-  .info-row .label{color:var(--text-muted);}
-  .info-row .value{font-weight:600;}
-
-  /* ---------- Toast ---------- */
-  #toast-wrap{position:fixed;bottom:1.5rem;right:1.5rem;display:flex;flex-direction:column;gap:.6rem;z-index:999;}
-  .toast{
-    background:var(--text);color:#fff;padding:.85rem 1.2rem;border-radius:var(--radius-md);font-size:.85rem;
-    display:flex;align-items:center;gap:.6rem;box-shadow:var(--shadow-md);animation:toast-in .25s ease;min-width:260px;
-  }
-  .toast.success{background:#0f7a45;}
-  .toast.warn{background:#a15c07;}
-  .toast.error{background:#b42318;}
-  @keyframes toast-in{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:none;}}
-
-  /* ---------- Modal ---------- */
-  .modal-overlay{position:fixed;inset:0;background:rgba(15,20,35,.45);display:none;align-items:center;justify-content:center;z-index:998;padding:1rem;}
-  .modal-overlay.open{display:flex;}
-  .modal{background:var(--surface);border-radius:var(--radius-lg);padding:1.8rem;max-width:440px;width:100%;box-shadow:var(--shadow-md);max-height:90vh;overflow-y:auto;}
-  .modal.modal-wide{max-width:520px;}
-  .modal h3{margin-bottom:.6rem;}
-  .modal p{color:var(--text-muted);font-size:.88rem;margin-bottom:1.2rem;line-height:1.5;}
-  .modal-actions{display:flex;gap:.7rem;justify-content:flex-end;margin-top:1.2rem;}
-
-  /* ---------- Auth (Login / Registro) ---------- */
-  #auth-shell{position:fixed;inset:0;background:linear-gradient(155deg,var(--bg) 55%,var(--brand-tint));display:flex;align-items:center;justify-content:center;z-index:500;padding:1.5rem;}
-  #auth-shell.hidden{display:none;}
-  .auth-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow-md);padding:2.3rem 2.2rem;max-width:430px;width:100%;}
-  .auth-brand{display:flex;align-items:center;gap:12px;margin-bottom:1.8rem;}
-  .auth-brand h1{font-size:1.05rem;}
-  .auth-brand h1 span{display:block;font-family:var(--font-body);font-weight:500;font-size:.75rem;color:var(--text-muted);letter-spacing:.04em;text-transform:uppercase;}
-  .auth-view{display:none;}
-  .auth-view.active{display:block;}
-  .auth-view h2{font-size:1.35rem;margin-bottom:.3rem;}
-  .auth-view > p.sub{color:var(--text-muted);font-size:.87rem;margin-bottom:1.5rem;}
-  .auth-switch{margin-top:1.3rem;text-align:center;font-size:.85rem;color:var(--text-muted);}
-  .link-btn{background:none;border:none;color:var(--brand);font-weight:600;cursor:pointer;padding:0;text-decoration:underline;font-size:inherit;}
-  .auth-back-btn{display:inline-block;margin-bottom:1rem;text-decoration:none;font-size:.85rem;}
-  .auth-back-btn:hover{text-decoration:underline;}
-  .demo-hint{margin-top:1.3rem;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:.8rem .9rem;font-size:.76rem;color:var(--text-muted);line-height:1.5;}
-  .demo-hint b{color:var(--text);}
-
-  ::-webkit-scrollbar{width:9px;height:9px;}
-  ::-webkit-scrollbar-thumb{background:#d3d9e6;border-radius:20px;}
-</style>
-</head>
-<body>
-
-<!-- ============================================================ -->
-<!-- AUTH SHELL: Login / Registro                                  -->
-<!-- ============================================================ -->
-<div id="auth-shell">
-  <button class="icon-btn theme-toggle-btn" style="position:absolute;top:1.5rem;right:1.5rem;" onclick="toggleTheme()" title="Cambiar tema" aria-label="Cambiar tema"></button>
-  <div class="auth-card">
-    <div class="auth-brand">
-      <div class="logo-mark">
-        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
-      </div>
-      <h1>NetMO<span>Gestión de notebooks</span></h1>
-    </div>
-
-    <!-- ---- LOGIN ---- -->
-    <section class="auth-view active" id="view-login">
-      <h2>Iniciar sesión</h2>
-      <p class="sub">Ingresá con tu correo de Gmail para acceder al sistema de préstamos.</p>
-      <form id="loginForm" onsubmit="login(event)">
-        <div class="form-grid" style="grid-template-columns:1fr;gap:1rem;">
-          <div class="field">
-            <label for="loginEmail">Correo (Gmail)</label>
-            <input type="email" id="loginEmail" placeholder="Ej: tunombre@gmail.com" required>
-          </div>
-          <div class="field">
-            <label for="loginPassword">Contraseña</label>
-            <input type="password" id="loginPassword" placeholder="••••••••" required>
-          </div>
-        </div>
-        <div id="loginError" class="field-error"></div>
-        <button type="submit" class="btn btn-primary btn-block" style="margin-top:.6rem;">Ingresar</button>
-      </form>
-      <p class="auth-switch">¿No tenés cuenta? <button class="link-btn" onclick="switchAuthView('registro')">Registrate acá</button></p>
-      <div class="demo-hint" id="demoHint">
-        <b>Usuarios demo:</b><br>
-        Alumno → <b>tprado@ottokrause.edu.ar</b> / clave <b>1234</b><br>
-        Alumna → <b>lfernandez@ottokrause.edu.ar</b> / clave <b>1234</b><br>
-        Alumno → <b>mrodriguez@ottokrause.edu.ar</b> / clave <b>5678</b><br>
-        Profesor → <b>agomez@ottokrause.edu.ar</b> / clave <b>1234</b><br>
-        Profesor → <b>dsuarez@ottokrause.edu.ar</b> / clave <b>2468</b><br>
-        Admin → <b>admin@ottokrause.edu.ar</b> / clave <b>admin123</b>
-      </div>
-    </section>
-
-    <!-- ---- REGISTRO ---- -->
-    <section class="auth-view" id="view-registro">
-      <button type="button" class="link-btn auth-back-btn" onclick="switchAuthView('login')" aria-label="Volver a iniciar sesión">← Volver a iniciar sesión</button>
-      <h2>Crear cuenta</h2>
-      <p class="sub">Registrate con tu correo de Gmail para poder reservar equipos. El registro es para alumnos — las cuentas de profesor las da de alta Preceptoría.</p>
-      <form id="registroForm" onsubmit="registrar(event)">
-        <div class="form-grid" style="grid-template-columns:1fr;gap:1rem;">
-          <div class="field">
-            <label for="regNombre">Nombre y apellido</label>
-            <input type="text" id="regNombre" placeholder="Ej: Ana Fernández" required>
-          </div>
-          <div class="field">
-            <label for="regEmail">Correo (Gmail)</label>
-            <input type="email" id="regEmail" placeholder="Ej: tunombre@gmail.com" required>
-          </div>
-          <div class="field">
-            <label for="regCurso">Curso / división</label>
-            <select id="regCurso" required>
-              <option>6° Informática "A"</option>
-              <option>6° Informática "B"</option>
-              <option>6° Computación "A"</option>
-              <option>6° Computación "B"</option>
-              <option>5° Informática "A"</option>
-              <option>5° Informática "B"</option>
-              <option>4° Informática "A"</option>
-            </select>
-          </div>
-          <div class="field">
-            <label for="regPassword">Contraseña</label>
-            <input type="password" id="regPassword" placeholder="Elegí una contraseña" required>
-          </div>
-        </div>
-        <div id="registroError" class="field-error"></div>
-        <button type="submit" class="btn btn-primary btn-block" style="margin-top:.6rem;">Registrarme</button>
-      </form>
-      <p class="auth-switch">¿Ya tenés cuenta? <button class="link-btn" onclick="switchAuthView('login')">Iniciá sesión</button></p>
-    </section>
-  </div>
-</div>
-
-<!-- ============================================================ -->
-<!-- APP ROOT (visible sólo con sesión iniciada)                   -->
-<!-- ============================================================ -->
-<div id="app-root">
-
-<aside class="sidebar">
-  <div class="logo">
-    <div class="logo-mark">
-      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
-    </div>
-    <h1>NetMO<span>Gestión de notebooks</span></h1>
-  </div>
-
-  <div class="role-pill-wrap">
-    <span class="role-pill" id="sidebarRolePill">Alumno</span>
-  </div>
-
-  <ul class="nav-menu">
-    <li data-roles="alumno,profesor,admin"><button class="nav-item" data-view="inicio" onclick="switchView('inicio')">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12l9-9 9 9"/><path d="M5 10v10h14V10"/></svg>
-      Inicio</button></li>
-    <li data-roles="alumno,profesor"><button class="nav-item" data-view="prestamos" onclick="switchView('prestamos')">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><line x1="2" y1="9" x2="22" y2="9"/></svg>
-      Mis préstamos</button></li>
-    <li data-roles="alumno,profesor"><button class="nav-item" data-view="reservas" onclick="switchView('reservas')">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="17" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="16" y1="2" x2="16" y2="6"/></svg>
-      Reservas</button></li>
-    <li data-roles="alumno,profesor"><button class="nav-item" data-view="falla" onclick="switchView('falla')">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-      Reportar falla</button></li>
-    <li data-roles="alumno,profesor"><button class="nav-item" data-view="tickets" onclick="switchView('tickets')">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v5a2 2 0 0 1 0 4v1a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-1a2 2 0 0 1 0-4z"/></svg>
-      Mis tickets <span class="nav-badge" id="ticketsBadge" style="display:none;">0</span></button></li>
-
-    <li data-roles="admin"><span class="nav-section-label">Administración</span></li>
-    <li data-roles="admin"><button class="nav-item" data-view="admin-profesores" onclick="switchView('admin-profesores')">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="16" y1="11" x2="22" y2="11"/></svg>
-      Profesores</button></li>
-    <li data-roles="admin"><button class="nav-item" data-view="admin-inventario" onclick="switchView('admin-inventario')">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
-      Inventario</button></li>
-    <li data-roles="admin"><button class="nav-item" data-view="admin-devoluciones" onclick="switchView('admin-devoluciones')">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9"/><path d="M3 4v8h8"/></svg>
-      Devoluciones <span class="nav-badge" id="devBadge" style="display:none;">0</span></button></li>
-    <li data-roles="admin"><button class="nav-item" data-view="admin-lotes" onclick="switchView('admin-lotes')">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-      Lotes de profesores <span class="nav-badge" id="lotesBadge" style="display:none;">0</span></button></li>
-    <li data-roles="admin"><button class="nav-item" data-view="admin-tickets" onclick="switchView('admin-tickets')">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-      Fallas reportadas <span class="nav-badge" id="adminTicketsBadge" style="display:none;">0</span></button></li>
-    <li data-roles="admin"><button class="nav-item" data-view="admin-tardanzas" onclick="switchView('admin-tardanzas')">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-      Devoluciones tardías <span class="nav-badge" id="tardanzasBadge" style="display:none;">0</span></button></li>
-
-    <li data-roles="alumno,profesor,admin"><button class="nav-item" data-view="perfil" onclick="switchView('perfil')">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-      Perfil</button></li>
-  </ul>
-
-  <div class="logout">
-    <button class="nav-item" onclick="openModal('logoutModal')">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-      Cerrar sesión</button>
-  </div>
-</aside>
-
-<main class="main-content">
-
-  <!-- ============ HEADER (common) ============ -->
-  <header class="header">
-    <div class="welcome-text">
-      <h2 id="pageTitle">¡Hola!</h2>
-      <p id="pageSubtitle">Aquí podés consultar la disponibilidad de notebooks y realizar reservas.</p>
-      <div class="test-mode-banner" id="testModeBanner" style="display:none;">
-        🧪 Modo demo sin BDD: viendo la interfaz como <span id="testModeRole"></span>
-      </div>
-    </div>
-    <div class="header-right">
-      <button class="icon-btn theme-toggle-btn" onclick="toggleTheme()" title="Cambiar tema" aria-label="Cambiar tema"></button>
-      <button class="icon-btn" onclick="switchView('tickets')" title="Notificaciones">
-        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-        <span class="dot-alert"></span>
-      </button>
-      <div class="user-profile" onclick="switchView('perfil')">
-        <div class="avatar" id="headerAvatar">--</div>
-        <div>
-          <h4 id="headerNombre">—</h4>
-          <p id="headerRolCurso">—</p>
-        </div>
-      </div>
-    </div>
-  </header>
-
-  <!-- ============ VIEW: INICIO ============ -->
-  <section class="view active" id="view-inicio">
-
-    <!-- ---- ADMIN: panel completo de inventario ---- -->
-    <div id="statsGridAdmin" class="stats-grid">
-      <div class="stat-card"><div class="stat-icon icon-green">💻</div><div class="stat-info"><span>Disponibles</span><h3 id="statDisponibles">0</h3><p>En este momento</p></div></div>
-      <div class="stat-card"><div class="stat-icon icon-blue">🖥️</div><div class="stat-info"><span>Prestadas</span><h3 id="statPrestadas">0</h3><p>Actualmente</p></div></div>
-      <div class="stat-card"><div class="stat-icon icon-orange">🔧</div><div class="stat-info"><span>En mantenimiento</span><h3 id="statMantenimiento">0</h3><p>No disponibles</p></div></div>
-      <div class="stat-card"><div class="stat-icon icon-purple">📊</div><div class="stat-info"><span>Total</span><h3 id="statTotal">0</h3><p>Notebooks en total</p></div></div>
-    </div>
-
-    <!-- ---- ALUMNO / PROFESOR: solo lo que les importa ---- -->
-    <div id="statsGridUsuario" class="stats-grid" style="grid-template-columns:minmax(200px,280px);">
-      <div class="stat-card"><div class="stat-icon icon-green">💻</div><div class="stat-info"><span>Disponibles</span><h3 id="statDisponiblesUsuario">0</h3><p>En este momento</p></div></div>
-    </div>
-
-    <div class="content-grid">
-      <div class="card" id="cardEstadoNotebooks">
-        <div class="card-header">
-          <div>
-            <h3>Estado de notebooks</h3>
-            <p>Información actualizada en tiempo real.</p>
-          </div>
-          <div class="search-bar-wrap">
-            <input type="text" id="searchInput" class="search-bar" placeholder="Buscar por número o estado" oninput="filterNotebooks()">
-            <select class="btn btn-sm" id="filterEstado" onchange="filterNotebooks()" style="font-weight:500;">
-              <option value="">Todos</option>
-              <option value="disponible">Disponible</option>
-              <option value="prestada">Prestada</option>
-              <option value="mantenimiento">Mantenimiento</option>
-              <option value="pendiente_devolucion">Pendiente devolución</option>
-            </select>
-          </div>
-        </div>
-        <table>
-          <thead><tr><th>N° de notebook</th><th>Estado</th><th>Ubicación</th><th>Última actualización</th></tr></thead>
-          <tbody id="notebookTable"></tbody>
-        </table>
-      </div>
-
-      <div class="card" id="cardMiActividad">
-        <div class="card-header">
-          <div>
-            <h3>Tu actividad</h3>
-            <p>Tus próximas reservas y tickets abiertos.</p>
-          </div>
-        </div>
-        <div id="miActividadWrap"></div>
-      </div>
-
-      <div class="actions-section">
-        <h3>Acciones rápidas</h3>
-        <button class="action-card" data-roles="alumno,profesor" onclick="switchView('reservas')">
-          <div class="action-icon">📅</div>
-          <div class="action-info"><h4>Reservar notebook</h4><p>Reservá una notebook o un lote</p></div>
-          <span class="action-arrow">›</span>
-        </button>
-        <button class="action-card" data-roles="alumno,profesor" onclick="switchView('prestamos')">
-          <div class="action-icon" style="background:var(--blue-bg);color:var(--blue-text);">↩️</div>
-          <div class="action-info"><h4>Devolver notebook</h4><p>Registrá una devolución</p></div>
-          <span class="action-arrow">›</span>
-        </button>
-        <button class="action-card" data-roles="alumno,profesor" onclick="switchView('falla')">
-          <div class="action-icon" style="background:var(--orange-bg);color:var(--orange-text);">⚠️</div>
-          <div class="action-info"><h4>Reportar falla</h4><p>Informar un problema</p></div>
-          <span class="action-arrow">›</span>
-        </button>
-        <button class="action-card" data-roles="admin" onclick="switchView('admin-devoluciones')">
-          <div class="action-icon" style="background:var(--red-bg);color:var(--red-text);">📥</div>
-          <div class="action-info"><h4>Confirmar devoluciones</h4><p>Revisar la cola de pendientes</p></div>
-          <span class="action-arrow">›</span>
-        </button>
-        <button class="action-card" data-roles="admin" onclick="switchView('admin-lotes')">
-          <div class="action-icon" style="background:var(--purple-bg);color:var(--purple-text);">👥</div>
-          <div class="action-info"><h4>Aprobar lotes</h4><p>Solicitudes de profesores</p></div>
-          <span class="action-arrow">›</span>
-        </button>
-        <button class="action-card" data-roles="alumno,profesor,admin" onclick="openModal('normasModal')">
-          <div class="action-icon" style="background:var(--purple-bg);color:var(--purple-text);">ℹ️</div>
-          <div class="action-info"><h4>Normas de uso</h4><p>Leé las normas</p></div>
-          <span class="action-arrow">›</span>
-        </button>
-
-        <div class="alert-box">
-          <h4>📢 Avisos importantes</h4>
-          <ul>
-            <li>Recordá devolver la notebook en la fecha y hora acordada.</li>
-            <li>Si tenés problemas, creá un ticket.</li>
-          </ul>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ============ VIEW: MIS PRÉSTAMOS (alumno) ============ -->
-  <section class="view" id="view-prestamos">
-    <div class="card">
-      <div class="card-header">
-        <div><h3>Préstamo activo</h3><p>Notebook que tenés actualmente en tu poder.</p></div>
-      </div>
-      <div id="prestamoActivoWrap"></div>
-    </div>
-
-    <div class="card" style="margin-top:1.5rem;">
-      <div class="card-header"><div><h3>Historial de préstamos</h3><p>Últimos movimientos registrados a tu nombre.</p></div></div>
-      <table>
-        <thead><tr><th>Notebook</th><th>Retirada</th><th>Devuelta</th><th>Estado</th></tr></thead>
-        <tbody>
-          <tr><td class="mono">NB-021</td><td>28 jun, 09:10</td><td>28 jun, 17:40</td><td><span class="badge badge-resuelto">Devuelta a tiempo</span></td></tr>
-          <tr><td class="mono">NB-009</td><td>22 jun, 08:55</td><td>22 jun, 18:05</td><td><span class="badge badge-resuelto">Devuelta a tiempo</span></td></tr>
-          <tr><td class="mono">NB-033</td><td>15 jun, 10:20</td><td>15 jun, 19:50</td><td><span class="badge badge-vencido">Devuelta con demora</span></td></tr>
-        </tbody>
-      </table>
-    </div>
-  </section>
-
-  <!-- ============ VIEW: RESERVAS (alumno + profesor) ============ -->
-  <section class="view" id="view-reservas">
-    <div class="view-grid">
-      <div class="card">
-        <div class="card-header"><div><h3>Nueva reserva</h3><p>Elegí carro, fecha y horario de retiro.</p></div></div>
-
-        <div class="toggle-row" id="loteToggleWrap" style="display:none;margin-bottom:1.1rem;">
-          <input type="checkbox" id="loteToggle" onchange="toggleLoteBlock()">
-          <label for="loteToggle" style="margin:0;">Solicitar un <b>lote</b> de notebooks para un curso completo</label>
-        </div>
-
-        <form id="reservaForm" onsubmit="crearReserva(event)">
-          <div class="form-grid">
-            <div class="field" id="resCantidadWrap">
-              <label for="resCantidad">Cantidad de equipos</label>
-              <input type="number" id="resCantidad" min="1" max="40" step="1" value="1" required>
-            </div>
-            <div class="field" data-roles-el="profesor">
-              <label for="resCursoProfesor">Curso</label>
-              <input type="text" id="resCursoProfesor" placeholder="Ej: 6° Informática A">
-            </div>
-            <div class="field">
-              <label for="resFecha">Fecha</label>
-              <input type="date" id="resFecha" required>
-            </div>
-            <div class="field">
-              <label for="resHora">Hora de retiro</label>
-              <input type="time" id="resHora" required>
-            </div>
-            <div class="field full">
-              <label for="resMotivo">Motivo / materia</label>
-              <input type="text" id="resMotivo" placeholder="Ej: Programación — TP integrador">
-            </div>
-          </div>
-
-          <div class="lote-block" id="loteBlock">
-            <h4>👥 Datos del lote</h4>
-            <div class="form-grid">
-              <div class="field">
-                <label for="loteCurso">Curso / división</label>
-                <input type="text" id="loteCurso" placeholder="Ej: 6° Informática A">
-              </div>
-              <div class="field">
-                <label for="loteCantidad">Cantidad de equipos</label>
-                <input type="number" id="loteCantidad" min="3" max="40" value="10">
-              </div>
-            </div>
-            <p class="hint" style="margin-top:.6rem;">La solicitud de lote queda <b>pendiente de aprobación</b> del Administrador antes de confirmarse.</p>
-          </div>
-
-          <div id="resFechaError" class="field-error"></div>
-          <div class="modal-actions" style="justify-content:flex-start;margin-top:1rem;">
-            <button type="submit" class="btn btn-primary" id="resSubmitBtn">Confirmar reserva</button>
-          </div>
-        </form>
-      </div>
-
-      <div class="card">
-        <div class="card-header"><div><h3>Mis reservas</h3><p>Próximos retiros programados.</p></div></div>
-        <div id="reservasListWrap"></div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ============ VIEW: REPORTAR FALLA ============ -->
-  <section class="view" id="view-falla">
-    <div class="view-grid">
-      <div class="card">
-        <div class="card-header"><div><h3>Reportar un problema</h3><p>Contanos qué pasó para poder darle seguimiento.</p></div></div>
-        <form id="fallaForm" onsubmit="crearTicket(event)">
-          <div class="form-grid">
-            <div class="field full">
-              <label for="fallaNotebook">Notebook afectada</label>
-              <select id="fallaNotebook" required>
-                <option value="">Seleccioná una notebook</option>
-                <option>NB-001</option><option>NB-002</option><option>NB-003</option><option>NB-004</option><option>NB-005</option>
-                <option value="otro">No lo sé / equipo del carro</option>
-              </select>
-            </div>
-            <div class="field full">
-              <label for="fallaDesc">Descripción</label>
-              <textarea id="fallaDesc" placeholder="Ej: la pantalla parpadea y se apaga sola después de unos minutos." required></textarea>
-              <span class="hint">Cuantos más detalles des, más rápido podemos resolverlo.</span>
-            </div>
-          </div>
-          <div class="modal-actions" style="justify-content:flex-start;margin-top:.3rem;">
-            <button type="submit" class="btn btn-primary">Enviar reporte</button>
-          </div>
-        </form>
-      </div>
-
-      <div class="card">
-        <div class="card-header"><div><h3>¿Qué pasa después?</h3></div></div>
-        <ul class="alert-box" style="border:none;padding:0;">
-          <li>Se genera un ticket con seguimiento en <b>Mis tickets</b>.</li>
-          <li>El taller revisa el equipo dentro de las 48&nbsp;hs hábiles.</li>
-          <li>Recibís una notificación cuando cambie el estado.</li>
-        </ul>
-      </div>
-    </div>
-  </section>
-
-  <!-- ============ VIEW: MIS TICKETS ============ -->
-  <section class="view" id="view-tickets">
-    <div class="card">
-      <div class="card-header">
-        <div><h3>Mis tickets</h3><p>Seguimiento de fallas y solicitudes que reportaste.</p></div>
-        <button class="btn btn-primary btn-sm" onclick="switchView('falla')">+ Nuevo ticket</button>
-      </div>
-      <table>
-        <thead><tr><th>Ticket</th><th>Notebook</th><th>Motivo</th><th>Estado</th><th>Fecha</th></tr></thead>
-        <tbody id="ticketsTable"></tbody>
-      </table>
-    </div>
-  </section>
-
-  <!-- ============ VIEW: PERFIL ============ -->
-  <section class="view" id="view-perfil">
-    <div class="view-grid">
-      <div class="card">
-        <div class="profile-hero">
-          <div class="avatar-lg" id="profileAvatarLg">--</div>
-          <div>
-            <h3 id="profileNombre">—</h3>
-            <p id="profileRolCurso">—</p>
-          </div>
-        </div>
-        <div class="info-row" data-roles-el="admin"><span class="label">Legajo</span><span class="value" id="profileLegajo">—</span></div>
-        <div class="info-row"><span class="label">Email institucional</span><span class="value" id="profileEmail">—</span></div>
-        <div class="info-row" data-roles-el="alumno"><span class="label">Curso</span><span class="value" id="profileCurso">—</span></div>
-        <p class="hint" style="margin-top:1.3rem;">Tus datos institucionales se cargan desde tu registro y no se pueden modificar desde acá. Si hay un error, contactá a Preceptoría.</p>
-      </div>
-
-      <div class="card">
-        <div class="card-header"><div><h3>Preferencias</h3></div></div>
-        <div class="info-row">
-          <label class="label" for="preferenciasEmail">Notificaciones por email</label>
-          <input type="checkbox" id="preferenciasEmail" onchange="actualizarPreferencias()">
-        </div>
-        <div class="info-row">
-          <label class="label" for="preferenciasRecordatorio">Recordatorio de devolución</label>
-          <select id="preferenciasRecordatorio" class="btn btn-sm" onchange="actualizarPreferencias()">
-            <option value="0">Sin recordatorio</option>
-            <option value="15">15 min antes</option>
-            <option value="30">30 min antes</option>
-            <option value="60">1 hora antes</option>
-          </select>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ============ VIEW: ADMIN · PROFESORES ============ -->
-  <section class="view" id="view-admin-profesores">
-    <div class="view-grid">
-      <div class="card">
-        <div class="card-header"><div><h3>Crear cuenta de profesor</h3><p>Cargá los datos que te dé el profesor para darlo de alta manualmente.</p></div></div>
-        <form id="crearProfesorForm" onsubmit="crearProfesor(event)">
-          <div class="form-grid" style="grid-template-columns:1fr;gap:1rem;">
-            <div class="field">
-              <label for="profNombre">Nombre y apellido</label>
-              <input type="text" id="profNombre" placeholder="Ej: Ana Gómez" required>
-            </div>
-            <div class="field">
-              <label for="profEmail">Correo institucional</label>
-              <input type="email" id="profEmail" placeholder="Ej: agomez@ottokrause.edu.ar" required>
-            </div>
-            <div class="field">
-              <label for="profCatedra">Cátedra / materia</label>
-              <input type="text" id="profCatedra" placeholder="Ej: Programación" required>
-            </div>
-            <div class="field">
-              <label for="profPassword">Contraseña provisoria</label>
-              <input type="password" id="profPassword" placeholder="El profesor la puede cambiar después" required>
-            </div>
-          </div>
-          <div id="crearProfesorError" class="field-error"></div>
-          <div class="modal-actions" style="justify-content:flex-start;margin-top:.3rem;">
-            <button type="submit" class="btn btn-primary">Crear cuenta</button>
-          </div>
-        </form>
-      </div>
-
-      <div class="card">
-        <div class="card-header"><div><h3>Profesores registrados</h3><p>Cuentas de profesor dadas de alta en el sistema.</p></div></div>
-        <table>
-          <thead><tr><th>Nombre</th><th>Cátedra</th><th>Correo</th><th>Legajo</th></tr></thead>
-          <tbody id="profesoresTable"></tbody>
-        </table>
-      </div>
-    </div>
-  </section>
-
-  <!-- ============ VIEW: ADMIN · INVENTARIO ============ -->
-  <section class="view" id="view-admin-inventario">
-    <div class="card">
-      <div class="card-header">
-        <div><h3>Inventario completo</h3><p>Consultá y actualizá el estado operativo de cada notebook. Las acciones de reservas, préstamos, devoluciones y fallas también actualizan este inventario.</p></div>
-        <div class="search-bar-wrap">
-          <input type="text" id="adminSearchInput" class="search-bar" placeholder="Buscar por número o estado" oninput="filterAdminNotebooks()">
-          <select class="btn btn-sm" id="adminFilterEstado" onchange="filterAdminNotebooks()" style="font-weight:500;">
-            <option value="">Todos</option>
-            <option value="disponible">Disponible</option>
-            <option value="prestada">Prestada</option>
-            <option value="mantenimiento">Mantenimiento</option>
-            <option value="pendiente_devolucion">Pendiente devolución</option>
-          </select>
-          <button class="btn btn-primary btn-sm" onclick="openModal('addNotebookModal')">+ Agregar notebook</button>
-        </div>
-      </div>
-      <table>
-        <thead><tr><th>N° de notebook</th><th>Estado</th><th>Ubicación</th><th>En poder de</th><th>Última actualización</th><th>Cambiar estado</th></tr></thead>
-        <tbody id="adminInventoryTable"></tbody>
-      </table>
-    </div>
-  </section>
-
-  <!-- ============ VIEW: ADMIN · DEVOLUCIONES PENDIENTES ============ -->
-  <section class="view" id="view-admin-devoluciones">
-    <div class="card">
-      <div class="card-header">
-        <div><h3>Notificaciones de devolución</h3><p>Confirmá la recepción física del equipo para liberar al alumno de la deuda.</p></div>
-      </div>
-      <div id="devolucionesWrap"></div>
-    </div>
-  </section>
-
-  <!-- ============ VIEW: ADMIN · LOTES DE PROFESORES ============ -->
-  <section class="view" id="view-admin-lotes">
-    <div class="card">
-      <div class="card-header">
-        <div><h3>Solicitudes de lote</h3><p>Reservas de carros completos hechas por profesores, pendientes de aprobación.</p></div>
-      </div>
-      <div id="lotesWrap"></div>
-    </div>
-  </section>
-
-  <!-- ============ VIEW: ADMIN · FALLAS / TICKETS REPORTADOS ============ -->
-  <section class="view" id="view-admin-tickets">
-    <div class="card">
-      <div class="card-header">
-        <div><h3>Fallas reportadas por alumnos y profesores</h3><p>Actualizá el estado del ticket y, si corresponde, el estado físico del equipo.</p></div>
-      </div>
-      <table>
-        <thead><tr><th>Ticket</th><th>Reportado por</th><th>Notebook</th><th>Motivo</th><th>Estado ticket</th><th>Estado equipo</th></tr></thead>
-        <tbody id="adminTicketsTable"></tbody>
-      </table>
-    </div>
-  </section>
-
-  <!-- ============ VIEW: ADMIN · DEVOLUCIONES TARDÍAS / SANCIONES ============ -->
-  <section class="view" id="view-admin-tardanzas">
-    <div class="card" style="margin-bottom:1.5rem;">
-      <div class="card-header">
-        <div><h3>Usuarios con entregas tardías</h3><p>A partir de 3 demoras registradas, el sistema te avisa para que evalúes una sanción.</p></div>
-      </div>
-      <div id="usuariosTardiosWrap"></div>
-    </div>
-
-    <div class="card" style="margin-bottom:1.5rem;">
-      <div class="card-header"><div><h3>Historial por usuario</h3><p>Notebooks retiradas y porcentaje de devoluciones a tiempo, por alumno y profesor.</p></div></div>
-      <table>
-        <thead><tr><th>Usuario</th><th>Rol</th><th>Legajo</th><th>Notebooks retiradas (histórico)</th><th>Devoluciones a tiempo</th></tr></thead>
-        <tbody id="historialPorUsuarioTable"></tbody>
-      </table>
-    </div>
-
-    <div class="card">
-      <div class="card-header"><div><h3>Historial completo de demoras</h3><p>Cada entrega confirmada después de la hora límite queda registrada acá.</p></div></div>
-      <table>
-        <thead><tr><th>Usuario</th><th>Rol</th><th>Notebook</th><th>Fecha</th></tr></thead>
-        <tbody id="historialTardanzasTable"></tbody>
-      </table>
-    </div>
-  </section>
-
-</main>
-</div><!-- /#app-root -->
-
-<!-- ============ MODALS ============ -->
-<div class="modal-overlay" id="normasModal">
-  <div class="modal">
-    <h3>Normas de uso</h3>
-    <p>
-      1. Retirá y devolvé la notebook en el horario reservado.<br>
-      2. No instales software fuera de lo pedido por la cátedra.<br>
-      3. Reportá cualquier falla apenas la detectes.<br>
-      4. El extravío o rotura por mal uso es responsabilidad del alumno.
-    </p>
-    <div class="modal-actions"><button class="btn btn-primary" onclick="closeModal('normasModal')">Entendido</button></div>
-  </div>
-</div>
-
-<div class="modal-overlay" id="logoutModal">
-  <div class="modal">
-    <h3>¿Cerrar sesión?</h3>
-    <p>Vas a salir de tu cuenta de NetMO. Podés volver a ingresar cuando quieras con tu usuario institucional.</p>
-    <div class="modal-actions">
-      <button class="btn" onclick="closeModal('logoutModal')">Cancelar</button>
-      <button class="btn btn-danger-outline" onclick="closeModal('logoutModal');logout();">Cerrar sesión</button>
-    </div>
-  </div>
-</div>
-
-<div class="modal-overlay" id="returnModal">
-  <div class="modal">
-    <h3>Confirmar devolución</h3>
-    <p id="returnModalText">¿Confirmás la devolución de esta notebook?</p>
-    <div class="modal-actions">
-      <button class="btn" onclick="closeModal('returnModal')">Cancelar</button>
-      <button class="btn btn-primary" onclick="confirmarDevolucion()">Confirmar</button>
-    </div>
-  </div>
-</div>
-
-<div class="modal-overlay" id="addNotebookModal">
-  <div class="modal">
-    <h3>Agregar notebook al inventario</h3>
-    <p>Sumá un equipo nuevo al stock del sistema. Los equipos nuevos siempre ingresan como <b>disponibles</b>.</p>
-    <form id="addNotebookForm" onsubmit="agregarNotebook(event)">
-      <div class="form-grid" style="grid-template-columns:1fr;gap:1rem;">
-        <div class="field">
-          <label for="newNbId">N° de notebook</label>
-          <input type="text" id="newNbId" placeholder="Ej: NB-050" required>
-        </div>
-        <div class="field">
-          <label for="newNbUbicacion">Ubicación</label>
-          <select id="newNbUbicacion">
-            <option value="Carro 1">Carro 1</option>
-            <option value="Carro 2">Carro 2</option>
-            <option value="Carro 3">Carro 3</option>
-          </select>
-        </div>
-      </div>
-      <div class="modal-actions">
-        <button type="button" class="btn" onclick="closeModal('addNotebookModal')">Cancelar</button>
-        <button type="submit" class="btn btn-primary">Agregar al stock</button>
-      </div>
-    </form>
-  </div>
-</div>
-
-<div class="modal-overlay" id="rejectLoteModal">
-  <div class="modal">
-    <h3>Rechazar solicitud de lote</h3>
-    <p id="rejectLoteText">¿Seguro que querés rechazar esta solicitud?</p>
-    <div class="modal-actions">
-      <button class="btn" onclick="closeModal('rejectLoteModal')">Cancelar</button>
-      <button class="btn btn-danger-outline" id="rejectLoteConfirmBtn" onclick="">Rechazar</button>
-    </div>
-  </div>
-</div>
-
-<div id="toast-wrap"></div>
-
-<script>
 /* ======================================================================
    ESTADO EN MEMORIA
 ====================================================================== */
 let estadoUsuarios = [
-  {legajo:'2024-0417', nombre:'Teo Prado', email:'tprado@ottokrause.edu.ar', curso:'6° Informática "B"', rol:'alumno', password:'1234', tardanzas:2, baneado:false, retiradas:14, aTiempoPct:92},
-  {legajo:'2024-0528', nombre:'Lucía Fernández', email:'lfernandez@ottokrause.edu.ar', curso:'6° Informática "A"', rol:'alumno', password:'1234', tardanzas:0, baneado:false, retiradas:6, aTiempoPct:100},
-  {legajo:'2024-0639', nombre:'Mateo Rodríguez', email:'mrodriguez@ottokrause.edu.ar', curso:'6° Computación "A"', rol:'alumno', password:'5678', tardanzas:1, baneado:false, retiradas:9, aTiempoPct:97},
-  {legajo:'PRF-010', nombre:'Prof. Ana Gómez', email:'agomez@ottokrause.edu.ar', curso:'Profesor · Cátedra Programación', rol:'profesor', password:'1234', tardanzas:0, baneado:false, retiradas:31, aTiempoPct:100},
-  {legajo:'PRF-011', nombre:'Prof. Diego Suárez', email:'dsuarez@ottokrause.edu.ar', curso:'Profesor · Cátedra Redes', rol:'profesor', password:'2468', tardanzas:0, baneado:false, retiradas:18, aTiempoPct:100},
-  {legajo:'ADM-001', nombre:'Admin NetMO', email:'admin@ottokrause.edu.ar', curso:'Administración', rol:'admin', password:'admin123', tardanzas:0, baneado:false},
+  {legajo:'2024-0417', nombre:'Teo Prado', email:'tprado@ottokrause.edu.ar', rol:'alumno', password:'1234', tardanzas:2, baneado:false, retiradas:14, aTiempoPct:92},
+  {legajo:'2024-0528', nombre:'Lucía Fernández', email:'lfernandez@ottokrause.edu.ar', rol:'alumno', password:'1234', tardanzas:0, baneado:false, retiradas:6, aTiempoPct:100},
+  {legajo:'2024-0639', nombre:'Mateo Rodríguez', email:'mrodriguez@ottokrause.edu.ar', rol:'alumno', password:'5678', tardanzas:1, baneado:false, retiradas:9, aTiempoPct:97},
+  {legajo:'PRF-010', nombre:'Prof. Ana Gómez', email:'agomez@ottokrause.edu.ar', rol:'profesor', password:'1234', tardanzas:0, baneado:false, retiradas:31, aTiempoPct:100},
+  {legajo:'PRF-011', nombre:'Prof. Diego Suárez', email:'dsuarez@ottokrause.edu.ar', rol:'profesor', password:'2468', tardanzas:0, baneado:false, retiradas:18, aTiempoPct:100},
+  {legajo:'ADM-001', nombre:'Admin NetMO', email:'admin@ottokrause.edu.ar', rol:'admin', password:'admin123', tardanzas:0, baneado:false},
 ];
+let profesoresRegistrados = estadoUsuarios.filter(user=>user.rol==='profesor');
 
 let currentUser = null;   // usuario realmente logueado
 let rolActivo = null;     // rol del usuario autenticado
 let authToken = null;
-const API_BASE = window.NETMO_API_URL === null ? null : (window.NETMO_API_URL || 'http://localhost:3000');
-document.getElementById('demoHint').style.display = API_BASE ? 'none' : '';
+const API_BASE = window.NETMO_CONFIG.apiBaseUrl === null ? null : window.NETMO_CONFIG.apiBaseUrl.replace(/\/+$/, '');
+document.getElementById('demoHint').style.display = API_BASE === null ? '' : 'none';
 
 let notebooks = [
   {id:'NB-001', estado:'disponible', ubicacion:'Carro 1', act:'Hace 2 min', prestadoA:null},
@@ -1009,6 +33,7 @@ let stats = {disponibles:0, prestadas:0, mantenimiento:0, total:0};
 let prestamosActivos = {
   '2024-0417': {id:'NB-014', desde:'Hoy, 08:40', vence:'Hoy, 18:00', vencimiento:new Date(Date.now() - 2*60*60*1000), pendiente:false}
 };
+let historialPrestamos = [];
 
 // Notificaciones de devolución pendientes de confirmación del Admin
 let notificacionesDevolucion = [];
@@ -1045,7 +70,7 @@ const pageMeta = {
   falla:    ['Reportar falla', 'Contanos qué problema encontraste con un equipo.'],
   tickets:  ['Mis tickets', 'Seguimiento de todos los reportes que enviaste.'],
   perfil:   ['Mi perfil', 'Tus datos institucionales y preferencias de la cuenta.'],
-  'admin-profesores':   ['Profesores', 'Creá cuentas de profesor con los datos que te den.'],
+  'admin-profesores':   ['Profesores', 'Consultá las cuentas de profesor registradas.'],
   'admin-inventario':   ['Inventario completo', 'Estado de todas las notebooks del sistema.'],
   'admin-devoluciones': ['Devoluciones pendientes', 'Confirmá la recepción física de los equipos.'],
   'admin-lotes':        ['Lotes de profesores', 'Aprobá o rechazá solicitudes de carros completos.'],
@@ -1064,7 +89,7 @@ function switchAuthView(name){
 }
 
 async function apiRequest(path, options={}){
-  if(!API_BASE) throw new Error('La API no está habilitada en el modo demo');
+  if(API_BASE === null) throw new Error('La API no está habilitada en el modo demo');
   const headers = {'Content-Type':'application/json', ...(options.headers||{})};
   if(authToken) headers.Authorization = 'Bearer '+authToken;
   const response = await fetch(API_BASE+path, {...options, headers});
@@ -1102,10 +127,12 @@ async function cargarEstadoAPI(){
     ownerNombre:ticket.owner_nombre || currentUser.nombre, ownerRol:ticket.owner_rol || currentUser.rol
   }));
   if(esAdmin){
-    const [returnsData, lateReturnsData] = await Promise.all([
+    const [returnsData, lateReturnsData, professorsData] = await Promise.all([
       apiRequest('/api/admin/returns'),
-      apiRequest('/api/admin/late-returns')
+      apiRequest('/api/admin/late-returns'),
+      apiRequest('/api/admin/professors')
     ]);
+    profesoresRegistrados = professorsData.professors;
     notificacionesDevolucion = returnsData.returns.map(item=>({
       id:item.id, notebookId:item.notebook, alumnoLegajo:item.legajo, alumnoNombre:item.nombre,
       curso:item.curso, fechaSolicitud:new Date(item.solicitado_at).toLocaleString(), rol:'alumno', returnId:item.id
@@ -1119,8 +146,9 @@ async function cargarEstadoAPI(){
     });
   }
   prestamosActivos = {};
-  loansData.loans.forEach(loan=>{
-    prestamosActivos[currentUser.legajo] = {id:loan.notebook, desde:new Date(loan.retirada_at).toLocaleString(), vence:new Date(loan.vence_at).toLocaleString(), pendiente:loan.estado!=='activo', loanId:loan.id};
+  historialPrestamos = loansData.loans;
+  loansData.loans.filter(loan=>loan.estado !== 'devuelto').forEach(loan=>{
+    if(!prestamosActivos[currentUser.legajo]) prestamosActivos[currentUser.legajo] = {id:loan.notebook, curso:loan.curso, desde:new Date(loan.retirada_at).toLocaleString(), vence:new Date(loan.vence_at).toLocaleString(), pendiente:loan.estado!=='activo', loanId:loan.id};
   });
 }
 
@@ -1163,16 +191,25 @@ async function login(e){
   }
 }
 
-function registrar(e){
+async function registrar(e){
   e.preventDefault();
-  if(API_BASE){
-    document.getElementById('registroError').textContent = 'El registro de usuarios se gestiona desde la administración.';
-    return;
-  }
   const nombre = document.getElementById('regNombre').value.trim();
   const email = document.getElementById('regEmail').value.trim();
-  const curso = document.getElementById('regCurso').value;
   const password = document.getElementById('regPassword').value;
+
+  if(API_BASE){
+    try{
+      await apiRequest('/api/auth/register', {method:'POST', body:JSON.stringify({nombre, email, password})});
+      document.getElementById('registroForm').reset();
+      document.getElementById('registroError').textContent = '';
+      switchAuthView('login');
+      showToast('Registro exitoso. Ahora podés iniciar sesión.', 'success');
+      document.getElementById('loginEmail').value = email;
+    }catch(error){
+      document.getElementById('registroError').textContent = error.message;
+    }
+    return;
+  }
 
   if(estadoUsuarios.some(u=>u.email.toLowerCase()===email.toLowerCase())){
     document.getElementById('registroError').textContent = 'Ya existe una cuenta registrada con ese correo.';
@@ -1180,7 +217,7 @@ function registrar(e){
   }
 
   const legajo = 'U-' + Date.now().toString().slice(-8);
-  estadoUsuarios.push({legajo, nombre, email, curso, rol:'alumno', password, tardanzas:0, baneado:false, retiradas:0, aTiempoPct:null});
+  estadoUsuarios.push({legajo, nombre, email, rol:'profesor', password, tardanzas:0, baneado:false, retiradas:0, aTiempoPct:null});
   document.getElementById('registroForm').reset();
   document.getElementById('registroError').textContent = '';
   switchAuthView('login');
@@ -1188,52 +225,29 @@ function registrar(e){
   document.getElementById('loginEmail').value = email;
 }
 
-/* ======================================================================
-   ADMIN · ALTA MANUAL DE PROFESORES
-====================================================================== */
-function crearProfesor(e){
-  e.preventDefault();
-  if(API_BASE){
-    document.getElementById('crearProfesorError').textContent = 'La gestión de profesores requiere un endpoint de administración.';
-    return;
-  }
-  const nombre = document.getElementById('profNombre').value.trim();
-  const email = document.getElementById('profEmail').value.trim();
-  const catedra = document.getElementById('profCatedra').value.trim();
-  const password = document.getElementById('profPassword').value;
-  const errorBox = document.getElementById('crearProfesorError');
-
-  if(estadoUsuarios.some(u=>u.email.toLowerCase()===email.toLowerCase())){
-    errorBox.textContent = 'Ya existe una cuenta registrada con ese correo.';
-    return;
-  }
-
-  const legajo = 'PRF-' + Date.now().toString().slice(-6);
-  const curso = 'Profesor · Cátedra ' + catedra;
-  estadoUsuarios.push({legajo, nombre, email, curso, rol:'profesor', password, tardanzas:0, baneado:false, retiradas:0, aTiempoPct:null});
-  document.getElementById('crearProfesorForm').reset();
-  errorBox.textContent = '';
-  renderProfesoresTable();
-  showToast(`Cuenta creada para ${nombre}. Ya puede iniciar sesión con ese correo.`, 'success');
-}
-
 function renderProfesoresTable(){
   const tbody = document.getElementById('profesoresTable');
   if(!tbody) return;
-  const profesores = estadoUsuarios.filter(u=>u.rol==='profesor');
+  const query = (document.getElementById('profesoresSearchInput')?.value || '').trim().toLowerCase();
+  const profesores = profesoresRegistrados.filter(profesor=>
+    [profesor.nombre, profesor.email, profesor.legajo].some(value=>String(value || '').toLowerCase().includes(query))
+  );
   if(profesores.length===0){
-    tbody.innerHTML = `<tr><td colspan="4"><div class="empty-state">
-      <div class="glyph">🧑‍🏫</div><h4>Todavía no hay profesores cargados</h4><p>Usá el formulario para crear la primera cuenta.</p>
+    tbody.innerHTML = `<tr><td colspan="3"><div class="empty-state">
+      <div class="glyph">🧑‍🏫</div><h4>No hay profesores que coincidan</h4><p>Probá con otro nombre, correo o legajo.</p>
     </div></td></tr>`;
     return;
   }
   tbody.innerHTML = profesores.map(p=>`
     <tr>
       <td>${p.nombre}</td>
-      <td>${p.curso.replace('Profesor · Cátedra ', '')}</td>
       <td>${p.email}</td>
       <td class="mono">${p.legajo}</td>
     </tr>`).join('');
+}
+
+function filterProfesores(){
+  renderProfesoresTable();
 }
 
 function iniciarSesion(){
@@ -1345,7 +359,7 @@ function switchView(name){
   window.scrollTo({top:0, behavior:'smooth'});
 
   if(name==='inicio' && rolActivo!=='admin') renderMiActividad();
-  if(name==='prestamos') renderPrestamoActivo();
+  if(name==='prestamos'){ renderPrestamoActivo(); renderHistorialPrestamos(); }
   if(name==='reservas'){ renderReservas(); toggleProfesorUI(); }
   if(name==='tickets') renderTicketsPropios();
   if(name==='perfil') renderPerfil();
@@ -1361,6 +375,7 @@ function renderAll(){
   renderHeaderUser();
   renderNotebooks();
   renderPrestamoActivo();
+  renderHistorialPrestamos();
   renderReservas();
   renderTicketsPropios();
   renderPerfil();
@@ -1376,7 +391,7 @@ function renderHeaderUser(){
   if(!currentUser) return;
   document.getElementById('headerAvatar').textContent = getInitials(currentUser.nombre);
   document.getElementById('headerNombre').textContent = currentUser.nombre;
-  document.getElementById('headerRolCurso').textContent = rolLabel[rolActivo] + ' · ' + currentUser.curso;
+  document.getElementById('headerRolCurso').textContent = rolLabel[rolActivo];
 }
 
 function getInitials(nombre){
@@ -1688,6 +703,25 @@ function renderPrestamoActivo(){
     </div>`;
 }
 
+function renderHistorialPrestamos(){
+  const tbody = document.getElementById('historialPrestamosTable');
+  if(!tbody) return;
+  if(historialPrestamos.length===0){
+    tbody.innerHTML = `<tr><td colspan="4"><div class="empty-state">
+      <div class="glyph">📋</div><h4>No tenés historial de préstamos</h4><p>Los préstamos que retires aparecerán acá.</p>
+    </div></td></tr>`;
+    return;
+  }
+  tbody.innerHTML = historialPrestamos.map(loan=>{
+    const retirada = new Date(loan.retirada_at).toLocaleString();
+    const devuelta = loan.devuelta_at ? new Date(loan.devuelta_at).toLocaleString() : '—';
+    const demorada = loan.devuelta_at && new Date(loan.devuelta_at) > new Date(loan.vence_at);
+    const label = loan.estado==='devuelto' ? (demorada ? 'Devuelta con demora' : 'Devuelta a tiempo') : (loan.estado==='devolucion_pendiente' ? 'Devolución pendiente' : 'Préstamo activo');
+    const badge = loan.estado==='devuelto' ? (demorada ? 'badge-vencido' : 'badge-resuelto') : (loan.estado==='devolucion_pendiente' ? 'badge-pendiente_devolucion' : 'badge-prestada');
+    return `<tr><td class="mono">${loan.notebook}</td><td>${retirada}</td><td>${devuelta}</td><td><span class="badge ${badge}">${label}</span></td></tr>`;
+  }).join('');
+}
+
 function openReturnModal(){
   const prestamo = prestamosActivos[currentUser.legajo];
   document.getElementById('returnModalText').textContent = `¿Confirmás que estás devolviendo físicamente la notebook ${prestamo.id}? Un administrador deberá confirmar la recepción antes de que quede liberada.`;
@@ -1718,7 +752,7 @@ async function confirmarDevolucion(){
     notebookId: prestamo.id,
     alumnoLegajo: currentUser.legajo,
     alumnoNombre: currentUser.nombre,
-    curso: currentUser.curso,
+    curso: prestamosActivos[currentUser.legajo]?.curso || 'Curso no informado',
     fechaSolicitud: 'Recién',
     solicitadoEn: new Date(),
     vencimiento: prestamo.vencimiento || null,
@@ -1848,10 +882,10 @@ function validarFechaHora(fechaStr, horaStr){
   }
 
   const minutosDelDia = hh*60+mm;
-  const minInicio = diaSemana===5 ? 9*60+30 : 7*60+45;
-  const minFin = 17*60+30;
-  if(minutosDelDia < minInicio || minutosDelDia > minFin){
-    return {valid:false, msg:diaSemana===5 ? 'Los viernes el retiro debe ser entre las 09:30 y las 17:30.' : 'El horario de retiro debe ser entre las 07:45 y las 17:30.'};
+  const dentroDeHorario = (minutosDelDia >= 8*60 && minutosDelDia <= 12*60+10)
+    || (minutosDelDia >= 13*60+30 && minutosDelDia <= 17*60+30);
+  if(!dentroDeHorario){
+    return {valid:false, msg:'Solo se puede reservar de 08:00 a 12:10 y de 13:30 a 17:30.'};
   }
 
   return {valid:true, msg:''};
@@ -2053,8 +1087,10 @@ function renderLotes(){
   if(!wrap) return;
   const badge = document.getElementById('lotesBadge');
   const pendientes = reservas.filter(r=>r.tipo==='lote' && r.estado==='pendiente_aprobacion');
+  const aprobadas = reservas.filter(r=>r.tipo==='lote' && r.estado==='aprobada');
+  const individuales = reservas.filter(r=>r.tipo==='individual' && r.estado==='confirmada');
 
-  if(pendientes.length===0){
+  if(pendientes.length===0 && aprobadas.length===0 && individuales.length===0){
     wrap.innerHTML = `<div class="empty-state">
       <div class="glyph">👥</div>
       <h4>No hay solicitudes de lote pendientes</h4>
@@ -2063,7 +1099,7 @@ function renderLotes(){
     badge.style.display = 'none';
     return;
   }
-  badge.style.display = 'inline-flex';
+  badge.style.display = pendientes.length ? 'inline-flex' : 'none';
   badge.textContent = pendientes.length;
 
   wrap.innerHTML = pendientes.map(r=>`
@@ -2075,6 +1111,22 @@ function renderLotes(){
       </div>
       <button class="btn btn-sm btn-success-outline" style="margin-right:.5rem;" onclick="aprobarLote('${r.id}')">Aprobar</button>
       <button class="btn btn-sm btn-danger-outline" onclick="pedirRechazoLote('${r.id}')">Rechazar</button>
+    </div>`).join('') + aprobadas.map(r=>`
+    <div class="action-card" style="cursor:default;margin-bottom:.8rem;">
+      <div class="action-icon" style="background:var(--green-bg);color:var(--green-text);">📦</div>
+      <div class="action-info">
+        <h4>${r.curso} · ${r.cantidad} equipos</h4>
+        <p>${r.ownerNombre} · ${formatFecha(r.fecha)} ${r.hora} — Retiro aprobado</p>
+      </div>
+      <button class="btn btn-sm btn-primary" onclick="registrarRetiro('${r.id}')">Registrar retiro</button>
+    </div>`).join('') + individuales.map(r=>`
+    <div class="action-card" style="cursor:default;margin-bottom:.8rem;">
+      <div class="action-icon" style="background:var(--blue-bg);color:var(--blue-text);">📅</div>
+      <div class="action-info">
+        <h4>${r.ownerNombre} · ${r.cantidad}</h4>
+        <p>${formatFecha(r.fecha)} ${r.hora} — Reserva confirmada</p>
+      </div>
+      <button class="btn btn-sm btn-primary" onclick="registrarRetiro('${r.id}')">Registrar retiro</button>
     </div>`).join('');
 }
 
@@ -2091,21 +1143,35 @@ async function aprobarLote(id){
     return;
   }
   r.estado = 'aprobada';
+  renderLotes();
+  renderReservas();
+  showToast(`Lote de ${r.curso} aprobado. Falta registrar el retiro físico.`, 'success');
+}
 
-  let asignadas = 0;
-  (r.notebookIds || []).forEach(notebookId=>{
+async function registrarRetiro(id){
+  const r = reservas.find(reserva=>reserva.id===id);
+  if(!r) return;
+  if(authToken){
+    try{
+      const result = await apiRequest(`/api/admin/reservations/${id}/checkout`, {method:'POST'});
+      await cargarEstadoAPI();
+      renderAll();
+      showToast(`${result.loansCreated || 0} préstamo(s) creado(s).`, 'success');
+    }catch(error){ showToast(error.message, 'warn'); }
+    return;
+  }
+  const notebookIds = r.notebookIds || [];
+  notebookIds.forEach(notebookId=>{
     const nb = notebooks.find(item=>item.id===notebookId);
-    if(nb && nb.estado==='reservada'){
-      nb.estado='prestada'; nb.ubicacion='—'; nb.act='Recién'; nb.prestadoA = r.ownerLegajo+' · '+r.curso;
-      asignadas++;
-    }
+    if(nb){ nb.estado='prestada'; nb.ubicacion='—'; nb.act='Recién'; nb.prestadoA = r.ownerLegajo+' · '+r.curso; }
   });
-
+  r.estado = 'retirada';
+  prestamosActivos[r.ownerLegajo] = {id:notebookIds[0], curso:r.curso, desde:'Recién', vence:'Hoy', pendiente:false};
   renderNotebooks();
   renderAdminInventario();
   renderLotes();
   renderReservas();
-  showToast(`Lote de ${r.curso} aprobado (${asignadas} equipos asignados).`, 'success');
+  showToast('Retiro registrado y préstamo creado.', 'success');
 }
 
 let pendingRejectId = null;
@@ -2379,10 +1445,9 @@ function renderPerfil(){
   if(!currentUser) return;
   document.getElementById('profileAvatarLg').textContent = getInitials(currentUser.nombre);
   document.getElementById('profileNombre').textContent = currentUser.nombre;
-  document.getElementById('profileRolCurso').textContent = rolLabel[currentUser.rol] + ' · ' + currentUser.curso;
+  document.getElementById('profileRolCurso').textContent = rolLabel[currentUser.rol];
   document.getElementById('profileLegajo').textContent = currentUser.legajo;
   document.getElementById('profileEmail').textContent = currentUser.email;
-  document.getElementById('profileCurso').textContent = currentUser.curso;
   const preferencias = currentUser.preferencias || {email:true, recordatorio:'30'};
   document.getElementById('preferenciasEmail').checked = preferencias.email;
   document.getElementById('preferenciasRecordatorio').value = preferencias.recordatorio;
@@ -2445,6 +1510,3 @@ document.getElementById('resFecha').max = `${today.getFullYear()}-12-31`;
   if(!saved){ saved = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; }
   applyTheme(saved);
 })();
-</script>
-</body>
-</html>

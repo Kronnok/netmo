@@ -4,7 +4,7 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE TYPE user_role AS ENUM ('alumno', 'profesor', 'admin');
 CREATE TYPE notebook_status AS ENUM ('disponible', 'prestada', 'mantenimiento', 'pendiente_devolucion');
 CREATE TYPE reservation_type AS ENUM ('individual', 'lote');
-CREATE TYPE reservation_status AS ENUM ('confirmada', 'pendiente_aprobacion', 'aprobada', 'rechazada', 'cancelada');
+CREATE TYPE reservation_status AS ENUM ('confirmada', 'pendiente_aprobacion', 'aprobada', 'retirada', 'rechazada', 'cancelada');
 CREATE TYPE loan_status AS ENUM ('activo', 'devolucion_pendiente', 'devuelto');
 CREATE TYPE ticket_status AS ENUM ('abierto', 'progreso', 'resuelto');
 
@@ -13,7 +13,6 @@ CREATE TABLE users (
   legajo VARCHAR(32) NOT NULL UNIQUE,
   nombre VARCHAR(120) NOT NULL,
   email CITEXT NOT NULL UNIQUE,
-  curso VARCHAR(120) NOT NULL,
   rol user_role NOT NULL,
   password_hash TEXT NOT NULL,
   baneado BOOLEAN NOT NULL DEFAULT FALSE,
@@ -87,10 +86,10 @@ BEGIN
   IF weekday > 5 THEN
     RAISE EXCEPTION 'Las reservas solo pueden hacerse de lunes a viernes';
   END IF;
-    IF (weekday = 5 AND (local_time < TIME '09:30' OR local_time > TIME '17:30'))
-      OR (weekday <> 5 AND (local_time < TIME '07:45' OR local_time > TIME '17:30')) THEN
-    RAISE EXCEPTION 'El horario de retiro no esta disponible';
-  END IF;
+    IF NOT ((local_time >= TIME '08:00' AND local_time <= TIME '12:10')
+        OR (local_time >= TIME '13:30' AND local_time <= TIME '17:30')) THEN
+      RAISE EXCEPTION 'Solo se pueden hacer reservas de 08:00 a 12:10 y de 13:30 a 17:30';
+    END IF;
   RETURN NEW;
 END;
 $$;
@@ -104,6 +103,7 @@ CREATE TABLE loans (
   notebook_id BIGINT NOT NULL REFERENCES notebooks(id),
   user_id BIGINT NOT NULL REFERENCES users(id),
   reservation_id BIGINT REFERENCES reservations(id),
+  curso VARCHAR(120),
   retirada_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   vence_at TIMESTAMPTZ NOT NULL,
   devuelta_at TIMESTAMPTZ,

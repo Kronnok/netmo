@@ -1,69 +1,47 @@
 # NetMO
 
-Sistema web para gestionar el préstamo, reserva y mantenimiento de notebooks de la escuela.
-Arquitectura desacoplada: frontend en HTML/CSS/JS, API REST en Node.js y base de datos PostgreSQL en Docker.
-
-## Estructura
-
-- `index.html`: frontend (consume la API con `fetch`)
-- `backend/`: API REST (Node.js + pg)
-- `database/`: esquema SQL, datos de prueba y configuración de Docker
-- `specs/`: especificaciones técnicas
+Sistema web para gestionar préstamos, reservas y mantenimiento de notebooks.
+El frontend es HTML, CSS y JavaScript nativo; la API usa Node.js CommonJS y HTTP
+nativo, organizada en rutas, controladores, servicios y acceso a datos. La
+persistencia es PostgreSQL 16.
 
 ## Requisitos
 
-- Docker Desktop
-- Python 3 (solo para servir el frontend) o cualquier servidor estático
+- Node.js 22 o superior.
+- PostgreSQL 16 accesible mediante `DATABASE_URL`.
+- `pg_dump` y `pg_restore` solo si se usan las copias de seguridad opcionales.
 
-## Instalación
+## Desarrollo local
 
-```sh
-git clone https://github.com/Kronnok/netmo.git
-cd netmo/database
-cp .env.example .env
-```
+1. Copiá `.env.example` a `.env` y completá la URL de PostgreSQL y las cuatro
+   contraseñas privadas requeridas por el seed.
+2. Instalá y prepará la base:
 
-Editá `.env` y definí contraseñas propias para `POSTGRES_PASSWORD` y las cuatro `NETMO_SEED_*_PASSWORD`.
+   ```sh
+   npm ci --prefix backend
+   npm run db:migrate
+   npm run db:seed
+   ```
 
-## Levantar el sistema
+3. Iniciá la API y el frontend:
 
-Base de datos y API:
+   ```sh
+   npm run dev
+   ```
 
-```sh
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
-curl http://localhost:3000/health
-```
+   El servidor usa el puerto `3000` por defecto. La configuración de frontend
+   está en `frontend/config.js`; el modo demo se activa únicamente al establecer
+   `apiBaseUrl: null`.
 
-Frontend (desde la carpeta `database`):
+## Despliegue
 
-```sh
-python -m http.server 5500 --directory ..
-```
+Render aloja la API y Neon PostgreSQL; Cloudflare Pages o Netlify sirven el
+frontend estático. Consultá [DEPLOY.md](./DEPLOY.md) para configurar las
+variables, los orígenes CORS y las plataformas.
 
-Abrí http://localhost:5500/index.html
+## Base de datos
 
-## Variables de entorno
-
-Ver `database/.env.example`. El archivo `.env` real no se sube al repositorio.
-
-## Usuarios de prueba
-
-Definidos en `database/seed.sql`; las contraseñas son las que cargaste en `.env`.
-
-| Rol | Email |
-|---|---|
-| Alumno | tprado@ottokrause.edu.ar |
-| Profesor | agomez@ottokrause.edu.ar |
-| Admin | admin@ottokrause.edu.ar |
-
-## Detener
-
-```sh
-docker compose down
-```
-
-No uses `docker compose down -v`: borra los datos de la base.
-
-## Equipo
-
-- Agueda Munive, Martin Cosmelli, Franco Bravo, Marcos Lens y Teo Prado. Todos desarrolladores
+El esquema, las migraciones y los datos iniciales se encuentran en `database/`.
+`npm run db:seed` registra la aplicación del seed para evitar ejecutarlo una
+segunda vez. Las credenciales se suministran mediante variables de entorno y no
+deben guardarse en el repositorio.

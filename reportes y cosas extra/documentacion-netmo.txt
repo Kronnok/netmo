@@ -460,7 +460,7 @@ El cambio de montaje no migra automaticamente ese volumen ni sus registros.
 
 Para iniciar el sistema en PowerShell:
 
-  $env:POSTGRES_PASSWORD="una-clave-segura"
+  $env:POSTGRES_PASSWORD="[configure privately]"
   docker compose -f database/docker-compose.yml up -d --build
 
 La API local queda disponible en:

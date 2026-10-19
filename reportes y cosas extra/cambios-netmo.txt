@@ -56,4 +56,3 @@ Tests previstos:
 - Devoluciones normales y tardías.
 - Reportes de fallas.
 - Persistencia de datos.
-- Accesibilidad y vista móvil.

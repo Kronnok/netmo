@@ -69,7 +69,7 @@ Este test debe realizarse en una computadora que tenga Docker instalado.
 
 En PowerShell:
 
-  $env:POSTGRES_PASSWORD="una-clave-segura"
+  $env:POSTGRES_PASSWORD="[configure privately]"
   docker compose -f database/docker-compose.yml up -d --build
 
 Luego se debe comprobar:

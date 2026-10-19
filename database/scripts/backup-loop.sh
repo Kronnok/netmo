@@ -1,8 +1,8 @@
 #!/bin/sh
 set -eu
 
-BACKUP_DIR=${BACKUP_DIR:-/backups}
-BACKUP_DATABASE=${BACKUP_DATABASE:-${POSTGRES_DB:-netmo}}
+BACKUP_DIR=${BACKUP_DIR:-database/backups}
+BACKUP_DATABASE=${BACKUP_DATABASE:-PostgreSQL}
 BACKUP_INTERVAL_SECONDS=${BACKUP_INTERVAL_SECONDS:-86400}
 BACKUP_TIMEZONE=${BACKUP_TIMEZONE:-America/Argentina/Buenos_Aires}
 BACKUP_ONCE=${BACKUP_ONCE:-0}
@@ -11,8 +11,7 @@ BACKUP_RETRY_DELAY_SECONDS=${BACKUP_RETRY_DELAY_SECONDS:-2}
 BACKUP_LOCK_DIR=${BACKUP_LOCK_DIR:-${BACKUP_DIR}/.netmo-backup.lock}
 BACKUP_LOCK_MAX_AGE_SECONDS=${BACKUP_LOCK_MAX_AGE_SECONDS:-7200}
 
-: "${POSTGRES_USER:?POSTGRES_USER es obligatorio}"
-: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD es obligatorio}"
+: "${DATABASE_URL:?Definí DATABASE_URL antes de generar backups}"
 
 case "$BACKUP_INTERVAL_SECONDS" in
   ''|*[!0-9]*)
@@ -109,13 +108,7 @@ backup_once() {
   dump_succeeded=0
   retry=1
   while [ "$retry" -le "$BACKUP_CONNECTION_RETRIES" ]; do
-    if PGPASSWORD="$POSTGRES_PASSWORD" pg_dump \
-      --format=custom \
-      --host="${POSTGRES_HOST:-postgres}" \
-      --port="${POSTGRES_PORT:-5432}" \
-      --username="$POSTGRES_USER" \
-      --dbname="$BACKUP_DATABASE" \
-      --file="$temp_file"; then
+    if pg_dump --format=custom --dbname="$DATABASE_URL" --file="$temp_file"; then
       dump_succeeded=1
       break
     fi
