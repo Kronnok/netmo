@@ -1,3 +1,3 @@
 window.NETMO_CONFIG = {
-  apiBaseUrl: ''
+  apiBaseUrl: 'https://netmo-api.onrender.com'
 };
