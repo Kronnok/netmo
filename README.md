@@ -14,7 +14,9 @@ persistencia es PostgreSQL 16.
 ## Desarrollo local
 
 1. Copiá `.env.example` a `.env` y completá la URL de PostgreSQL y las cuatro
-   contraseñas privadas requeridas por el seed.
+   contraseñas privadas requeridas por el seed. En desarrollo, si `JWT_SECRET`
+   está vacío, la API genera un secreto aleatorio temporal al iniciar; en
+   producción es obligatorio.
 2. Instalá y prepará la base:
 
    ```sh
@@ -42,6 +44,8 @@ variables, los orígenes CORS y las plataformas.
 ## Base de datos
 
 El esquema, las migraciones y los datos iniciales se encuentran en `database/`.
+`npm run db:migrate` aplica, entre otras, `002-business-timezone.sql`, que fija
+las reglas de reservas a `America/Argentina/Buenos_Aires` en PostgreSQL.
 `npm run db:seed` registra la aplicación del seed para evitar ejecutarlo una
 segunda vez. Las credenciales se suministran mediante variables de entorno y no
 deben guardarse en el repositorio.

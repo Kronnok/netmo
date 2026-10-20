@@ -18,36 +18,39 @@ function corsHeaders(request) {
   const headers = {
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'Referrer-Policy': 'no-referrer',
     Vary: 'Origin'
   };
   if (origin && allowed) headers['Access-Control-Allow-Origin'] = config.corsOrigins.includes('*') ? '*' : origin;
   return headers;
 }
 
-function serveFrontend(response, pathname) {
+function serveFrontend(response, pathname, headers) {
   let relativePath;
   try {
     relativePath = pathname === '/' ? 'index.html' : decodeURIComponent(pathname).slice(1);
   } catch {
-    response.writeHead(400).end();
+    response.writeHead(400, headers).end();
     return;
   }
   const filePath = path.resolve(frontendDir, relativePath);
   if (!filePath.startsWith(`${frontendDir}${path.sep}`)) {
-    response.writeHead(403).end();
+    response.writeHead(403, headers).end();
     return;
   }
   const contentType = contentTypes[path.extname(filePath)];
   if (!contentType) {
-    response.writeHead(404).end();
+    response.writeHead(404, headers).end();
     return;
   }
   fs.readFile(filePath, (error, data) => {
     if (error) {
-      response.writeHead(error.code === 'ENOENT' ? 404 : 500).end();
+      response.writeHead(error.code === 'ENOENT' ? 404 : 500, headers).end();
       return;
     }
-    response.writeHead(200, { 'Content-Type': contentType });
+    response.writeHead(200, { ...headers, 'Content-Type': contentType });
     response.end(data);
   });
 }
@@ -71,7 +74,7 @@ const server = http.createServer((request, response) => {
     return;
   }
   if (config.serveFrontend && request.method === 'GET' && !url.pathname.startsWith('/api/')) {
-    serveFrontend(response, url.pathname);
+    serveFrontend(response, url.pathname, headers);
     return;
   }
   controller.send(response, 404, { error: 'Ruta no encontrada' }, headers);

@@ -1,5 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 
 const envPath = path.resolve(__dirname, '..', '.env');
 if (fs.existsSync(envPath)) {
@@ -17,17 +18,25 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
 }
 
 const nodeEnv = process.env.NODE_ENV || 'development';
+const jwtSecret = process.env.JWT_SECRET || (nodeEnv === 'production' ? null : crypto.randomBytes(32).toString('hex'));
 const corsOrigins = process.env.CORS_ORIGIN
   ? process.env.CORS_ORIGIN.split(',').map((origin) => origin.trim()).filter(Boolean)
   : nodeEnv === 'production' ? [] : ['*'];
 if (nodeEnv === 'production' && corsOrigins.length === 0) {
   throw new Error('CORS_ORIGIN es obligatorio en producción');
 }
+if (nodeEnv === 'production' && !jwtSecret) {
+  throw new Error('JWT_SECRET es obligatorio en producción');
+}
+if (jwtSecret && Buffer.byteLength(jwtSecret, 'utf8') < 32) {
+  throw new Error('JWT_SECRET debe tener al menos 32 bytes');
+}
 
 module.exports = Object.freeze({
   port,
   nodeEnv,
   databaseUrl: process.env.DATABASE_URL,
+  jwtSecret,
   corsOrigins,
   serveFrontend: nodeEnv !== 'production'
 });

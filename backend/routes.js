@@ -4,6 +4,7 @@ const routes = [
   ['POST', /^\/api\/auth\/register$/, 'register'],
   ['GET', /^\/api\/me$/, 'me'],
   ['GET', /^\/api\/admin\/professors$/, 'professors'],
+  ['GET', /^\/api\/admin\/users$/, 'users'],
   ['GET', /^\/api\/preferences$/, 'preferences'],
   ['PATCH', /^\/api\/preferences$/, 'updatePreferences'],
   ['GET', /^\/api\/notebooks$/, 'notebooks'],
@@ -13,6 +14,7 @@ const routes = [
   ['DELETE', /^\/api\/reservations\/([^/]+)$/, 'cancelReservation', ['code']],
   ['GET', /^\/api\/admin\/reservations$/, 'adminReservations'],
   ['POST', /^\/api\/admin\/reservations\/(\d+)\/approve$/, 'approveReservation', ['id']],
+  ['POST', /^\/api\/admin\/reservations\/(\d+)\/reject$/, 'rejectReservation', ['id']],
   ['POST', /^\/api\/admin\/reservations\/(\d+)\/checkout$/, 'checkoutReservation', ['id']],
   ['GET', /^\/api\/loans$/, 'loans'],
   ['POST', /^\/api\/loans\/(\d+)\/return$/, 'requestReturn', ['id']],
@@ -23,7 +25,8 @@ const routes = [
   ['POST', /^\/api\/tickets$/, 'createTicket'],
   ['PATCH', /^\/api\/tickets\/([^/]+)$/, 'updateTicket', ['code']],
   ['GET', /^\/api\/admin\/late-returns$/, 'lateReturns'],
-  ['PATCH', /^\/api\/admin\/users\/([^/]+)$/, 'updateUser', ['legajo']]
+  ['PATCH', /^\/api\/admin\/users\/([^/]+)$/, 'updateUser', ['legajo']],
+  ['PATCH', /^\/api\/admin\/users\/([^/]+)\/rol$/, 'updateUserRole', ['legajo']]
 ];
 
 function resolve(method, pathname) {

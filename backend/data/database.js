@@ -5,6 +5,7 @@ if (!config.databaseUrl) throw new Error('DATABASE_URL es obligatorio');
 
 const pool = new Pool({
   connectionString: config.databaseUrl,
+  options: '-c timezone=America/Argentina/Buenos_Aires',
   ssl: /localhost|127\.0\.0\.1/.test(new URL(config.databaseUrl).hostname) ? false : { rejectUnauthorized: false }
 });
 
