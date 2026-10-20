@@ -1,7 +1,7 @@
  Deploy gratuito
 
-NetMO se despliega sin Docker ni Nginx: Neon aloja PostgreSQL, Render ejecuta la
-API y Cloudflare Pages o Netlify sirve el frontend estático.
+Neon aloja PostgreSQL, Render ejecuta la API y Cloudflare Pages o Netlify sirve
+el frontend estático.
 
 ## 1. PostgreSQL 16 en Neon
 
@@ -20,6 +20,9 @@ Definí `DATABASE_URL` y las cuatro variables `NETMO_SEED_*_PASSWORD` de
 esa versión ya está aplicada. Rotá cualquier credencial que haya sido expuesta
 antes de usar la base en producción.
 
+`npm run db:migrate` también aplica `002-business-timezone.sql`, que actualiza
+los triggers de reservas para usar `America/Argentina/Buenos_Aires`.
+
 ## 2. API en Render
 
 Importá el repositorio en Render usando [render.yaml](./render.yaml). En el
@@ -28,10 +31,14 @@ servicio completá:
 - `DATABASE_URL`: cadena de Neon con `sslmode=require`.
 - `CORS_ORIGIN`: origen exacto de Pages o Netlify (sin rutas), por ejemplo
   `https://netmo.pages.dev`.
+- `JWT_SECRET`: secreto de firma HMAC de los tokens, válidos durante 12 horas.
+  `render.yaml` solicita que Render lo genere automáticamente; conservá ese
+  valor como secreto y no lo copies al repositorio.
 
 Render publica la API y comprueba `/health`. Configurá `DATABASE_URL` y
-`CORS_ORIGIN` como variables privadas del servicio. Después de cambiar el
-esquema, volvé a ejecutar `npm run db:migrate` desde un entorno seguro.
+`CORS_ORIGIN` como variables privadas del servicio; `JWT_SECRET` se genera en
+Render a partir del manifiesto. Después de cambiar el esquema, volvé a ejecutar
+`npm run db:migrate` desde un entorno seguro.
 
 ## 3. Frontend estático
 

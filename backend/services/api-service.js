@@ -1,6 +1,7 @@
 const crypto = require('node:crypto');
 const db = require('../data/database');
 const { AppError } = require('../errors');
+const { parseBusinessDateTime, reservationTimeError } = require('./business-time');
 
 function requireAdmin(user, message) {
   if (user.rol !== 'admin') throw new AppError(message, 403);
@@ -9,13 +10,10 @@ function requireAdmin(user, message) {
 function reservationPayload(body, user) {
   const type = body.tipo || 'individual';
   if (!['individual', 'lote'].includes(type)) throw new AppError('Tipo de reserva inválido', 400);
-  const retiroAt = new Date(body.retiroAt);
-  if (Number.isNaN(retiroAt.getTime())) throw new AppError('retiroAt inválido', 400);
-  if (retiroAt.getFullYear() !== new Date().getFullYear()) throw new AppError('La reserva debe ser del año actual', 400);
-  const minutes = retiroAt.getHours() * 60 + retiroAt.getMinutes();
-  if (!((minutes >= 480 && minutes <= 730) || (minutes >= 810 && minutes <= 1050))) {
-    throw new AppError('Solo se pueden hacer reservas de 08:00 a 12:10 y de 13:30 a 17:30', 400);
-  }
+  const retiroAt = parseBusinessDateTime(body.retiroAt);
+  if (!retiroAt) throw new AppError('retiroAt inválido', 400);
+  const timeError = reservationTimeError(retiroAt);
+  if (timeError) throw new AppError(timeError, 400);
   const quantity = Number(body.cantidad);
   if (!Number.isInteger(quantity) || quantity < 1 || quantity > 40) throw new AppError('Cantidad inválida', 400);
   if (user.rol === 'alumno' && quantity !== 1) throw new AppError('Los alumnos solo pueden pedir una notebook', 400);
@@ -44,6 +42,11 @@ const actions = {
     const result = await db.query("SELECT legajo, nombre, email FROM users WHERE rol = 'profesor' ORDER BY nombre");
     return { professors: result.rows };
   },
+  async users(_body, user) {
+    requireAdmin(user, 'Solo admin puede consultar usuarios');
+    const result = await db.query("SELECT legajo, nombre, email, rol, baneado FROM users WHERE rol <> 'admin' ORDER BY nombre");
+    return { users: result.rows };
+  },
   async preferences(_body, user) {
     const result = await db.query('SELECT email_notifications AS email, return_reminder_minutes AS recordatorio FROM user_preferences WHERE user_id = $1', [user.id]);
     return { preferences: result.rows[0] || { email: true, recordatorio: 30 } };
@@ -68,7 +71,7 @@ const actions = {
   },
   async updateNotebook(body, user, { code }) {
     requireAdmin(user, 'Solo admin puede cambiar estados');
-    if (!['disponible', 'prestada', 'mantenimiento', 'pendiente_devolucion'].includes(body.estado)) {
+    if (!['disponible', 'mantenimiento'].includes(body.estado)) {
       throw new AppError('Estado de notebook inválido', 400);
     }
     const result = await db.query(`UPDATE notebooks SET estado = $1,
@@ -136,6 +139,16 @@ const actions = {
     if (!result.rowCount) throw new AppError('Solicitud de lote no encontrada', 404);
     return { message: 'Lote aprobado' };
   },
+  async rejectReservation(_body, user, { id }) {
+    requireAdmin(user, 'Solo admin puede rechazar reservas');
+    return db.transaction(async (client) => {
+      const reservation = await client.query(`UPDATE reservations SET estado = 'rechazada'
+        WHERE id = $1 AND tipo = 'lote' AND estado IN ('pendiente_aprobacion', 'aprobada') RETURNING id`, [id]);
+      if (!reservation.rowCount) throw new AppError('Solicitud de lote no encontrada o no rechazable', 404);
+      await client.query('UPDATE reservation_notebooks SET active = FALSE WHERE reservation_id = $1 AND active', [id]);
+      return { message: 'Lote rechazado' };
+    });
+  },
   async checkoutReservation(_body, user, { id }) {
     requireAdmin(user, 'Solo admin puede registrar retiros');
     return db.transaction(async (client) => {
@@ -183,6 +196,7 @@ const actions = {
     return { returns: result.rows };
   },
   async confirmReturn(_body, user, { id }) {
+    requireAdmin(user, 'Solo admin puede confirmar devoluciones');
     return db.transaction(async (client) => {
       const result = await client.query(`UPDATE returns SET estado = 'confirmada', confirmado_at = now(), confirmado_por = $1
         WHERE id = $2 AND estado = 'pendiente' RETURNING loan_id`, [user.id, id]);
@@ -240,6 +254,16 @@ const actions = {
     requireAdmin(user, 'Solo admin puede suspender usuarios');
     const result = await db.query(`UPDATE users SET baneado = $1 WHERE legajo = $2 AND rol <> 'admin'
       RETURNING legajo, nombre, baneado`, [Boolean(body.baneado), legajo]);
+    if (!result.rowCount) throw new AppError('Usuario no encontrado o no modificable', 404);
+    return { user: result.rows[0] };
+  },
+  async updateUserRole(body, user, { legajo }) {
+    requireAdmin(user, 'Solo admin puede cambiar roles');
+    if (!['alumno', 'profesor'].includes(body.rol)) {
+      throw new AppError('Rol inválido', 400);
+    }
+    const result = await db.query(`UPDATE users SET rol = $1 WHERE legajo = $2 AND rol <> 'admin'
+      RETURNING legajo, nombre, email, rol`, [body.rol, legajo]);
     if (!result.rowCount) throw new AppError('Usuario no encontrado o no modificable', 404);
     return { user: result.rows[0] };
   }

@@ -9,7 +9,8 @@ let estadoUsuarios = [
   {legajo:'PRF-011', nombre:'Prof. Diego Suárez', email:'dsuarez@ottokrause.edu.ar', rol:'profesor', password:'2468', tardanzas:0, baneado:false, retiradas:18, aTiempoPct:100},
   {legajo:'ADM-001', nombre:'Admin NetMO', email:'admin@ottokrause.edu.ar', rol:'admin', password:'admin123', tardanzas:0, baneado:false},
 ];
-let profesoresRegistrados = estadoUsuarios.filter(user=>user.rol==='profesor');
+let usuariosRegistrados = estadoUsuarios.filter(user=>user.rol!=='admin');
+let usuariosConTardanzas = [];
 
 let currentUser = null;   // usuario realmente logueado
 let rolActivo = null;     // rol del usuario autenticado
@@ -58,10 +59,28 @@ let ticketSeq = 15;
 
 const badgeClass = {disponible:'badge-disponible', prestada:'badge-prestada', reservada:'badge-pendiente_devolucion', mantenimiento:'badge-mantenimiento', pendiente_devolucion:'badge-pendiente_devolucion'};
 const badgeLabel = {disponible:'Disponible', prestada:'Prestada', reservada:'Reservada', mantenimiento:'En mantenimiento', pendiente_devolucion:'Pend. devolución'};
-const estadosNotebookManuales = ['disponible','prestada','mantenimiento','pendiente_devolucion'];
+const estadosNotebookManuales = ['disponible','mantenimiento'];
 const ticketBadgeClass = {abierto:'badge-abierto', progreso:'badge-progreso', resuelto:'badge-resuelto'};
 const ticketBadgeLabel = {abierto:'Abierto', progreso:'En progreso', resuelto:'Resuelto'};
 const rolLabel = {alumno:'Alumno', profesor:'Profesor', admin:'Administrador'};
+const BUSINESS_TIME_ZONE = 'America/Argentina/Buenos_Aires';
+
+function escapeHtml(value){
+  return String(value ?? '').replace(/[&<>"']/g, character=>({
+    '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'
+  })[character]);
+}
+
+function formatBusinessDateTime(value, options={}){
+  return new Date(value).toLocaleString('es-AR', {timeZone:BUSINESS_TIME_ZONE, ...options});
+}
+
+function businessDateParts(value){
+  return Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
+    timeZone:BUSINESS_TIME_ZONE, year:'numeric', month:'2-digit', day:'2-digit',
+    hour:'2-digit', minute:'2-digit', hourCycle:'h23'
+  }).formatToParts(new Date(value)).map(({type, value:part})=>[type, part]));
+}
 
 const pageMeta = {
   inicio:   ['¡Hola{NOMBRE}!', 'Aquí podés consultar la disponibilidad de notebooks y realizar reservas.'],
@@ -70,7 +89,7 @@ const pageMeta = {
   falla:    ['Reportar falla', 'Contanos qué problema encontraste con un equipo.'],
   tickets:  ['Mis tickets', 'Seguimiento de todos los reportes que enviaste.'],
   perfil:   ['Mi perfil', 'Tus datos institucionales y preferencias de la cuenta.'],
-  'admin-profesores':   ['Profesores', 'Consultá las cuentas de profesor registradas.'],
+  'admin-profesores':   ['Usuarios y roles', 'Consultá las cuentas y asigná los roles habilitados.'],
   'admin-inventario':   ['Inventario completo', 'Estado de todas las notebooks del sistema.'],
   'admin-devoluciones': ['Devoluciones pendientes', 'Confirmá la recepción física de los equipos.'],
   'admin-lotes':        ['Lotes de profesores', 'Aprobá o rechazá solicitudes de carros completos.'],
@@ -109,46 +128,41 @@ async function cargarEstadoAPI(){
   };
   notebooks = notebooksData.notebooks.map(notebook=>({
     id:notebook.id, estado:notebook.estado, ubicacion:notebook.ubicacion,
-    act:notebook.actualizada ? new Date(notebook.actualizada).toLocaleString() : 'Recién',
+    act:notebook.actualizada ? formatBusinessDateTime(notebook.actualizada) : 'Recién',
     prestadoA:notebook.prestado_a || null
   }));
   reservas = reservationsData.reservations.map(reserva=>{
-    const retiro = new Date(reserva.retiro_at);
+    const retiro = businessDateParts(reserva.retiro_at);
     return {
       id:reserva.id || reserva.codigo, ownerLegajo:reserva.legajo || currentUser.legajo, ownerNombre:reserva.nombre || currentUser.nombre,
       tipo:reserva.tipo, curso:reserva.curso, cantidad:`${reserva.cantidad} ${reserva.cantidad===1?'notebook':'notebooks'}`,
-      fecha:retiro.toISOString().slice(0,10), hora:retiro.toTimeString().slice(0,5), motivo:reserva.motivo,
+      fecha:`${retiro.year}-${retiro.month}-${retiro.day}`, hora:`${retiro.hour}:${retiro.minute}`, motivo:reserva.motivo,
       estado:reserva.estado, notebookIds:reserva.notebook_ids || []
     };
   });
   tickets = ticketsData.tickets.map(ticket=>({
     id:ticket.id, notebook:ticket.notebook || 'otro', motivo:ticket.motivo, motivoCompleto:ticket.descripcion,
-    estado:ticket.estado, fecha:new Date(ticket.created_at).toLocaleDateString(), ownerLegajo:currentUser.legajo,
+    estado:ticket.estado, fecha:formatBusinessDateTime(ticket.created_at, {dateStyle:'short'}), ownerLegajo:currentUser.legajo,
     ownerNombre:ticket.owner_nombre || currentUser.nombre, ownerRol:ticket.owner_rol || currentUser.rol
   }));
   if(esAdmin){
-    const [returnsData, lateReturnsData, professorsData] = await Promise.all([
+    const [returnsData, lateReturnsData, usersData] = await Promise.all([
       apiRequest('/api/admin/returns'),
       apiRequest('/api/admin/late-returns'),
-      apiRequest('/api/admin/professors')
+      apiRequest('/api/admin/users')
     ]);
-    profesoresRegistrados = professorsData.professors;
     notificacionesDevolucion = returnsData.returns.map(item=>({
       id:item.id, notebookId:item.notebook, alumnoLegajo:item.legajo, alumnoNombre:item.nombre,
-      curso:item.curso, fechaSolicitud:new Date(item.solicitado_at).toLocaleString(), rol:'alumno', returnId:item.id
+      curso:item.curso, fechaSolicitud:formatBusinessDateTime(item.solicitado_at), rol:'alumno', returnId:item.id
     }));
-    lateReturnsData.users.forEach(apiUser=>{
-      const localUser = estadoUsuarios.find(user=>user.legajo===apiUser.legajo);
-      if(localUser){
-        localUser.tardanzas = apiUser.tardanzas;
-        localUser.baneado = apiUser.baneado;
-      }
-    });
+    usuariosRegistrados = usersData.users;
+    usuariosConTardanzas = lateReturnsData.users;
+    historialTardanzas = [];
   }
   prestamosActivos = {};
   historialPrestamos = loansData.loans;
   loansData.loans.filter(loan=>loan.estado !== 'devuelto').forEach(loan=>{
-    if(!prestamosActivos[currentUser.legajo]) prestamosActivos[currentUser.legajo] = {id:loan.notebook, curso:loan.curso, desde:new Date(loan.retirada_at).toLocaleString(), vence:new Date(loan.vence_at).toLocaleString(), pendiente:loan.estado!=='activo', loanId:loan.id};
+    if(!prestamosActivos[currentUser.legajo]) prestamosActivos[currentUser.legajo] = {id:loan.notebook, curso:loan.curso, desde:formatBusinessDateTime(loan.retirada_at), vence:formatBusinessDateTime(loan.vence_at), pendiente:loan.estado!=='activo', loanId:loan.id};
   });
 }
 
@@ -167,7 +181,7 @@ async function login(e){
       document.getElementById('loginError').textContent = 'Usuario bloqueado por administración';
       return;
     }
-    currentUser = {...demoUser};
+    currentUser = Object.fromEntries(Object.entries(demoUser).filter(([key])=>key!=='password'));
     rolActivo = currentUser.rol;
     document.getElementById('loginForm').reset();
     document.getElementById('loginError').textContent = '';
@@ -178,7 +192,7 @@ async function login(e){
   try{
     const result = await apiRequest('/api/auth/login', {method:'POST', body:JSON.stringify({email, password:pass})});
     authToken = result.token;
-    currentUser = {...result.user, password:pass};
+    currentUser = {...result.user};
     rolActivo = currentUser.rol;
     await cargarEstadoAPI();
     document.getElementById('loginForm').reset();
@@ -196,6 +210,10 @@ async function registrar(e){
   const nombre = document.getElementById('regNombre').value.trim();
   const email = document.getElementById('regEmail').value.trim();
   const password = document.getElementById('regPassword').value;
+  if(password.length < 8){
+    document.getElementById('registroError').textContent = 'La contraseña debe tener al menos 8 caracteres.';
+    return;
+  }
 
   if(API_BASE){
     try{
@@ -217,7 +235,8 @@ async function registrar(e){
   }
 
   const legajo = 'U-' + Date.now().toString().slice(-8);
-  estadoUsuarios.push({legajo, nombre, email, rol:'profesor', password, tardanzas:0, baneado:false, retiradas:0, aTiempoPct:null});
+  estadoUsuarios.push({legajo, nombre, email, rol:'alumno', password, tardanzas:0, baneado:false, retiradas:0, aTiempoPct:null});
+  usuariosRegistrados = estadoUsuarios.filter(user=>user.rol!=='admin');
   document.getElementById('registroForm').reset();
   document.getElementById('registroError').textContent = '';
   switchAuthView('login');
@@ -229,25 +248,49 @@ function renderProfesoresTable(){
   const tbody = document.getElementById('profesoresTable');
   if(!tbody) return;
   const query = (document.getElementById('profesoresSearchInput')?.value || '').trim().toLowerCase();
-  const profesores = profesoresRegistrados.filter(profesor=>
-    [profesor.nombre, profesor.email, profesor.legajo].some(value=>String(value || '').toLowerCase().includes(query))
+  const usuarios = usuariosRegistrados.filter(usuario=>
+    [usuario.nombre, usuario.email, usuario.legajo, usuario.rol].some(value=>String(value || '').toLowerCase().includes(query))
   );
-  if(profesores.length===0){
-    tbody.innerHTML = `<tr><td colspan="3"><div class="empty-state">
-      <div class="glyph">🧑‍🏫</div><h4>No hay profesores que coincidan</h4><p>Probá con otro nombre, correo o legajo.</p>
+  if(usuarios.length===0){
+    tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state">
+      <div class="glyph">🧑‍🏫</div><h4>No hay usuarios que coincidan</h4><p>Probá con otro nombre, correo o legajo.</p>
     </div></td></tr>`;
     return;
   }
-  tbody.innerHTML = profesores.map(p=>`
+  tbody.innerHTML = usuarios.map(usuario=>`
     <tr>
-      <td>${p.nombre}</td>
-      <td>${p.email}</td>
-      <td class="mono">${p.legajo}</td>
+      <td>${escapeHtml(usuario.nombre)}</td>
+      <td>${escapeHtml(usuario.email)}</td>
+      <td class="mono">${escapeHtml(usuario.legajo)}</td>
+      <td>${escapeHtml(rolLabel[usuario.rol] || usuario.rol)}</td>
+      <td><select class="btn btn-sm" aria-label="Cambiar rol de ${escapeHtml(usuario.nombre)}"
+        onchange="cambiarRol(${escapeHtml(JSON.stringify(usuario.legajo))}, this.value)">
+        <option value="alumno" ${usuario.rol==='alumno'?'selected':''}>Alumno</option>
+        <option value="profesor" ${usuario.rol==='profesor'?'selected':''}>Profesor</option>
+      </select></td>
     </tr>`).join('');
 }
 
 function filterProfesores(){
   renderProfesoresTable();
+}
+
+async function cambiarRol(legajo, rol){
+  const usuario = usuariosRegistrados.find(item=>item.legajo===legajo);
+  if(!usuario || !['alumno','profesor'].includes(rol)) return;
+  if(authToken){
+    try{
+      await apiRequest(`/api/admin/users/${encodeURIComponent(legajo)}/rol`, {method:'PATCH', body:JSON.stringify({rol})});
+      await cargarEstadoAPI();
+      renderAll();
+      showToast(`Rol de ${usuario.nombre} actualizado.`, 'success');
+    }catch(error){ showToast(error.message, 'warn'); }
+    return;
+  }
+  usuario.rol = rol;
+  renderProfesoresTable();
+  renderTardanzas();
+  showToast(`Rol de ${usuario.nombre} actualizado.`, 'success');
 }
 
 function iniciarSesion(){
@@ -431,10 +474,10 @@ function renderNotebooks(){
   actualizarStats();
   notebooks.forEach(nb=>{
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td class="mono">${nb.id}</td>
-      <td><span class="badge ${badgeClass[nb.estado]}">${badgeLabel[nb.estado]}</span></td>
-      <td>${nb.ubicacion}</td>
-      <td>${nb.act}</td>`;
+    tr.innerHTML = `<td class="mono">${escapeHtml(nb.id)}</td>
+      <td><span class="badge ${escapeHtml(badgeClass[nb.estado])}">${escapeHtml(badgeLabel[nb.estado])}</span></td>
+      <td>${escapeHtml(nb.ubicacion)}</td>
+      <td>${escapeHtml(nb.act)}</td>`;
     tbody.appendChild(tr);
   });
   document.getElementById('statDisponibles').textContent = stats.disponibles;
@@ -482,13 +525,13 @@ function renderMiActividad(){
     html += `
       <div class="action-card" style="cursor:default;margin-bottom:.8rem;">
         <div class="action-icon" style="background:var(--blue-bg);color:var(--blue-text);">💻</div>
-        <div class="action-info"><h4>Tenés ${prestamo.id} en tu poder</h4><p>Vence ${prestamo.vence}</p></div>
+        <div class="action-info"><h4>Tenés ${escapeHtml(prestamo.id)} en tu poder</h4><p>Vence ${escapeHtml(prestamo.vence)}</p></div>
       </div>`;
   } else if(prestamo && prestamo.pendiente){
     html += `
       <div class="action-card" style="cursor:default;margin-bottom:.8rem;">
         <div class="action-icon" style="background:var(--green-bg);color:var(--green-text);">✅</div>
-        <div class="action-info"><h4>Devolución de ${prestamo.id} informada</h4><p>Esperando confirmación de recepción del Administrador.</p></div>
+        <div class="action-info"><h4>Devolución de ${escapeHtml(prestamo.id)} informada</h4><p>Esperando confirmación de recepción del Administrador.</p></div>
       </div>`;
   }
 
@@ -497,7 +540,7 @@ function renderMiActividad(){
     html += `
       <div class="action-card" style="cursor:default;margin-bottom:.8rem;">
         <div class="action-icon">📅</div>
-        <div class="action-info"><h4>${detalle}</h4><p>${formatFecha(proximaReserva.fecha)} · ${proximaReserva.hora}</p></div>
+        <div class="action-info"><h4>${escapeHtml(detalle)}</h4><p>${escapeHtml(formatFecha(proximaReserva.fecha))} · ${escapeHtml(proximaReserva.hora)}</p></div>
       </div>`;
   } else if(!prestamo){
     html += `<div class="empty-state">
@@ -511,7 +554,7 @@ function renderMiActividad(){
     html += `
       <div class="action-card" style="cursor:pointer;" onclick="switchView('tickets')">
         <div class="action-icon" style="background:var(--orange-bg);color:var(--orange-text);">⚠️</div>
-        <div class="action-info"><h4>${ticketsAbiertos} ticket${ticketsAbiertos===1?'':'s'} abierto${ticketsAbiertos===1?'':'s'}</h4><p>Ver seguimiento</p></div>
+        <div class="action-info"><h4>${escapeHtml(ticketsAbiertos)} ticket${ticketsAbiertos===1?'':'s'} abierto${ticketsAbiertos===1?'':'s'}</h4><p>Ver seguimiento</p></div>
         <span class="action-arrow">›</span>
       </div>`;
   }
@@ -535,17 +578,16 @@ function renderAdminInventario(){
   if(!tbody) return;
   tbody.innerHTML = notebooks.map(nb=>`
     <tr>
-      <td class="mono">${nb.id}</td>
-      <td><span class="badge ${badgeClass[nb.estado]}">${badgeLabel[nb.estado]}</span></td>
-      <td>${nb.ubicacion}</td>
-      <td>${nb.prestadoA || '—'}</td>
-      <td>${nb.act}</td>
+      <td class="mono">${escapeHtml(nb.id)}</td>
+      <td><span class="badge ${escapeHtml(badgeClass[nb.estado])}">${escapeHtml(badgeLabel[nb.estado])}</span></td>
+      <td>${escapeHtml(nb.ubicacion)}</td>
+      <td>${escapeHtml(nb.prestadoA || '—')}</td>
+      <td>${escapeHtml(nb.act)}</td>
       <td>
-        <select class="btn btn-sm" aria-label="Cambiar estado de ${nb.id}" onchange="adminCambiarEstadoNotebook('${nb.id}', this.value)">
+        <select class="btn btn-sm" aria-label="Cambiar estado de ${escapeHtml(nb.id)}" onchange="adminCambiarEstadoNotebook(${escapeHtml(JSON.stringify(nb.id))}, this.value)">
+          ${estadosNotebookManuales.includes(nb.estado) ? '' : '<option value="" selected disabled>—</option>'}
           <option value="disponible" ${nb.estado==='disponible'?'selected':''}>Disponible</option>
-          <option value="prestada" ${nb.estado==='prestada'?'selected':''}>Prestada</option>
           <option value="mantenimiento" ${nb.estado==='mantenimiento'?'selected':''}>Mantenimiento</option>
-          <option value="pendiente_devolucion" ${nb.estado==='pendiente_devolucion'?'selected':''}>Pend. devolución</option>
         </select>
       </td>
     </tr>`).join('');
@@ -634,25 +676,6 @@ async function adminCambiarEstadoNotebook(id, nuevoEstado){
   showToast(`${id} actualizada a ${badgeLabel[nuevoEstado].toLowerCase()}.`, 'success');
 }
 
-function agregarNotebook(e){
-  e.preventDefault();
-  const id = document.getElementById('newNbId').value.trim().toUpperCase();
-  const ubicacion = document.getElementById('newNbUbicacion').value;
-  if(!id){ showToast('Ingresá un número de notebook.', 'warn'); return; }
-  if(notebooks.some(n=>n.id===id)){ showToast('Ya existe una notebook con ese número.', 'warn'); return; }
-
-  // Un equipo nuevo siempre entra como "disponible": no tiene sentido sumarlo ya roto.
-  notebooks.push({id, estado:'disponible', ubicacion, act:'Recién', prestadoA:null});
-  stats.total += 1;
-  stats.disponibles += 1;
-
-  document.getElementById('addNotebookForm').reset();
-  closeModal('addNotebookModal');
-  renderNotebooks();
-  renderAdminInventario();
-  showToast(`${id} agregada al stock como disponible.`, 'success');
-}
-
 function filterAdminNotebooks(){
   const q = document.getElementById('adminSearchInput').value.toLowerCase();
   const est = document.getElementById('adminFilterEstado').value;
@@ -684,8 +707,8 @@ function renderPrestamoActivo(){
       <div class="action-card" style="cursor:default;">
         <div class="action-icon" style="background:var(--red-bg);color:var(--red-text);">⏳</div>
         <div class="action-info">
-          <h4>${prestamo.id}</h4>
-          <p>Retirada ${prestamo.desde} · Devolución informada</p>
+          <h4>${escapeHtml(prestamo.id)}</h4>
+          <p>Retirada ${escapeHtml(prestamo.desde)} · Devolución informada</p>
         </div>
         <span class="badge badge-pendiente_devolucion">Esperando confirmación del Admin</span>
       </div>
@@ -696,8 +719,8 @@ function renderPrestamoActivo(){
     <div class="action-card" style="cursor:default;">
       <div class="action-icon" style="background:var(--blue-bg);color:var(--blue-text);">💻</div>
       <div class="action-info">
-        <h4>${prestamo.id}</h4>
-        <p>Retirada ${prestamo.desde} · Vence ${prestamo.vence}</p>
+        <h4>${escapeHtml(prestamo.id)}</h4>
+        <p>Retirada ${escapeHtml(prestamo.desde)} · Vence ${escapeHtml(prestamo.vence)}</p>
       </div>
       <button class="btn btn-primary btn-sm" onclick="openReturnModal()">Devolver</button>
     </div>`;
@@ -713,12 +736,12 @@ function renderHistorialPrestamos(){
     return;
   }
   tbody.innerHTML = historialPrestamos.map(loan=>{
-    const retirada = new Date(loan.retirada_at).toLocaleString();
-    const devuelta = loan.devuelta_at ? new Date(loan.devuelta_at).toLocaleString() : '—';
+    const retirada = formatBusinessDateTime(loan.retirada_at);
+    const devuelta = loan.devuelta_at ? formatBusinessDateTime(loan.devuelta_at) : '—';
     const demorada = loan.devuelta_at && new Date(loan.devuelta_at) > new Date(loan.vence_at);
     const label = loan.estado==='devuelto' ? (demorada ? 'Devuelta con demora' : 'Devuelta a tiempo') : (loan.estado==='devolucion_pendiente' ? 'Devolución pendiente' : 'Préstamo activo');
     const badge = loan.estado==='devuelto' ? (demorada ? 'badge-vencido' : 'badge-resuelto') : (loan.estado==='devolucion_pendiente' ? 'badge-pendiente_devolucion' : 'badge-prestada');
-    return `<tr><td class="mono">${loan.notebook}</td><td>${retirada}</td><td>${devuelta}</td><td><span class="badge ${badge}">${label}</span></td></tr>`;
+    return `<tr><td class="mono">${escapeHtml(loan.notebook)}</td><td>${escapeHtml(retirada)}</td><td>${escapeHtml(devuelta)}</td><td><span class="badge ${escapeHtml(badge)}">${escapeHtml(label)}</span></td></tr>`;
   }).join('');
 }
 
@@ -789,8 +812,8 @@ function renderDevoluciones(){
     <div class="action-card" style="cursor:default;margin-bottom:.8rem;">
       <div class="action-icon" style="background:var(--red-bg);color:var(--red-text);">📥</div>
       <div class="action-info">
-        <h4>${n.notebookId} · ${n.alumnoNombre}</h4>
-        <p>${n.curso} · Legajo ${n.alumnoLegajo} · Solicitado ${n.fechaSolicitud}</p>
+        <h4>${escapeHtml(n.notebookId)} · ${escapeHtml(n.alumnoNombre)}</h4>
+        <p>${escapeHtml(n.curso)} · Legajo ${escapeHtml(n.alumnoLegajo)} · Solicitado ${escapeHtml(n.fechaSolicitud)}</p>
       </div>
       <button class="btn btn-primary btn-sm" onclick="confirmarRecepcion(${i})">Confirmar recepción física</button>
     </div>`).join('');
@@ -863,20 +886,20 @@ function validarFechaHora(fechaStr, horaStr){
 
   const [y,m,d] = fechaStr.split('-').map(Number);
   const [hh,mm] = horaStr.split(':').map(Number);
-  const seleccion = new Date(y, m-1, d, hh, mm);
-  const ahora = new Date();
-  const hoyInicio = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate());
-  const fechaSeleccionadaInicio = new Date(y, m-1, d);
+  const hoy = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
+    timeZone:BUSINESS_TIME_ZONE, year:'numeric', month:'2-digit', day:'2-digit'
+  }).formatToParts(new Date()).map(({type, value})=>[type, value]));
+  const fechaActual = `${hoy.year}-${hoy.month}-${hoy.day}`;
 
-  if(y !== ahora.getFullYear()){
-    return {valid:false, msg:`Las reservas solo pueden hacerse durante el año ${ahora.getFullYear()}.`};
+  if(y !== Number(hoy.year)){
+    return {valid:false, msg:`Las reservas solo pueden hacerse durante el año ${hoy.year}.`};
   }
 
-  if(fechaSeleccionadaInicio < hoyInicio){
+  if(fechaStr < fechaActual){
     return {valid:false, msg:'No se pueden reservar fechas pasadas.'};
   }
 
-  const diaSemana = seleccion.getDay(); // 0=domingo, 6=sábado
+  const diaSemana = new Date(Date.UTC(y, m-1, d)).getUTCDay();
   if(diaSemana===0 || diaSemana===6){
     return {valid:false, msg:'Sólo se puede reservar de lunes a viernes (días hábiles).'};
   }
@@ -1071,11 +1094,11 @@ function renderReservas(){
     <div class="action-card" style="cursor:default;margin-bottom:.8rem;">
       <div class="action-icon">${r.tipo==='lote' ? '👥' : '📅'}</div>
       <div class="action-info">
-        <h4>${r.tipo==='lote' || r.curso ? (r.curso+' · '+r.cantidad+' equipos') : r.cantidad}</h4>
-        <p>${formatFecha(r.fecha)} · ${r.hora} — ${r.motivo}</p>
+        <h4>${escapeHtml(r.tipo==='lote' || r.curso ? (r.curso+' · '+r.cantidad+' equipos') : r.cantidad)}</h4>
+        <p>${escapeHtml(formatFecha(r.fecha))} · ${escapeHtml(r.hora)} — ${escapeHtml(r.motivo)}</p>
       </div>
-      <span class="badge badge-${r.estado}" style="margin-right:.5rem;">${estadoLabelMap[r.estado]}</span>
-      ${r.estado==='pendiente_aprobacion' || r.estado==='confirmada' ? `<button class="btn btn-sm btn-danger-outline" onclick="cancelarReserva('${r.id}')">Cancelar</button>` : ''}
+      <span class="badge badge-${escapeHtml(r.estado)}" style="margin-right:.5rem;">${escapeHtml(estadoLabelMap[r.estado] || r.estado)}</span>
+      ${r.estado==='pendiente_aprobacion' || r.estado==='confirmada' ? `<button class="btn btn-sm btn-danger-outline" onclick="cancelarReserva(${escapeHtml(JSON.stringify(r.id))})">Cancelar</button>` : ''}
     </div>`).join('');
 }
 
@@ -1106,27 +1129,27 @@ function renderLotes(){
     <div class="action-card" style="cursor:default;margin-bottom:.8rem;">
       <div class="action-icon" style="background:var(--purple-bg);color:var(--purple-text);">👥</div>
       <div class="action-info">
-        <h4>${r.curso} · ${r.cantidad} equipos</h4>
-        <p>${r.ownerNombre} · ${formatFecha(r.fecha)} ${r.hora} — ${r.motivo}</p>
+        <h4>${escapeHtml(r.curso)} · ${escapeHtml(r.cantidad)} equipos</h4>
+        <p>${escapeHtml(r.ownerNombre)} · ${escapeHtml(formatFecha(r.fecha))} ${escapeHtml(r.hora)} — ${escapeHtml(r.motivo)}</p>
       </div>
-      <button class="btn btn-sm btn-success-outline" style="margin-right:.5rem;" onclick="aprobarLote('${r.id}')">Aprobar</button>
-      <button class="btn btn-sm btn-danger-outline" onclick="pedirRechazoLote('${r.id}')">Rechazar</button>
+      <button class="btn btn-sm btn-success-outline" style="margin-right:.5rem;" onclick="aprobarLote(${escapeHtml(JSON.stringify(r.id))})">Aprobar</button>
+      <button class="btn btn-sm btn-danger-outline" onclick="pedirRechazoLote(${escapeHtml(JSON.stringify(r.id))})">Rechazar</button>
     </div>`).join('') + aprobadas.map(r=>`
     <div class="action-card" style="cursor:default;margin-bottom:.8rem;">
       <div class="action-icon" style="background:var(--green-bg);color:var(--green-text);">📦</div>
       <div class="action-info">
-        <h4>${r.curso} · ${r.cantidad} equipos</h4>
-        <p>${r.ownerNombre} · ${formatFecha(r.fecha)} ${r.hora} — Retiro aprobado</p>
+        <h4>${escapeHtml(r.curso)} · ${escapeHtml(r.cantidad)} equipos</h4>
+        <p>${escapeHtml(r.ownerNombre)} · ${escapeHtml(formatFecha(r.fecha))} ${escapeHtml(r.hora)} — Retiro aprobado</p>
       </div>
-      <button class="btn btn-sm btn-primary" onclick="registrarRetiro('${r.id}')">Registrar retiro</button>
+      <button class="btn btn-sm btn-primary" onclick="registrarRetiro(${escapeHtml(JSON.stringify(r.id))})">Registrar retiro</button>
     </div>`).join('') + individuales.map(r=>`
     <div class="action-card" style="cursor:default;margin-bottom:.8rem;">
       <div class="action-icon" style="background:var(--blue-bg);color:var(--blue-text);">📅</div>
       <div class="action-info">
-        <h4>${r.ownerNombre} · ${r.cantidad}</h4>
-        <p>${formatFecha(r.fecha)} ${r.hora} — Reserva confirmada</p>
+        <h4>${escapeHtml(r.ownerNombre)} · ${escapeHtml(r.cantidad)}</h4>
+        <p>${escapeHtml(formatFecha(r.fecha))} ${escapeHtml(r.hora)} — Reserva confirmada</p>
       </div>
-      <button class="btn btn-sm btn-primary" onclick="registrarRetiro('${r.id}')">Registrar retiro</button>
+      <button class="btn btn-sm btn-primary" onclick="registrarRetiro(${escapeHtml(JSON.stringify(r.id))})">Registrar retiro</button>
     </div>`).join('');
 }
 
@@ -1184,12 +1207,34 @@ function pedirRechazoLote(id){
   openModal('rejectLoteModal');
 }
 
-function confirmarRechazoLote(){
+async function confirmarRechazoLote(){
   const r = reservas.find(x=>x.id===pendingRejectId);
+  if(!r) return;
+  if(authToken){
+    try{
+      await apiRequest(`/api/admin/reservations/${encodeURIComponent(r.id)}/reject`, {method:'POST'});
+      await cargarEstadoAPI();
+      renderAll();
+      closeModal('rejectLoteModal');
+      showToast('Solicitud de lote rechazada.', 'warn');
+    }catch(error){ showToast(error.message, 'warn'); }
+    return;
+  }
   if(r) r.estado = 'rechazada';
+  r.notebookIds?.forEach(notebookId=>{
+    const notebook = notebooks.find(item=>item.id===notebookId);
+    if(notebook?.estado==='reservada'){
+      notebook.estado = 'disponible';
+      notebook.ubicacion = 'Carro 1';
+      notebook.act = 'Recién';
+    }
+  });
   closeModal('rejectLoteModal');
   renderLotes();
   renderReservas();
+  renderNotebooks();
+  renderAdminInventario();
+  actualizarControlesReserva();
   showToast('Solicitud de lote rechazada.', 'warn');
 }
 
@@ -1275,11 +1320,11 @@ function renderTicketsPropios(){
   }
   tbody.innerHTML = propios.map(t=>`
     <tr>
-      <td class="mono">${t.id}</td>
-      <td class="mono">${t.notebook}</td>
-      <td>${t.motivo}</td>
-      <td><span class="badge ${ticketBadgeClass[t.estado]}">${ticketBadgeLabel[t.estado]}</span></td>
-      <td>${t.fecha}</td>
+      <td class="mono">${escapeHtml(t.id)}</td>
+      <td class="mono">${escapeHtml(t.notebook)}</td>
+      <td>${escapeHtml(t.motivo)}</td>
+      <td><span class="badge ${escapeHtml(ticketBadgeClass[t.estado])}">${escapeHtml(ticketBadgeLabel[t.estado])}</span></td>
+      <td>${escapeHtml(t.fecha)}</td>
     </tr>`).join('');
 }
 
@@ -1299,21 +1344,21 @@ function renderAdminTickets(){
     const nb = notebooks.find(n=>n.id===t.notebook);
     let equipoCol = '<span class="hint">Sin equipo identificado</span>';
     if(nb){
-      equipoCol = `<span class="badge ${badgeClass[nb.estado]}">${badgeLabel[nb.estado]}</span>`;
+      equipoCol = `<span class="badge ${escapeHtml(badgeClass[nb.estado])}">${escapeHtml(badgeLabel[nb.estado])}</span>`;
       if(nb.estado==='mantenimiento'){
-        equipoCol += ` <button class="btn btn-sm btn-success-outline" style="margin-left:.4rem;" onclick="habilitarNotebook('${nb.id}')">Habilitar</button>`;
+        equipoCol += ` <button class="btn btn-sm btn-success-outline" style="margin-left:.4rem;" onclick="habilitarNotebook(${escapeHtml(JSON.stringify(nb.id))})">Habilitar</button>`;
       } else if(nb.marcarMantenimientoAlDevolver){
         equipoCol += ` <span class="hint">(pasará a mantenimiento al devolverse)</span>`;
       }
     }
     return `
     <tr>
-      <td class="mono">${t.id}</td>
-      <td>${t.ownerNombre} <span class="hint">(${rolLabel[t.ownerRol]})</span></td>
-      <td class="mono">${t.notebook}</td>
-      <td>${t.motivo}</td>
+      <td class="mono">${escapeHtml(t.id)}</td>
+      <td>${escapeHtml(t.ownerNombre)} <span class="hint">(${escapeHtml(rolLabel[t.ownerRol] || t.ownerRol)})</span></td>
+      <td class="mono">${escapeHtml(t.notebook)}</td>
+      <td>${escapeHtml(t.motivo)}</td>
       <td>
-        <select class="btn btn-sm" style="font-weight:500;" onchange="adminSetTicketEstado('${t.id}', this.value)">
+        <select class="btn btn-sm" style="font-weight:500;" onchange="adminSetTicketEstado(${escapeHtml(JSON.stringify(t.id))}, this.value)">
           <option value="abierto" ${t.estado==='abierto'?'selected':''}>Abierto</option>
           <option value="progreso" ${t.estado==='progreso'?'selected':''}>En progreso</option>
           <option value="resuelto" ${t.estado==='resuelto'?'selected':''}>Resuelto</option>
@@ -1361,7 +1406,7 @@ function renderTardanzas(){
   const badge = document.getElementById('tardanzasBadge');
   if(!wrap || !tbody) return;
 
-  const todosUsuarios = estadoUsuarios.filter(u=>u.rol!=='admin');
+  const todosUsuarios = authToken ? usuariosConTardanzas : estadoUsuarios.filter(u=>u.rol!=='admin');
 
   if(porUsuarioBody){
     if(todosUsuarios.length===0){
@@ -1369,11 +1414,11 @@ function renderTardanzas(){
     } else {
       porUsuarioBody.innerHTML = todosUsuarios.map(u=>`
         <tr>
-          <td>${u.nombre}</td>
-          <td>${rolLabel[u.rol]}</td>
-          <td class="mono">${u.legajo}</td>
-          <td>${u.retiradas ?? 0}</td>
-          <td>${u.aTiempoPct==null ? '<span class="hint">Sin historial</span>' : u.aTiempoPct+'%'}</td>
+          <td>${escapeHtml(u.nombre)}</td>
+          <td>${escapeHtml(rolLabel[u.rol] || u.rol)}</td>
+          <td class="mono">${escapeHtml(u.legajo)}</td>
+          <td>${escapeHtml(u.tardanzas ?? 0)}</td>
+          <td>${(u.candidato_a_sancion ?? (u.tardanzas >= 3)) ? 'Sí' : 'No'}</td>
         </tr>`).join('');
     }
   }
@@ -1391,12 +1436,12 @@ function renderTardanzas(){
       <div class="action-card" style="cursor:default;margin-bottom:.8rem;${u.tardanzas>=3 && !u.baneado ? 'border-color:var(--red-text);' : ''}">
         <div class="action-icon" style="${u.tardanzas>=3 ? 'background:var(--red-bg);color:var(--red-text);' : 'background:var(--orange-bg);color:var(--orange-text);'}">${u.baneado ? '🚫' : '⏰'}</div>
         <div class="action-info">
-          <h4>${u.nombre} <span class="hint">(${rolLabel[u.rol]} · ${u.legajo})</span></h4>
-          <p>${u.tardanzas} entrega${u.tardanzas===1?'':'s'} tardía${u.tardanzas===1?'':'s'} registrada${u.tardanzas===1?'':'s'}${u.tardanzas>=3 ? ' · candidato a sanción' : ''}</p>
+          <h4>${escapeHtml(u.nombre)} <span class="hint">(${escapeHtml(rolLabel[u.rol] || u.rol)} · ${escapeHtml(u.legajo)})</span></h4>
+          <p>${escapeHtml(u.tardanzas)} entrega${u.tardanzas===1?'':'s'} tardía${u.tardanzas===1?'':'s'} registrada${u.tardanzas===1?'':'s'}${u.tardanzas>=3 ? ' · candidato a sanción' : ''}</p>
         </div>
         ${u.baneado
-          ? `<button class="btn btn-sm btn-success-outline" onclick="cambiarBaneo('${u.legajo}', false)">Quitar baneo</button>`
-          : `<button class="btn btn-sm btn-danger-outline" onclick="cambiarBaneo('${u.legajo}', true)">Banear</button>`}
+          ? `<button class="btn btn-sm btn-success-outline" onclick="cambiarBaneo(${escapeHtml(JSON.stringify(u.legajo))}, false)">Quitar baneo</button>`
+          : `<button class="btn btn-sm btn-danger-outline" onclick="cambiarBaneo(${escapeHtml(JSON.stringify(u.legajo))}, true)">Banear</button>`}
       </div>`).join('');
   }
 
@@ -1405,14 +1450,14 @@ function renderTardanzas(){
   else{ badge.style.display='none'; }
 
   if(historialTardanzas.length===0){
-    tbody.innerHTML = `<tr><td colspan="4"><div class="empty-state"><p>Todavía no hay entregas tardías registradas.</p></div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="4"><div class="empty-state"><p>${authToken ? 'El endpoint de demoras entrega un resumen por usuario, no el detalle de cada devolución.' : 'Todavía no hay entregas tardías registradas.'}</p></div></td></tr>`;
   } else {
     tbody.innerHTML = historialTardanzas.map(h=>`
       <tr>
-        <td>${h.nombre}</td>
-        <td>${rolLabel[h.rol]}</td>
-        <td class="mono">${h.notebookId}</td>
-        <td>${h.fecha}</td>
+        <td>${escapeHtml(h.nombre)}</td>
+        <td>${escapeHtml(rolLabel[h.rol] || h.rol)}</td>
+        <td class="mono">${escapeHtml(h.notebookId)}</td>
+        <td>${escapeHtml(h.fecha)}</td>
       </tr>`).join('');
   }
 }
@@ -1422,7 +1467,7 @@ function permabanear(legajo){
 }
 
 async function cambiarBaneo(legajo, baneado){
-  const u = estadoUsuarios.find(x=>x.legajo===legajo);
+  const u = usuariosRegistrados.find(x=>x.legajo===legajo) || estadoUsuarios.find(x=>x.legajo===legajo);
   if(!u) return;
   if(authToken){
     try{
@@ -1500,9 +1545,9 @@ function toggleTheme(){
 /* ======================================================================
    INIT
 ====================================================================== */
-const today = new Date();
-document.getElementById('resFecha').min = today.toISOString().split('T')[0];
-document.getElementById('resFecha').max = `${today.getFullYear()}-12-31`;
+const today = businessDateParts(new Date());
+document.getElementById('resFecha').min = `${today.year}-${today.month}-${today.day}`;
+document.getElementById('resFecha').max = `${today.year}-12-31`;
 
 (function initTheme(){
   let saved = null;

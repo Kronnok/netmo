@@ -30,6 +30,7 @@ test('sirve frontend en desarrollo, valida JSON y responde CORS', async (context
       ...process.env,
       PORT: String(port),
       NODE_ENV: 'development',
+      JWT_SECRET: 'test-only-secret-that-is-long-enough-for-hmac',
       DATABASE_URL: 'postgresql://test:test@127.0.0.1:1/netmo',
       CORS_ORIGIN: 'https://frontend.test'
     },
@@ -56,6 +57,9 @@ test('sirve frontend en desarrollo, valida JSON y responde CORS', async (context
 
   const page = await fetch(baseUrl);
   assert.match(await page.text(), /NetMO/);
+  assert.equal(page.headers.get('x-content-type-options'), 'nosniff');
+  assert.equal(page.headers.get('x-frame-options'), 'DENY');
+  assert.equal(page.headers.get('referrer-policy'), 'no-referrer');
   assert.equal((await fetch(`${baseUrl}/app.js`)).status, 200);
   assert.equal((await fetch(`${baseUrl}/styles.css`)).status, 200);
 
