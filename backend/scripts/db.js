@@ -19,7 +19,9 @@ async function migrate() {
     }
     const migrations = [
       '001-course-belongs-to-operations.sql',
-      '002-business-timezone.sql'
+      '002-business-timezone.sql',
+      '003-admin-accounts-and-carros.sql',
+      '004-reservation-schedule.sql'
     ];
     for (const version of migrations) {
       const applied = await client.query('SELECT 1 FROM schema_migrations WHERE version = $1', [version]);

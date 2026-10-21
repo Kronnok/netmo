@@ -31,9 +31,8 @@ persistencia es PostgreSQL 16.
    npm run dev
    ```
 
-   El servidor usa el puerto `3000` por defecto. La configuración de frontend
-   está en `frontend/config.js`; el modo demo se activa únicamente al establecer
-   `apiBaseUrl: null`.
+   El servidor usa el puerto `3000` por defecto. El frontend siempre usa la API
+   configurada en `frontend/config.js`; las cuentas son creadas por administración.
 
 ## Despliegue
 
@@ -44,8 +43,9 @@ variables, los orígenes CORS y las plataformas.
 ## Base de datos
 
 El esquema, las migraciones y los datos iniciales se encuentran en `database/`.
-`npm run db:migrate` aplica, entre otras, `002-business-timezone.sql`, que fija
-las reglas de reservas a `America/Argentina/Buenos_Aires` en PostgreSQL.
+`npm run db:migrate` aplica las reglas de reservas de lunes a viernes,
+08:00–11:50 y 13:30–17:40, en `America/Argentina/Buenos_Aires`, junto con las
+migraciones de cuentas administradas, vencimiento de baneos y carros.
 `npm run db:seed` registra la aplicación del seed para evitar ejecutarlo una
 segunda vez. Las credenciales se suministran mediante variables de entorno y no
 deben guardarse en el repositorio.

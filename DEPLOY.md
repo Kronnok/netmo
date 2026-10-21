@@ -20,8 +20,12 @@ Definí `DATABASE_URL` y las cuatro variables `NETMO_SEED_*_PASSWORD` de
 esa versión ya está aplicada. Rotá cualquier credencial que haya sido expuesta
 antes de usar la base en producción.
 
-`npm run db:migrate` también aplica `002-business-timezone.sql`, que actualiza
-los triggers de reservas para usar `America/Argentina/Buenos_Aires`.
+`npm run db:migrate` aplica migraciones nuevas sin modificar las ya aplicadas.
+Las reservas usan la zona `America/Argentina/Buenos_Aires`, de lunes a viernes,
+08:00–11:50 y 13:30–17:40, y rechazan fechas pasadas. Las migraciones agregan
+también baneos con vencimiento y la relación de inventario con carros; el
+backfill conserva la ubicación existente y asigna `carro_id` cuando contiene un
+número de carro válido.
 
 ## 2. API en Render
 
@@ -34,6 +38,10 @@ servicio completá:
 - `JWT_SECRET`: secreto de firma HMAC de los tokens, válidos durante 12 horas.
   `render.yaml` solicita que Render lo genere automáticamente; conservá ese
   valor como secreto y no lo copies al repositorio.
+
+  Las cuentas nuevas se crean desde la sección **Usuarios** del panel de
+  administración; no existe registro público. Desde **Inventario** se administran
+  carros y altas consecutivas de notebooks.
 
 Render publica la API y comprueba `/health`. Configurá `DATABASE_URL` y
 `CORS_ORIGIN` como variables privadas del servicio; `JWT_SECRET` se genera en

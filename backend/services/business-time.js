@@ -60,14 +60,15 @@ function parseBusinessDateTime(value) {
 }
 
 function reservationTimeError(reservationDate, now = new Date()) {
+  if (reservationDate.getTime() <= now.getTime()) return 'La fecha y hora de reserva deben ser futuras';
   const requested = businessTimeParts(reservationDate);
   const current = businessTimeParts(now);
   if (requested.year !== current.year) return 'La reserva debe ser del año actual';
   const weekday = new Date(Date.UTC(Number(requested.year), Number(requested.month) - 1, Number(requested.day))).getUTCDay();
   if (weekday === 0 || weekday === 6) return 'Las reservas solo pueden hacerse de lunes a viernes';
   const minutes = Number(requested.hour) * 60 + Number(requested.minute);
-  if (!((minutes >= 480 && minutes <= 730) || (minutes >= 810 && minutes <= 1050))) {
-    return 'Solo se pueden hacer reservas de 08:00 a 12:10 y de 13:30 a 17:30';
+  if (!((minutes >= 480 && minutes <= 710) || (minutes >= 810 && minutes <= 1060))) {
+    return 'Solo se pueden hacer reservas de 08:00 a 11:50 y de 13:30 a 17:40';
   }
   return null;
 }

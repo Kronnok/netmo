@@ -1,61 +1,25 @@
 /* ======================================================================
    ESTADO EN MEMORIA
 ====================================================================== */
-let estadoUsuarios = [
-  {legajo:'2024-0417', nombre:'Teo Prado', email:'tprado@ottokrause.edu.ar', rol:'alumno', password:'1234', tardanzas:2, baneado:false, retiradas:14, aTiempoPct:92},
-  {legajo:'2024-0528', nombre:'Lucía Fernández', email:'lfernandez@ottokrause.edu.ar', rol:'alumno', password:'1234', tardanzas:0, baneado:false, retiradas:6, aTiempoPct:100},
-  {legajo:'2024-0639', nombre:'Mateo Rodríguez', email:'mrodriguez@ottokrause.edu.ar', rol:'alumno', password:'5678', tardanzas:1, baneado:false, retiradas:9, aTiempoPct:97},
-  {legajo:'PRF-010', nombre:'Prof. Ana Gómez', email:'agomez@ottokrause.edu.ar', rol:'profesor', password:'1234', tardanzas:0, baneado:false, retiradas:31, aTiempoPct:100},
-  {legajo:'PRF-011', nombre:'Prof. Diego Suárez', email:'dsuarez@ottokrause.edu.ar', rol:'profesor', password:'2468', tardanzas:0, baneado:false, retiradas:18, aTiempoPct:100},
-  {legajo:'ADM-001', nombre:'Admin NetMO', email:'admin@ottokrause.edu.ar', rol:'admin', password:'admin123', tardanzas:0, baneado:false},
-];
-let usuariosRegistrados = estadoUsuarios.filter(user=>user.rol!=='admin');
+let usuariosRegistrados = [];
 let usuariosConTardanzas = [];
 
-let currentUser = null;   // usuario realmente logueado
-let rolActivo = null;     // rol del usuario autenticado
+let currentUser = null;
+let rolActivo = null;
 let authToken = null;
-const API_BASE = window.NETMO_CONFIG.apiBaseUrl === null ? null : window.NETMO_CONFIG.apiBaseUrl.replace(/\/+$/, '');
-document.getElementById('demoHint').style.display = API_BASE === null ? '' : 'none';
+const API_BASE = (window.NETMO_CONFIG.apiBaseUrl || '').replace(/\/+$/, '');
 
-let notebooks = [
-  {id:'NB-001', estado:'disponible', ubicacion:'Carro 1', act:'Hace 2 min', prestadoA:null},
-  {id:'NB-002', estado:'disponible', ubicacion:'Carro 1', act:'Hace 2 min', prestadoA:null},
-  {id:'NB-003', estado:'prestada',   ubicacion:'—',       act:'Hace 15 min', prestadoA:'PRF-010 · Prof. Ana Gómez'},
-  {id:'NB-004', estado:'mantenimiento', ubicacion:'Taller', act:'Hace 1 día', prestadoA:null},
-  {id:'NB-005', estado:'disponible', ubicacion:'Carro 2', act:'Hace 3 min', prestadoA:null},
-  {id:'NB-014', estado:'prestada',   ubicacion:'—',       act:'Hace 6 hs', prestadoA:'2024-0417 · Teo Prado'},
-];
-
+let notebooks = [];
+let carros = [];
 let stats = {disponibles:0, prestadas:0, mantenimiento:0, total:0};
-
-// Préstamos activos por legajo de alumno. "vencimiento" es la hora límite real de devolución:
-// para la demo la dejamos 2 horas en el pasado para poder mostrar el flujo de entrega tardía.
-let prestamosActivos = {
-  '2024-0417': {id:'NB-014', desde:'Hoy, 08:40', vence:'Hoy, 18:00', vencimiento:new Date(Date.now() - 2*60*60*1000), pendiente:false}
-};
+let prestamosActivos = {};
 let historialPrestamos = [];
 
-// Notificaciones de devolución pendientes de confirmación del Admin
 let notificacionesDevolucion = [];
-let notifSeq = 1;
-
-// Historial de entregas tardías (para que el Admin pueda ver reincidencias y sancionar)
-let historialTardanzas = [
-  {legajo:'2024-0417', nombre:'Teo Prado', rol:'alumno', notebookId:'NB-033', fecha:'15 jun'},
-  {legajo:'2024-0417', nombre:'Teo Prado', rol:'alumno', notebookId:'NB-021', fecha:'02 jul'},
-];
-
-// Reservas: individuales (alumno/profesor) y de lote (profesor -> requiere aprobación admin)
-let reservas = [
-  {id:'RES-01', ownerLegajo:'2024-0417', ownerNombre:'Teo Prado', tipo:'individual', carro:'Carro 2', cantidad:'1 notebook', fecha:'2026-07-16', hora:'09:00', motivo:'Física — laboratorio', estado:'confirmada'}
-];
-let reservaSeq = 2;
-
-let tickets = [
-  {id:'TCK-014', notebook:'NB-004', motivo:'La pantalla se apaga sola', motivoCompleto:'La pantalla se apaga sola después de unos minutos de uso.', estado:'progreso', fecha:'07 jul', ownerLegajo:'2024-0417', ownerNombre:'Teo Prado', ownerRol:'alumno'}
-];
-let ticketSeq = 15;
+let historialTardanzas = [];
+let reservas = [];
+let tickets = [];
+let lateReturnsInterval = null;
 
 const badgeClass = {disponible:'badge-disponible', prestada:'badge-prestada', reservada:'badge-pendiente_devolucion', mantenimiento:'badge-mantenimiento', pendiente_devolucion:'badge-pendiente_devolucion'};
 const badgeLabel = {disponible:'Disponible', prestada:'Prestada', reservada:'Reservada', mantenimiento:'En mantenimiento', pendiente_devolucion:'Pend. devolución'};
@@ -89,26 +53,19 @@ const pageMeta = {
   falla:    ['Reportar falla', 'Contanos qué problema encontraste con un equipo.'],
   tickets:  ['Mis tickets', 'Seguimiento de todos los reportes que enviaste.'],
   perfil:   ['Mi perfil', 'Tus datos institucionales y preferencias de la cuenta.'],
-  'admin-profesores':   ['Usuarios y roles', 'Consultá las cuentas y asigná los roles habilitados.'],
+  'admin-profesores':   ['Usuarios', 'Creá cuentas y consultá alumnos y profesores.'],
   'admin-inventario':   ['Inventario completo', 'Estado de todas las notebooks del sistema.'],
   'admin-devoluciones': ['Devoluciones pendientes', 'Confirmá la recepción física de los equipos.'],
-  'admin-lotes':        ['Lotes de profesores', 'Aprobá o rechazá solicitudes de carros completos.'],
+  'admin-lotes':        ['Préstamos', 'Aprobá y registrá el retiro de las solicitudes de préstamo (individuales o por lote).'],
   'admin-tickets':      ['Fallas reportadas', 'Tickets enviados por alumnos y profesores. Actualizá el estado del equipo según corresponda.'],
   'admin-tardanzas':    ['Devoluciones tardías', 'Historial de demoras y sanciones a alumnos y profesores.'],
 };
 
 /* ======================================================================
-   AUTH: LOGIN / REGISTRO / LOGOUT
+   AUTH: LOGIN / LOGOUT
 ====================================================================== */
-function switchAuthView(name){
-  document.querySelectorAll('.auth-view').forEach(v=>v.classList.remove('active'));
-  document.getElementById('view-'+name).classList.add('active');
-  document.getElementById('loginError').textContent = '';
-  document.getElementById('registroError').textContent = '';
-}
-
 async function apiRequest(path, options={}){
-  if(API_BASE === null) throw new Error('La API no está habilitada en el modo demo');
+  if(!API_BASE) throw new Error('La API no está configurada');
   const headers = {'Content-Type':'application/json', ...(options.headers||{})};
   if(authToken) headers.Authorization = 'Bearer '+authToken;
   const response = await fetch(API_BASE+path, {...options, headers});
@@ -119,8 +76,9 @@ async function apiRequest(path, options={}){
 
 async function cargarEstadoAPI(){
   const esAdmin = currentUser.rol==='admin';
-  const [notebooksData, reservationsData, loansData, ticketsData, preferencesData] = await Promise.all([
+  const [notebooksData, reservationsData, loansData, ticketsData, preferencesData, carrosData] = await Promise.all([
     apiRequest('/api/notebooks'), apiRequest(esAdmin ? '/api/admin/reservations' : '/api/reservations'), apiRequest('/api/loans'), apiRequest(esAdmin ? '/api/admin/tickets' : '/api/tickets'), apiRequest('/api/preferences')
+    , ...(esAdmin ? [apiRequest('/api/admin/carros')] : [Promise.resolve({carros:[]})])
   ]);
   currentUser.preferencias = {
     email: Boolean(preferencesData.preferences?.email),
@@ -129,8 +87,9 @@ async function cargarEstadoAPI(){
   notebooks = notebooksData.notebooks.map(notebook=>({
     id:notebook.id, estado:notebook.estado, ubicacion:notebook.ubicacion,
     act:notebook.actualizada ? formatBusinessDateTime(notebook.actualizada) : 'Recién',
-    prestadoA:notebook.prestado_a || null
+    prestadoA:notebook.prestado_a || null, carro_id:notebook.carro_id
   }));
+  carros = carrosData.carros;
   reservas = reservationsData.reservations.map(reserva=>{
     const retiro = businessDateParts(reserva.retiro_at);
     return {
@@ -146,23 +105,30 @@ async function cargarEstadoAPI(){
     ownerNombre:ticket.owner_nombre || currentUser.nombre, ownerRol:ticket.owner_rol || currentUser.rol
   }));
   if(esAdmin){
-    const [returnsData, lateReturnsData, usersData] = await Promise.all([
+    const [returnsData, lateReturnsData, studentsData, teachersData] = await Promise.all([
       apiRequest('/api/admin/returns'),
       apiRequest('/api/admin/late-returns'),
-      apiRequest('/api/admin/users')
+      apiRequest('/api/admin/users?rol=alumno'),
+      apiRequest('/api/admin/users?rol=profesor')
     ]);
     notificacionesDevolucion = returnsData.returns.map(item=>({
       id:item.id, notebookId:item.notebook, alumnoLegajo:item.legajo, alumnoNombre:item.nombre,
       curso:item.curso, fechaSolicitud:formatBusinessDateTime(item.solicitado_at), rol:'alumno', returnId:item.id
     }));
-    usuariosRegistrados = usersData.users;
+    usuariosRegistrados = [...studentsData.users, ...teachersData.users];
     usuariosConTardanzas = lateReturnsData.users;
-    historialTardanzas = [];
+    historialTardanzas = lateReturnsData.history.map(item=>({
+      ...item, notebookId:item.notebook_id, fecha:formatBusinessDateTime(item.fecha)
+    }));
   }
   prestamosActivos = {};
   historialPrestamos = loansData.loans;
   loansData.loans.filter(loan=>loan.estado !== 'devuelto').forEach(loan=>{
-    if(!prestamosActivos[currentUser.legajo]) prestamosActivos[currentUser.legajo] = {id:loan.notebook, curso:loan.curso, desde:formatBusinessDateTime(loan.retirada_at), vence:formatBusinessDateTime(loan.vence_at), pendiente:loan.estado!=='activo', loanId:loan.id};
+    if(!prestamosActivos[currentUser.legajo]) prestamosActivos[currentUser.legajo] = [];
+    prestamosActivos[currentUser.legajo].push({
+      id:loan.notebook, curso:loan.curso, desde:formatBusinessDateTime(loan.retirada_at),
+      vence:formatBusinessDateTime(loan.vence_at), pendiente:loan.estado!=='activo', loanId:loan.id
+    });
   });
 }
 
@@ -170,24 +136,6 @@ async function login(e){
   e.preventDefault();
   const email = document.getElementById('loginEmail').value.trim();
   const pass = document.getElementById('loginPassword').value;
-
-  if(!API_BASE){
-    const demoUser = estadoUsuarios.find(u=>u.email.toLowerCase()===email.toLowerCase());
-    if(!demoUser || demoUser.password!==pass){
-      document.getElementById('loginError').textContent = 'Correo o contraseña incorrectos';
-      return;
-    }
-    if(demoUser.baneado){
-      document.getElementById('loginError').textContent = 'Usuario bloqueado por administración';
-      return;
-    }
-    currentUser = Object.fromEntries(Object.entries(demoUser).filter(([key])=>key!=='password'));
-    rolActivo = currentUser.rol;
-    document.getElementById('loginForm').reset();
-    document.getElementById('loginError').textContent = '';
-    iniciarSesion();
-    return;
-  }
 
   try{
     const result = await apiRequest('/api/auth/login', {method:'POST', body:JSON.stringify({email, password:pass})});
@@ -205,59 +153,59 @@ async function login(e){
   }
 }
 
-async function registrar(e){
+function validarNombreCuenta(value, label){
+  const name = value.trim().normalize('NFC');
+  if(!name) return `${label} no puede estar vacío`;
+  if(name.length<2) return `${label} debe tener al menos 2 caracteres`;
+  if(name.length>60) return `${label} no puede superar 60 caracteres`;
+  if(!/^[\p{L}\p{M}]+(?: [\p{L}\p{M}]+)*$/u.test(name)) return `${label} solo puede contener letras y espacios simples`;
+  if(Array.from(name.replace(/ /g, '')).length<2) return `${label} debe tener al menos 2 letras`;
+  return '';
+}
+
+async function crearUsuarioAdmin(e){
   e.preventDefault();
-  const nombre = document.getElementById('regNombre').value.trim();
-  const email = document.getElementById('regEmail').value.trim();
-  const password = document.getElementById('regPassword').value;
-  if(password.length < 8){
-    document.getElementById('registroError').textContent = 'La contraseña debe tener al menos 8 caracteres.';
-    return;
+  const error = document.getElementById('adminUserError');
+  const nombre = document.getElementById('userNombre').value.trim();
+  const apellido = document.getElementById('userApellido').value.trim();
+  const email = document.getElementById('userEmail').value.toLowerCase();
+  const legajo = document.getElementById('userLegajo').value;
+  const rol = document.getElementById('userRol').value;
+  const password = document.getElementById('userPassword').value;
+  error.textContent = validarNombreCuenta(nombre, 'El nombre') || validarNombreCuenta(apellido, 'El apellido');
+  if(!error.textContent && nombre.length + apellido.length + 1 > 120) error.textContent = 'El nombre y apellido no pueden superar 120 caracteres en conjunto';
+  if(!error.textContent && (!/^\d{1,10}$/.test(legajo))) error.textContent = 'Legajo debe contener de 1 a 10 dígitos';
+  if(!error.textContent && /\s/.test(email)) error.textContent = 'El email no puede contener espacios';
+  if(!error.textContent && (email.length > 254 || !/^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$/.test(email))) error.textContent = 'Ingresá un email válido de hasta 254 caracteres';
+  if(!error.textContent && (password.length < 8 || /\s/.test(password))) error.textContent = 'La contraseña debe tener al menos 8 caracteres y no contener espacios';
+  if(error.textContent){ showToast(error.textContent, 'warn'); return; }
+  try{
+    await apiRequest('/api/admin/users', {method:'POST', body:JSON.stringify({nombre, apellido, email, legajo, rol, password})});
+    document.getElementById('adminUserForm').reset();
+    error.textContent = '';
+    await cargarEstadoAPI();
+    renderAll();
+    showToast('Usuario creado correctamente.', 'success');
+  }catch(requestError){
+    error.textContent = requestError.message;
+    showToast(requestError.message, 'warn');
   }
-
-  if(API_BASE){
-    try{
-      await apiRequest('/api/auth/register', {method:'POST', body:JSON.stringify({nombre, email, password})});
-      document.getElementById('registroForm').reset();
-      document.getElementById('registroError').textContent = '';
-      switchAuthView('login');
-      showToast('Registro exitoso. Ahora podés iniciar sesión.', 'success');
-      document.getElementById('loginEmail').value = email;
-    }catch(error){
-      document.getElementById('registroError').textContent = error.message;
-    }
-    return;
-  }
-
-  if(estadoUsuarios.some(u=>u.email.toLowerCase()===email.toLowerCase())){
-    document.getElementById('registroError').textContent = 'Ya existe una cuenta registrada con ese correo.';
-    return;
-  }
-
-  const legajo = 'U-' + Date.now().toString().slice(-8);
-  estadoUsuarios.push({legajo, nombre, email, rol:'alumno', password, tardanzas:0, baneado:false, retiradas:0, aTiempoPct:null});
-  usuariosRegistrados = estadoUsuarios.filter(user=>user.rol!=='admin');
-  document.getElementById('registroForm').reset();
-  document.getElementById('registroError').textContent = '';
-  switchAuthView('login');
-  showToast('Registro exitoso. Ahora podés iniciar sesión.', 'success');
-  document.getElementById('loginEmail').value = email;
 }
 
 function renderProfesoresTable(){
-  const tbody = document.getElementById('profesoresTable');
-  if(!tbody) return;
   const query = (document.getElementById('profesoresSearchInput')?.value || '').trim().toLowerCase();
-  const usuarios = usuariosRegistrados.filter(usuario=>
+  const filtered = usuariosRegistrados.filter(usuario=>
     [usuario.nombre, usuario.email, usuario.legajo, usuario.rol].some(value=>String(value || '').toLowerCase().includes(query))
   );
-  if(usuarios.length===0){
-    tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state">
-      <div class="glyph">🧑‍🏫</div><h4>No hay usuarios que coincidan</h4><p>Probá con otro nombre, correo o legajo.</p>
-    </div></td></tr>`;
-    return;
-  }
-  tbody.innerHTML = usuarios.map(usuario=>`
+  for(const [rol, tbodyId] of [['alumno', 'alumnosTable'], ['profesor', 'profesoresTable']]){
+    const tbody = document.getElementById(tbodyId);
+    if(!tbody) continue;
+    const users = filtered.filter(usuario=>usuario.rol===rol);
+    if(!users.length){
+      tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state"><p>No hay ${rol==='alumno'?'alumnos':'profesores'} que coincidan.</p></div></td></tr>`;
+      continue;
+    }
+    tbody.innerHTML = users.map(usuario=>`
     <tr>
       <td>${escapeHtml(usuario.nombre)}</td>
       <td>${escapeHtml(usuario.email)}</td>
@@ -269,6 +217,7 @@ function renderProfesoresTable(){
         <option value="profesor" ${usuario.rol==='profesor'?'selected':''}>Profesor</option>
       </select></td>
     </tr>`).join('');
+  }
 }
 
 function filterProfesores(){
@@ -278,41 +227,31 @@ function filterProfesores(){
 async function cambiarRol(legajo, rol){
   const usuario = usuariosRegistrados.find(item=>item.legajo===legajo);
   if(!usuario || !['alumno','profesor'].includes(rol)) return;
-  if(authToken){
-    try{
-      await apiRequest(`/api/admin/users/${encodeURIComponent(legajo)}/rol`, {method:'PATCH', body:JSON.stringify({rol})});
-      await cargarEstadoAPI();
-      renderAll();
-      showToast(`Rol de ${usuario.nombre} actualizado.`, 'success');
-    }catch(error){ showToast(error.message, 'warn'); }
-    return;
-  }
-  usuario.rol = rol;
-  renderProfesoresTable();
-  renderTardanzas();
-  showToast(`Rol de ${usuario.nombre} actualizado.`, 'success');
+  try{
+    await apiRequest(`/api/admin/users/${encodeURIComponent(legajo)}/rol`, {method:'PATCH', body:JSON.stringify({rol})});
+    await cargarEstadoAPI();
+    renderAll();
+    showToast(`Rol de ${usuario.nombre} actualizado.`, 'success');
+  }catch(error){ showToast(error.message, 'warn'); }
 }
 
 function iniciarSesion(){
   document.getElementById('auth-shell').classList.add('hidden');
   document.getElementById('app-root').classList.add('active');
-  const testBanner = document.getElementById('testModeBanner');
-  testBanner.style.display = API_BASE ? 'none' : 'inline-flex';
-  document.getElementById('demoHint').style.display = API_BASE ? 'none' : '';
-  document.getElementById('testModeRole').textContent = `sesión de ${rolLabel[rolActivo]}`;
   renderAll();
   applyRoleVisibility();
   switchView('inicio');
 }
 
 function logout(){
+  if(lateReturnsInterval) clearInterval(lateReturnsInterval);
+  lateReturnsInterval = null;
   authToken = null;
   currentUser = null;
   rolActivo = null;
-  document.getElementById('testModeBanner').style.display = 'none';
   document.getElementById('app-root').classList.remove('active');
   document.getElementById('auth-shell').classList.remove('hidden');
-  switchAuthView('login');
+  document.getElementById('loginError').textContent = '';
   showToast('Sesión cerrada correctamente.', 'warn');
 }
 
@@ -350,13 +289,13 @@ function toggleLoteBlock(){
   const checked = document.getElementById('loteToggle').checked;
   document.getElementById('loteBlock').classList.toggle('show', checked);
   document.getElementById('resCantidadWrap').style.display = checked ? 'none' : 'flex';
-  document.getElementById('loteCurso').required = checked && rolActivo==='profesor';
+  document.getElementById('resCursoProfesor').required = rolActivo==='profesor';
   document.getElementById('resSubmitBtn').textContent = checked ? 'Enviar solicitud de lote' : 'Confirmar reserva';
   actualizarControlesReserva();
 }
 
 function tieneEquiposPendientes(legajo){
-  if(prestamosActivos[legajo]) return true;
+  if(prestamosActivos[legajo]?.length) return true;
   if(notificacionesDevolucion.some(notificacion=>notificacion.alumnoLegajo===legajo)) return true;
   return reservas.some(reserva=>reserva.ownerLegajo===legajo &&
     !['rechazada','cancelada'].includes(reserva.estado) &&
@@ -411,7 +350,32 @@ function switchView(name){
   if(name==='admin-devoluciones') renderDevoluciones();
   if(name==='admin-lotes') renderLotes();
   if(name==='admin-tickets') renderAdminTickets();
-  if(name==='admin-tardanzas') renderTardanzas();
+  if(lateReturnsInterval) clearInterval(lateReturnsInterval);
+  lateReturnsInterval = null;
+  if(name==='admin-tardanzas'){
+    renderTardanzas();
+    if(authToken && rolActivo==='admin'){
+      void refreshAdminLateReturns();
+      lateReturnsInterval = setInterval(()=>void refreshAdminLateReturns(), 30000);
+    }
+  }
+  if(authToken && ['prestamos', 'reservas', 'admin-lotes'].includes(name)){
+    void cargarEstadoAPI().then(renderAll).catch(error=>showToast(error.message, 'warn'));
+  }
+}
+
+async function refreshAdminLateReturns(){
+  if(!authToken || rolActivo!=='admin' || !document.getElementById('view-admin-tardanzas').classList.contains('active')) return;
+  try{
+    const data = await apiRequest('/api/admin/late-returns');
+    usuariosConTardanzas = data.users;
+    historialTardanzas = data.history.map(item=>({
+      ...item, notebookId:item.notebook_id, fecha:formatBusinessDateTime(item.fecha)
+    }));
+    renderTardanzas();
+  }catch(error){
+    showToast(error.message, 'warn');
+  }
 }
 
 function renderAll(){
@@ -428,6 +392,82 @@ function renderAll(){
   renderLotes();
   renderAdminTickets();
   renderTardanzas();
+  renderInventarioForms();
+  renderFallaNotebookOptions();
+}
+
+function renderInventarioForms(){
+  const list = document.getElementById('carrosList');
+  if(list){
+    list.innerHTML = carros.length
+      ? `<div class="pill-list">${carros.map(carro=>`<span class="badge badge-disponible">Carro ${escapeHtml(carro.numero)}</span>`).join(' ')}</div>`
+      : '<p class="hint">Todavía no hay carros cargados.</p>';
+  }
+  const select = document.getElementById('notebookCarro');
+  if(select){
+    const selected = select.value;
+    select.innerHTML = carros.map(carro=>`<option value="${escapeHtml(carro.numero)}">Carro ${escapeHtml(carro.numero)}</option>`).join('');
+    if(selected && carros.some(carro=>String(carro.numero)===selected)) select.value = selected;
+    select.disabled = carros.length===0;
+  }
+}
+
+function renderFallaNotebookOptions(){
+  const select = document.getElementById('fallaNotebook');
+  if(!select) return;
+  const selected = select.value;
+  select.innerHTML = '<option value="">Seleccioná una notebook</option>'
+    + notebooks.map(notebook=>`<option value="${escapeHtml(notebook.id)}">${escapeHtml(notebook.id)}</option>`).join('')
+    + '<option value="otro">No lo sé / equipo del carro</option>';
+  if([...select.options].some(option=>option.value===selected)) select.value = selected;
+}
+
+async function crearCarro(e){
+  e.preventDefault();
+  const input = document.getElementById('carroNumero');
+  const error = document.getElementById('carroError');
+  if(!/^\d{1,3}$/.test(input.value) || Number(input.value)<1){
+    error.textContent = 'El número de carro debe contener de 1 a 3 dígitos, entre 1 y 999.';
+    return;
+  }
+  try{
+    await apiRequest('/api/admin/carros', {method:'POST', body:JSON.stringify({numero:Number(input.value)})});
+    document.getElementById('carroForm').reset();
+    error.textContent = '';
+    await cargarEstadoAPI();
+    renderAll();
+    showToast('Carro agregado correctamente.', 'success');
+  }catch(requestError){
+    error.textContent = requestError.message;
+    showToast(requestError.message, 'warn');
+  }
+}
+
+async function crearNotebooks(e){
+  e.preventDefault();
+  const numero = document.getElementById('notebookNumero').value;
+  const carro_id = Number(document.getElementById('notebookCarro').value);
+  const cantidad = Number(document.getElementById('notebookCantidad').value);
+  const error = document.getElementById('notebookError');
+  if(!/^\d{1,3}$/.test(numero) || Number(numero)<1 || Number(numero)+cantidad-1>999){
+    error.textContent = 'El número debe estar entre 1 y 999 y la serie no puede superar 999.';
+    return;
+  }
+  if(!Number.isInteger(cantidad) || cantidad<1 || cantidad>10 || !carro_id){
+    error.textContent = 'Seleccioná un carro y una cantidad de 1 a 10.';
+    return;
+  }
+  try{
+    await apiRequest('/api/admin/notebooks', {method:'POST', body:JSON.stringify({numero, carro_id, cantidad})});
+    document.getElementById('notebookForm').reset();
+    error.textContent = '';
+    await cargarEstadoAPI();
+    renderAll();
+    showToast('Notebooks agregadas correctamente.', 'success');
+  }catch(requestError){
+    error.textContent = requestError.message;
+    showToast(requestError.message, 'warn');
+  }
 }
 
 function renderHeaderUser(){
@@ -517,7 +557,8 @@ function renderMiActividad(){
     .filter(r=>r.ownerLegajo===currentUser.legajo && r.estado!=='rechazada')
     .sort((a,b)=>a.fecha.localeCompare(b.fecha))[0];
   const ticketsAbiertos = tickets.filter(t=>t.ownerLegajo===currentUser.legajo && t.estado!=='resuelto').length;
-  const prestamo = prestamosActivos[currentUser.legajo];
+  const prestamos = prestamosActivos[currentUser.legajo] || [];
+  const prestamo = prestamos[0];
 
   let html = '';
 
@@ -525,7 +566,7 @@ function renderMiActividad(){
     html += `
       <div class="action-card" style="cursor:default;margin-bottom:.8rem;">
         <div class="action-icon" style="background:var(--blue-bg);color:var(--blue-text);">💻</div>
-        <div class="action-info"><h4>Tenés ${escapeHtml(prestamo.id)} en tu poder</h4><p>Vence ${escapeHtml(prestamo.vence)}</p></div>
+        <div class="action-info"><h4>${prestamos.length>1?`Tenés ${prestamos.length} notebooks en tu poder`:`Tenés ${escapeHtml(prestamo.id)} en tu poder`}</h4><p>Vence ${escapeHtml(prestamo.vence)}</p></div>
       </div>`;
   } else if(prestamo && prestamo.pendiente){
     html += `
@@ -593,87 +634,15 @@ function renderAdminInventario(){
     </tr>`).join('');
 }
 
-// El estado de las notebooks se mueve solo con el uso del sistema (reservas, préstamos, devoluciones
-// confirmadas y reportes de falla). La única decisión manual del Admin es habilitar un equipo que
-// estaba en mantenimiento y ya se terminó de reparar.
-function moverAMantenimiento(nb){
-  if(nb.estado==='mantenimiento') return;
-  if(nb.estado==='disponible') stats.disponibles = Math.max(0, stats.disponibles-1);
-  if(nb.estado==='prestada' || nb.estado==='pendiente_devolucion') stats.prestadas = Math.max(0, stats.prestadas-1);
-  stats.mantenimiento += 1;
-  nb.estado = 'mantenimiento';
-  nb.ubicacion = 'Taller';
-  nb.act = 'Recién';
-  nb.prestadoA = null;
-}
-
-async function habilitarNotebook(id){
-  const nb = notebooks.find(n=>n.id===id);
-  if(!nb || nb.estado!=='mantenimiento') return;
-  if(authToken){
-    try{
-      await apiRequest('/api/notebooks/'+encodeURIComponent(id), {method:'PATCH', body:JSON.stringify({estado:'disponible'})});
-      await cargarEstadoAPI();
-      renderAll();
-      showToast(`${id} habilitada. Ya figura como disponible.`, 'success');
-    }catch(error){ showToast(error.message, 'warn'); }
-    return;
-  }
-  stats.mantenimiento = Math.max(0, stats.mantenimiento-1);
-  stats.disponibles += 1;
-  nb.estado = 'disponible';
-  nb.ubicacion = 'Carro 1';
-  nb.act = 'Recién';
-  nb.marcarMantenimientoAlDevolver = false;
-  tickets.filter(t=>t.notebook===id && t.estado!=='resuelto').forEach(t=>t.estado='resuelto');
-
-  renderNotebooks();
-  renderAdminInventario();
-  renderAdminTickets();
-  showToast(`${id} habilitada. Ya figura como disponible.`, 'success');
-}
-
 async function adminCambiarEstadoNotebook(id, nuevoEstado){
   const nb = notebooks.find(n=>n.id===id);
   if(!nb || !estadosNotebookManuales.includes(nuevoEstado) || nb.estado===nuevoEstado) return;
-  if(authToken){
-    try{
-      await apiRequest('/api/notebooks/'+encodeURIComponent(id), {method:'PATCH', body:JSON.stringify({estado:nuevoEstado})});
-      await cargarEstadoAPI();
-      renderAll();
-      showToast(`${id} actualizada a ${badgeLabel[nuevoEstado].toLowerCase()}.`, 'success');
-    }catch(error){ showToast(error.message, 'warn'); }
-    return;
-  }
-
-  if(nb.estado==='disponible') stats.disponibles = Math.max(0, stats.disponibles-1);
-  if(nb.estado==='prestada' || nb.estado==='pendiente_devolucion') stats.prestadas = Math.max(0, stats.prestadas-1);
-  if(nb.estado==='mantenimiento') stats.mantenimiento = Math.max(0, stats.mantenimiento-1);
-  if(nuevoEstado==='disponible') stats.disponibles += 1;
-  if(nuevoEstado==='prestada') stats.prestadas += 1;
-  if(nuevoEstado==='mantenimiento') stats.mantenimiento += 1;
-
-  nb.estado = nuevoEstado;
-  nb.act = 'Recién';
-  if(nuevoEstado==='disponible'){
-    nb.ubicacion = 'Carro 1';
-    nb.prestadoA = null;
-  } else if(nuevoEstado==='mantenimiento'){
-    nb.ubicacion = 'Taller';
-    nb.prestadoA = null;
-  } else if(nuevoEstado==='pendiente_devolucion'){
-    nb.ubicacion = '—';
-  } else {
-    nb.ubicacion = '—';
-    nb.prestadoA = nb.prestadoA || 'Administración';
-  }
-  if(nuevoEstado==='disponible'){
-    tickets.filter(t=>t.notebook===id && t.estado!=='resuelto').forEach(t=>t.estado='resuelto');
-  }
-  renderNotebooks();
-  renderAdminInventario();
-  renderAdminTickets();
-  showToast(`${id} actualizada a ${badgeLabel[nuevoEstado].toLowerCase()}.`, 'success');
+  try{
+    await apiRequest('/api/notebooks/'+encodeURIComponent(id), {method:'PATCH', body:JSON.stringify({estado:nuevoEstado})});
+    await cargarEstadoAPI();
+    renderAll();
+    showToast(`${id} actualizada a ${badgeLabel[nuevoEstado].toLowerCase()}.`, 'success');
+  }catch(error){ showToast(error.message, 'warn'); }
 }
 
 function filterAdminNotebooks(){
@@ -693,8 +662,8 @@ function filterAdminNotebooks(){
 function renderPrestamoActivo(){
   const wrap = document.getElementById('prestamoActivoWrap');
   if(!currentUser) return;
-  const prestamo = prestamosActivos[currentUser.legajo];
-  if(!prestamo){
+  const prestamos = prestamosActivos[currentUser.legajo] || [];
+  if(!prestamos.length){
     wrap.innerHTML = `<div class="empty-state">
       <div class="glyph">✅</div>
       <h4>No tenés notebooks en préstamo</h4>
@@ -702,28 +671,17 @@ function renderPrestamoActivo(){
     </div>`;
     return;
   }
-  if(prestamo.pendiente){
-    wrap.innerHTML = `
-      <div class="action-card" style="cursor:default;">
-        <div class="action-icon" style="background:var(--red-bg);color:var(--red-text);">⏳</div>
-        <div class="action-info">
-          <h4>${escapeHtml(prestamo.id)}</h4>
-          <p>Retirada ${escapeHtml(prestamo.desde)} · Devolución informada</p>
-        </div>
-        <span class="badge badge-pendiente_devolucion">Esperando confirmación del Admin</span>
-      </div>
-      <p class="hint" style="margin-top:.8rem;">La devolución fue informada y queda pendiente de recepción física por parte del Administrador.</p>`;
-    return;
-  }
-  wrap.innerHTML = `
-    <div class="action-card" style="cursor:default;">
+  wrap.innerHTML = prestamos.map(prestamo=>prestamo.pendiente ? `
+    <div class="action-card" style="cursor:default;margin-bottom:.8rem;">
+      <div class="action-icon" style="background:var(--red-bg);color:var(--red-text);">⏳</div>
+      <div class="action-info"><h4>${escapeHtml(prestamo.id)}</h4><p>Retirada ${escapeHtml(prestamo.desde)} · Devolución informada</p></div>
+      <span class="badge badge-pendiente_devolucion">Esperando confirmación del Admin</span>
+    </div>` : `
+    <div class="action-card" style="cursor:default;margin-bottom:.8rem;">
       <div class="action-icon" style="background:var(--blue-bg);color:var(--blue-text);">💻</div>
-      <div class="action-info">
-        <h4>${escapeHtml(prestamo.id)}</h4>
-        <p>Retirada ${escapeHtml(prestamo.desde)} · Vence ${escapeHtml(prestamo.vence)}</p>
-      </div>
-      <button class="btn btn-primary btn-sm" onclick="openReturnModal()">Devolver</button>
-    </div>`;
+      <div class="action-info"><h4>${escapeHtml(prestamo.id)}</h4><p>Retirada ${escapeHtml(prestamo.desde)} · Vence ${escapeHtml(prestamo.vence)}</p></div>
+      <button class="btn btn-primary btn-sm" onclick="openReturnModal(${escapeHtml(JSON.stringify(prestamo.loanId))})">Devolver</button>
+    </div>`).join('');
 }
 
 function renderHistorialPrestamos(){
@@ -745,49 +703,25 @@ function renderHistorialPrestamos(){
   }).join('');
 }
 
-function openReturnModal(){
-  const prestamo = prestamosActivos[currentUser.legajo];
+let pendingReturnLoanId = null;
+function openReturnModal(loanId){
+  const prestamo = (prestamosActivos[currentUser.legajo] || []).find(loan=>loan.loanId===loanId);
+  if(!prestamo) return;
+  pendingReturnLoanId = loanId;
   document.getElementById('returnModalText').textContent = `¿Confirmás que estás devolviendo físicamente la notebook ${prestamo.id}? Un administrador deberá confirmar la recepción antes de que quede liberada.`;
   openModal('returnModal');
 }
 
 async function confirmarDevolucion(){
-  if(authToken){
-    const prestamoAPI = prestamosActivos[currentUser.legajo];
-    if(!prestamoAPI?.loanId) return;
-    try{
-      await apiRequest(`/api/loans/${prestamoAPI.loanId}/return`, {method:'POST'});
-      await cargarEstadoAPI();
-      renderAll();
-      closeModal('returnModal');
-      showToast('Devolución solicitada. Queda pendiente de confirmación del Administrador.', 'warn');
-    }catch(error){ showToast(error.message, 'warn'); }
-    return;
-  }
-  const prestamo = prestamosActivos[currentUser.legajo];
-  if(!prestamo) return;
-  const nb = notebooks.find(n=>n.id===prestamo.id);
-  if(nb){ nb.estado='pendiente_devolucion'; nb.act='Recién'; }
-  prestamo.pendiente = true;
-
-  notificacionesDevolucion.push({
-    id: 'DEV-'+String(notifSeq++).padStart(3,'0'),
-    notebookId: prestamo.id,
-    alumnoLegajo: currentUser.legajo,
-    alumnoNombre: currentUser.nombre,
-    curso: prestamosActivos[currentUser.legajo]?.curso || 'Curso no informado',
-    fechaSolicitud: 'Recién',
-    solicitadoEn: new Date(),
-    vencimiento: prestamo.vencimiento || null,
-    rol: currentUser.rol
-  });
-
-  renderNotebooks();
-  renderAdminInventario();
-  renderPrestamoActivo();
-  renderDevoluciones();
-  closeModal('returnModal');
-  showToast('Devolución solicitada. Queda pendiente de confirmación del Administrador.', 'warn');
+  const prestamoAPI = (prestamosActivos[currentUser.legajo] || []).find(loan=>loan.loanId===pendingReturnLoanId);
+  if(!prestamoAPI?.loanId) return;
+  try{
+    await apiRequest(`/api/loans/${prestamoAPI.loanId}/return`, {method:'POST'});
+    await cargarEstadoAPI();
+    renderAll();
+    closeModal('returnModal');
+    showToast('Devolución solicitada. Queda pendiente de confirmación del Administrador.', 'warn');
+  }catch(error){ showToast(error.message, 'warn'); }
 }
 
 /* ======================================================================
@@ -822,53 +756,12 @@ function renderDevoluciones(){
 async function confirmarRecepcion(idx){
   const n = notificacionesDevolucion[idx];
   if(!n) return;
-  if(authToken){
-    try{
-      await apiRequest(`/api/admin/returns/${n.returnId || n.id}/confirm`, {method:'POST'});
-      await cargarEstadoAPI();
-      renderAll();
-      showToast(`Recepción de ${n.notebookId} confirmada.`, 'success');
-    }catch(error){ showToast(error.message, 'warn'); }
-    return;
-  }
-  const nb = notebooks.find(x=>x.id===n.notebookId);
-  delete prestamosActivos[n.alumnoLegajo];
-  notificacionesDevolucion.splice(idx,1);
-
-  let aviso = `Recepción de ${n.notebookId} confirmada. Deuda de ${n.alumnoNombre} liberada.`;
-  if(nb && nb.marcarMantenimientoAlDevolver){
-    stats.prestadas = Math.max(0, stats.prestadas-1);
-    stats.mantenimiento += 1;
-    nb.estado='mantenimiento'; nb.ubicacion='Taller'; nb.act='Recién'; nb.prestadoA=null; nb.marcarMantenimientoAlDevolver=false;
-    aviso += ` Como tenía una falla reportada, quedó automáticamente en mantenimiento.`;
-  } else if(nb){
-    stats.prestadas = Math.max(0, stats.prestadas-1);
-    stats.disponibles += 1;
-    nb.estado='disponible'; nb.ubicacion='Carro 1'; nb.act='Recién'; nb.prestadoA=null;
-  }
-
-  // Entrega tardía: si el alumno/profesor devolvió el equipo después de la hora límite,
-  // queda registrado en su historial. Al llegar a 3 demoras, se avisa al Admin.
-  if(n.vencimiento && n.solicitadoEn && new Date(n.solicitadoEn) > new Date(n.vencimiento)){
-    const u = estadoUsuarios.find(x=>x.legajo===n.alumnoLegajo);
-    if(u){
-      u.tardanzas = (u.tardanzas||0) + 1;
-      historialTardanzas.unshift({legajo:n.alumnoLegajo, nombre:n.alumnoNombre, rol:n.rol||u.rol, notebookId:n.notebookId, fecha:'Recién'});
-      aviso += ` ⏰ Se registró como entrega tardía (van ${u.tardanzas}).`;
-      if(u.tardanzas >= 3 && !u.baneado){
-        showToast(`🚨 Aviso para el Admin: ${u.nombre} acumula ${u.tardanzas} entregas tardías. Podés evaluar una sanción en "Devoluciones tardías".`, 'error');
-      }
-    }
-    renderTardanzas();
-  }
-
-  renderNotebooks();
-  renderAdminInventario();
-  renderDevoluciones();
-  renderAdminTickets();
-  actualizarControlesReserva();
-  if(currentUser && currentUser.legajo===n.alumnoLegajo) renderPrestamoActivo();
-  showToast(aviso, 'success');
+  try{
+    await apiRequest(`/api/admin/returns/${n.returnId || n.id}/confirm`, {method:'POST'});
+    await cargarEstadoAPI();
+    renderAll();
+    showToast(`Recepción de ${n.notebookId} confirmada.`, 'success');
+  }catch(error){ showToast(error.message, 'warn'); }
 }
 
 /* ======================================================================
@@ -886,17 +779,15 @@ function validarFechaHora(fechaStr, horaStr){
 
   const [y,m,d] = fechaStr.split('-').map(Number);
   const [hh,mm] = horaStr.split(':').map(Number);
-  const hoy = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
-    timeZone:BUSINESS_TIME_ZONE, year:'numeric', month:'2-digit', day:'2-digit'
-  }).formatToParts(new Date()).map(({type, value})=>[type, value]));
+  const hoy = businessDateParts(new Date());
   const fechaActual = `${hoy.year}-${hoy.month}-${hoy.day}`;
 
   if(y !== Number(hoy.year)){
     return {valid:false, msg:`Las reservas solo pueden hacerse durante el año ${hoy.year}.`};
   }
 
-  if(fechaStr < fechaActual){
-    return {valid:false, msg:'No se pueden reservar fechas pasadas.'};
+  if(fechaStr < fechaActual || (fechaStr === fechaActual && `${horaStr}:00` <= `${hoy.hour}:${hoy.minute}:00`)){
+    return {valid:false, msg:'La fecha y hora de reserva deben ser futuras (hora de Buenos Aires).'};
   }
 
   const diaSemana = new Date(Date.UTC(y, m-1, d)).getUTCDay();
@@ -905,10 +796,10 @@ function validarFechaHora(fechaStr, horaStr){
   }
 
   const minutosDelDia = hh*60+mm;
-  const dentroDeHorario = (minutosDelDia >= 8*60 && minutosDelDia <= 12*60+10)
-    || (minutosDelDia >= 13*60+30 && minutosDelDia <= 17*60+30);
+  const dentroDeHorario = (minutosDelDia >= 8*60 && minutosDelDia <= 11*60+50)
+    || (minutosDelDia >= 13*60+30 && minutosDelDia <= 17*60+40);
   if(!dentroDeHorario){
-    return {valid:false, msg:'Solo se puede reservar de 08:00 a 12:10 y de 13:30 a 17:30.'};
+    return {valid:false, msg:'Solo se puede reservar de 08:00 a 11:50 y de 13:30 a 17:40.'};
   }
 
   return {valid:true, msg:''};
@@ -919,13 +810,35 @@ async function crearReservaAPI(e){
   const hora = document.getElementById('resHora').value;
   const esLote = rolActivo==='profesor' && document.getElementById('loteToggle').checked;
   const cantidad = esLote ? Number(document.getElementById('loteCantidad').value) : (rolActivo==='profesor' ? Number(document.getElementById('resCantidad').value) : 1);
-  const curso = rolActivo==='profesor' ? document.getElementById(esLote ? 'loteCurso' : 'resCursoProfesor').value.trim() : null;
+  const curso = rolActivo==='profesor' ? document.getElementById('resCursoProfesor').value.trim() : null;
+  const motivoInput = document.getElementById('resMotivo').value;
+  const motivo = motivoInput.trim();
   const errorBox = document.getElementById('resFechaError');
   const check = validarFechaHora(fecha, hora);
   if(!check.valid){ errorBox.textContent = check.msg; showToast(check.msg, 'warn'); return; }
+  if(rolActivo==='profesor' && !curso){
+    errorBox.textContent = 'El curso no puede estar vacío.';
+    showToast(errorBox.textContent, 'warn');
+    return;
+  }
+  if(motivoInput && !motivo){
+    errorBox.textContent = 'El motivo no puede estar vacío';
+    showToast(errorBox.textContent, 'warn');
+    return;
+  }
+  if(curso && curso.length>120){
+    errorBox.textContent = 'El curso no puede superar 120 caracteres.';
+    showToast(errorBox.textContent, 'warn');
+    return;
+  }
+  if(motivo.length>240){
+    errorBox.textContent = 'El motivo no puede superar 240 caracteres.';
+    showToast(errorBox.textContent, 'warn');
+    return;
+  }
   try{
     await apiRequest('/api/reservations', {method:'POST', body:JSON.stringify({
-      tipo:esLote ? 'lote' : 'individual', cantidad, curso, retiroAt:`${fecha}T${hora}:00`, motivo:document.getElementById('resMotivo').value || 'Sin especificar'
+      tipo:esLote ? 'lote' : 'individual', cantidad, curso, retiroAt:`${fecha}T${hora}:00`, motivo
     })});
     document.getElementById('reservaForm').reset();
     document.getElementById('loteToggle').checked = false;
@@ -941,139 +854,16 @@ async function crearReservaAPI(e){
 
 async function crearReserva(e){
   e.preventDefault();
-  if(authToken){ await crearReservaAPI(e); return; }
-  const errBox = document.getElementById('resFechaError');
-  const fecha = document.getElementById('resFecha').value;
-  const hora = document.getElementById('resHora').value;
-  const equiposDisponibles = notebooks.filter(nb=>nb.estado==='disponible');
-  const motivo = document.getElementById('resMotivo').value || 'Sin especificar';
-  const esLote = rolActivo==='profesor' && document.getElementById('loteToggle').checked;
-
-  if(tieneEquiposPendientes(currentUser.legajo)){
-    const msg = 'No podés pedir más notebooks hasta devolver las que tenés asignadas.';
-    errBox.textContent = msg;
-    showToast(msg, 'warn');
-    actualizarControlesReserva();
-    return;
-  }
-
-  const check = validarFechaHora(fecha, hora);
-  if(!check.valid){
-    errBox.textContent = check.msg;
-    showToast(check.msg, 'warn');
-    return;
-  }
-  errBox.textContent = '';
-
-  if(esLote){
-    const curso = document.getElementById('loteCurso').value.trim();
-    const cantidad = parseInt(document.getElementById('loteCantidad').value) || 10;
-    if(!curso){
-      const msg = 'Escribí el curso del lote.';
-      errBox.textContent = msg;
-      showToast(msg, 'warn');
-      return;
-    }
-    if(cantidad < 3 || cantidad > equiposDisponibles.length){
-      const msg = `El lote debe tener entre 3 y ${equiposDisponibles.length} equipos.`;
-      errBox.textContent = msg;
-      showToast(msg, 'warn');
-      return;
-    }
-    if(equiposDisponibles.length < cantidad){
-      const msg = `No hay suficientes notebooks disponibles para el lote. Disponibles: ${equiposDisponibles.length}.`;
-      errBox.textContent = msg;
-      showToast(msg, 'warn');
-      return;
-    }
-    const notebookIds = equiposDisponibles.slice(0, cantidad).map(nb=>nb.id);
-    notebookIds.forEach(id=>{ const nb=notebooks.find(item=>item.id===id); nb.estado='reservada'; nb.ubicacion='Reservada'; nb.act='Recién'; });
-    reservas.unshift({
-      id:'RES-'+String(reservaSeq++).padStart(2,'0'),
-      ownerLegajo: currentUser.legajo,
-      ownerNombre: currentUser.nombre,
-      tipo:'lote', curso, cantidad, fecha, hora, motivo, notebookIds,
-      estado:'pendiente_aprobacion'
-    });
-    document.getElementById('reservaForm').reset();
-    document.getElementById('loteToggle').checked = false;
-    toggleLoteBlock();
-    renderReservas();
-    renderLotes();
-    renderNotebooks();
-    renderAdminInventario();
-    actualizarControlesReserva();
-    showToast('Solicitud de lote enviada. Queda pendiente de aprobación del Administrador.', 'warn');
-    return;
-  }
-
-  const cantidadNumerica = rolActivo==='profesor' ? Number(document.getElementById('resCantidad').value) : 1;
-  const cantidad = `${cantidadNumerica} ${cantidadNumerica===1 ? 'notebook' : 'notebooks'}`;
-  const curso = rolActivo==='profesor' ? document.getElementById('resCursoProfesor').value.trim() : null;
-  if(rolActivo==='profesor' && !curso){
-    const msg = 'Escribí el curso de la reserva.';
-    errBox.textContent = msg;
-    showToast(msg, 'warn');
-    return;
-  }
-  if(rolActivo!=='profesor' && cantidadNumerica!==1){
-    const msg = 'Los alumnos solo pueden pedir una notebook por vez.';
-    errBox.textContent = msg;
-    showToast(msg, 'warn');
-    return;
-  }
-  if(esLote || (rolActivo==='profesor' && cantidadNumerica > equiposDisponibles.length)){
-    const msg = `No podés pedir más equipos que los disponibles: ${equiposDisponibles.length}.`;
-    errBox.textContent = msg;
-    showToast(msg, 'warn');
-    return;
-  }
-  if(equiposDisponibles.length < cantidadNumerica){
-    const msg = `No hay suficientes notebooks disponibles. Disponibles: ${equiposDisponibles.length}.`;
-    errBox.textContent = msg;
-    showToast(msg, 'warn');
-    return;
-  }
-  const notebookIds = equiposDisponibles.slice(0, cantidadNumerica).map(nb=>nb.id);
-  notebookIds.forEach(id=>{ const nb=notebooks.find(item=>item.id===id); nb.estado='reservada'; nb.ubicacion='Reservada'; nb.act='Recién'; });
-  reservas.unshift({
-    id:'RES-'+String(reservaSeq++).padStart(2,'0'),
-    ownerLegajo: currentUser.legajo,
-    ownerNombre: currentUser.nombre,
-    tipo:'individual', curso, cantidad, fecha, hora, motivo, notebookIds,
-    estado:'confirmada'
-  });
-  document.getElementById('reservaForm').reset();
-  renderReservas();
-  renderNotebooks();
-  renderAdminInventario();
-  actualizarControlesReserva();
-  showToast('Reserva confirmada para el '+formatFecha(fecha)+' a las '+hora+'.', 'success');
+  await crearReservaAPI(e);
 }
 
 async function cancelarReserva(id){
-  if(authToken){
-    try{
-      await apiRequest('/api/reservations/'+encodeURIComponent(id), {method:'DELETE'});
-      await cargarEstadoAPI();
-      renderAll();
-      showToast('Reserva cancelada.', 'warn');
-    }catch(error){ showToast(error.message, 'warn'); }
-    return;
-  }
-  const idx = reservas.findIndex(r=>r.id===id);
-  if(idx<0) return;
-  reservas[idx].notebookIds?.forEach(notebookId=>{
-    const nb = notebooks.find(item=>item.id===notebookId);
-    if(nb?.estado==='reservada'){ nb.estado='disponible'; nb.ubicacion='Carro 1'; nb.act='Recién'; }
-  });
-  reservas.splice(idx,1);
-  renderReservas();
-  renderLotes();
-  renderNotebooks();
-  renderAdminInventario();
-  actualizarControlesReserva();
-  showToast('Reserva cancelada.', 'warn');
+  try{
+    await apiRequest('/api/reservations/'+encodeURIComponent(id), {method:'DELETE'});
+    await cargarEstadoAPI();
+    renderAll();
+    showToast('Reserva cancelada.', 'warn');
+  }catch(error){ showToast(error.message, 'warn'); }
 }
 
 function renderReservas(){
@@ -1109,92 +899,61 @@ function renderLotes(){
   const wrap = document.getElementById('lotesWrap');
   if(!wrap) return;
   const badge = document.getElementById('lotesBadge');
-  const pendientes = reservas.filter(r=>r.tipo==='lote' && r.estado==='pendiente_aprobacion');
-  const aprobadas = reservas.filter(r=>r.tipo==='lote' && r.estado==='aprobada');
-  const individuales = reservas.filter(r=>r.tipo==='individual' && r.estado==='confirmada');
-
-  if(pendientes.length===0 && aprobadas.length===0 && individuales.length===0){
+  if(reservas.length===0){
     wrap.innerHTML = `<div class="empty-state">
-      <div class="glyph">👥</div>
-      <h4>No hay solicitudes de lote pendientes</h4>
-      <p>Las solicitudes de préstamo por lote de los profesores van a aparecer acá.</p>
+      <div class="glyph">📦</div>
+      <h4>No hay solicitudes de préstamo</h4>
+      <p>Las reservas individuales y por lote aparecerán acá.</p>
     </div>`;
     badge.style.display = 'none';
     return;
   }
-  badge.style.display = pendientes.length ? 'inline-flex' : 'none';
-  badge.textContent = pendientes.length;
-
-  wrap.innerHTML = pendientes.map(r=>`
-    <div class="action-card" style="cursor:default;margin-bottom:.8rem;">
-      <div class="action-icon" style="background:var(--purple-bg);color:var(--purple-text);">👥</div>
+  const actionable = reservas.filter(r=>['pendiente_aprobacion','confirmada','aprobada'].includes(r.estado)).length;
+  badge.style.display = actionable ? 'inline-flex' : 'none';
+  badge.textContent = actionable;
+  const labels = {
+    pendiente_aprobacion:'Pendiente de aprobación', confirmada:'Confirmada', aprobada:'Aprobada',
+    retirada:'Retirada', rechazada:'Rechazada', cancelada:'Cancelada'
+  };
+  wrap.innerHTML = [...reservas].sort((a,b)=>b.fecha.localeCompare(a.fecha)).map(r=>{
+    const canApprove = r.tipo==='lote' && r.estado==='pendiente_aprobacion';
+    const canReject = r.tipo==='lote' && ['pendiente_aprobacion','aprobada'].includes(r.estado);
+    const canCheckout = ['confirmada','aprobada'].includes(r.estado);
+    const heading = r.curso ? `${r.curso} · ${r.cantidad} equipos` : `${r.cantidad} · ${r.tipo==='lote'?'Lote':'Individual'}`;
+    return `<div class="action-card" style="cursor:default;margin-bottom:.8rem;">
+      <div class="action-icon" style="background:${r.tipo==='lote'?'var(--purple-bg)':'var(--blue-bg)'};color:${r.tipo==='lote'?'var(--purple-text)':'var(--blue-text)'};">${r.tipo==='lote'?'👥':'📅'}</div>
       <div class="action-info">
-        <h4>${escapeHtml(r.curso)} · ${escapeHtml(r.cantidad)} equipos</h4>
-        <p>${escapeHtml(r.ownerNombre)} · ${escapeHtml(formatFecha(r.fecha))} ${escapeHtml(r.hora)} — ${escapeHtml(r.motivo)}</p>
+        <h4>${escapeHtml(heading)}</h4>
+        <p>${escapeHtml(r.ownerNombre)} · ${escapeHtml(formatFecha(r.fecha))} ${escapeHtml(r.hora)} · ${escapeHtml(r.motivo || 'Sin especificar')}</p>
       </div>
-      <button class="btn btn-sm btn-success-outline" style="margin-right:.5rem;" onclick="aprobarLote(${escapeHtml(JSON.stringify(r.id))})">Aprobar</button>
-      <button class="btn btn-sm btn-danger-outline" onclick="pedirRechazoLote(${escapeHtml(JSON.stringify(r.id))})">Rechazar</button>
-    </div>`).join('') + aprobadas.map(r=>`
-    <div class="action-card" style="cursor:default;margin-bottom:.8rem;">
-      <div class="action-icon" style="background:var(--green-bg);color:var(--green-text);">📦</div>
-      <div class="action-info">
-        <h4>${escapeHtml(r.curso)} · ${escapeHtml(r.cantidad)} equipos</h4>
-        <p>${escapeHtml(r.ownerNombre)} · ${escapeHtml(formatFecha(r.fecha))} ${escapeHtml(r.hora)} — Retiro aprobado</p>
-      </div>
-      <button class="btn btn-sm btn-primary" onclick="registrarRetiro(${escapeHtml(JSON.stringify(r.id))})">Registrar retiro</button>
-    </div>`).join('') + individuales.map(r=>`
-    <div class="action-card" style="cursor:default;margin-bottom:.8rem;">
-      <div class="action-icon" style="background:var(--blue-bg);color:var(--blue-text);">📅</div>
-      <div class="action-info">
-        <h4>${escapeHtml(r.ownerNombre)} · ${escapeHtml(r.cantidad)}</h4>
-        <p>${escapeHtml(formatFecha(r.fecha))} ${escapeHtml(r.hora)} — Reserva confirmada</p>
-      </div>
-      <button class="btn btn-sm btn-primary" onclick="registrarRetiro(${escapeHtml(JSON.stringify(r.id))})">Registrar retiro</button>
-    </div>`).join('');
+      <span class="badge">${escapeHtml(labels[r.estado] || r.estado)}</span>
+      ${canApprove?`<button class="btn btn-sm btn-success-outline" onclick="aprobarLote(${escapeHtml(JSON.stringify(r.id))})">Aprobar</button>`:''}
+      ${canReject?`<button class="btn btn-sm btn-danger-outline" onclick="pedirRechazoLote(${escapeHtml(JSON.stringify(r.id))})">Rechazar</button>`:''}
+      ${canCheckout?`<button class="btn btn-sm btn-primary" onclick="registrarRetiro(${escapeHtml(JSON.stringify(r.id))})">Registrar retiro</button>`:''}
+    </div>`;
+  }).join('');
 }
 
 async function aprobarLote(id){
   const r = reservas.find(x=>x.id===id);
-  if(!r) return;
-  if(authToken){
-    try{
-      await apiRequest(`/api/admin/reservations/${id}/approve`, {method:'POST'});
-      await cargarEstadoAPI();
-      renderAll();
-      showToast(`Lote de ${r.curso} aprobado.`, 'success');
-    }catch(error){ showToast(error.message, 'warn'); }
-    return;
-  }
-  r.estado = 'aprobada';
-  renderLotes();
-  renderReservas();
-  showToast(`Lote de ${r.curso} aprobado. Falta registrar el retiro físico.`, 'success');
+  if(!r || r.tipo!=='lote') return;
+  try{
+    await apiRequest(`/api/admin/reservations/${id}/approve`, {method:'POST'});
+    await cargarEstadoAPI();
+    renderAll();
+    showToast(`Lote de ${r.curso} aprobado.`, 'success');
+  }catch(error){ showToast(error.message, 'warn'); }
 }
 
 async function registrarRetiro(id){
   const r = reservas.find(reserva=>reserva.id===id);
   if(!r) return;
-  if(authToken){
-    try{
-      const result = await apiRequest(`/api/admin/reservations/${id}/checkout`, {method:'POST'});
-      await cargarEstadoAPI();
-      renderAll();
-      showToast(`${result.loansCreated || 0} préstamo(s) creado(s).`, 'success');
-    }catch(error){ showToast(error.message, 'warn'); }
-    return;
-  }
-  const notebookIds = r.notebookIds || [];
-  notebookIds.forEach(notebookId=>{
-    const nb = notebooks.find(item=>item.id===notebookId);
-    if(nb){ nb.estado='prestada'; nb.ubicacion='—'; nb.act='Recién'; nb.prestadoA = r.ownerLegajo+' · '+r.curso; }
-  });
-  r.estado = 'retirada';
-  prestamosActivos[r.ownerLegajo] = {id:notebookIds[0], curso:r.curso, desde:'Recién', vence:'Hoy', pendiente:false};
-  renderNotebooks();
-  renderAdminInventario();
-  renderLotes();
-  renderReservas();
-  showToast('Retiro registrado y préstamo creado.', 'success');
+  try{
+    const result = await apiRequest(`/api/admin/reservations/${id}/checkout`, {method:'POST'});
+    await cargarEstadoAPI();
+    renderAll();
+    showToast(`${result.loansCreated || 0} préstamo(s) creado(s).`, 'success');
+  }catch(error){ showToast(error.message, 'warn'); }
 }
 
 let pendingRejectId = null;
@@ -1210,32 +969,13 @@ function pedirRechazoLote(id){
 async function confirmarRechazoLote(){
   const r = reservas.find(x=>x.id===pendingRejectId);
   if(!r) return;
-  if(authToken){
-    try{
-      await apiRequest(`/api/admin/reservations/${encodeURIComponent(r.id)}/reject`, {method:'POST'});
-      await cargarEstadoAPI();
-      renderAll();
-      closeModal('rejectLoteModal');
-      showToast('Solicitud de lote rechazada.', 'warn');
-    }catch(error){ showToast(error.message, 'warn'); }
-    return;
-  }
-  if(r) r.estado = 'rechazada';
-  r.notebookIds?.forEach(notebookId=>{
-    const notebook = notebooks.find(item=>item.id===notebookId);
-    if(notebook?.estado==='reservada'){
-      notebook.estado = 'disponible';
-      notebook.ubicacion = 'Carro 1';
-      notebook.act = 'Recién';
-    }
-  });
-  closeModal('rejectLoteModal');
-  renderLotes();
-  renderReservas();
-  renderNotebooks();
-  renderAdminInventario();
-  actualizarControlesReserva();
-  showToast('Solicitud de lote rechazada.', 'warn');
+  try{
+    await apiRequest(`/api/admin/reservations/${encodeURIComponent(r.id)}/reject`, {method:'POST'});
+    await cargarEstadoAPI();
+    renderAll();
+    closeModal('rejectLoteModal');
+    showToast('Solicitud de lote rechazada.', 'warn');
+  }catch(error){ showToast(error.message, 'warn'); }
 }
 
 /* ======================================================================
@@ -1244,57 +984,26 @@ async function confirmarRechazoLote(){
 async function crearTicket(e){
   e.preventDefault();
   const nbSel = document.getElementById('fallaNotebook');
+  const motivo = document.getElementById('fallaMotivo').value.trim();
   const desc = document.getElementById('fallaDesc').value.trim();
-  if(!nbSel.value || !desc){ showToast('Completá la notebook y la descripción.', 'warn'); return; }
-  if(authToken){
-    try{
-      await apiRequest('/api/tickets', {method:'POST', body:JSON.stringify({
-        notebook:nbSel.value==='otro' ? null : nbSel.value, motivo:desc.slice(0,240), descripcion:desc
-      })});
-      document.getElementById('fallaForm').reset();
-      await cargarEstadoAPI();
-      renderAll();
-      showToast('Reporte enviado al Administrador.', 'success');
-      switchView('tickets');
-    }catch(error){ showToast(error.message, 'warn'); }
+  if(!nbSel.value || !motivo || !desc){
+    showToast('Completá la notebook, el motivo y la descripción.', 'warn');
     return;
   }
-
-  const t = {
-    id: 'TCK-0'+(ticketSeq++),
-    notebook: nbSel.value==='otro' ? 'Sin identificar' : nbSel.value,
-    motivo: desc.length>46 ? desc.slice(0,46)+'…' : desc,
-    motivoCompleto: desc,
-    estado:'abierto', fecha:'hoy',
-    ownerLegajo: currentUser.legajo,
-    ownerNombre: currentUser.nombre,
-    ownerRol: currentUser.rol
-  };
-  tickets.unshift(t);
-  document.getElementById('fallaForm').reset();
-  document.querySelectorAll('#severityGroup .severity-opt').forEach(o=>o.className='severity-opt');
-  document.querySelector('.severity-opt[data-val="media"]').classList.add('checked-media');
-
-  // Automatización: si el equipo reportado está disponible, pasa solo a "mantenimiento".
-  // Si está prestado, se manda a mantenimiento recién cuando se confirme su devolución.
-  let avisoEquipo = '';
-  if(t.notebook !== 'Sin identificar'){
-    const nb = notebooks.find(n=>n.id===t.notebook);
-    if(nb && nb.estado==='disponible'){
-      moverAMantenimiento(nb);
-      avisoEquipo = ` ${t.notebook} se marcó automáticamente en mantenimiento.`;
-    } else if(nb){
-      nb.marcarMantenimientoAlDevolver = true;
-    }
+  if(motivo.length>240 || desc.length>4000){
+    showToast('El motivo admite hasta 240 caracteres y la descripción hasta 4000.', 'warn');
+    return;
   }
-
-  updateTicketsBadge();
-  updateAdminTicketsBadge();
-  renderAdminTickets();
-  renderNotebooks();
-  renderAdminInventario();
-  showToast('Reporte enviado al Administrador. Ticket '+t.id+' creado.'+avisoEquipo, 'success');
-  switchView('tickets');
+  try{
+    await apiRequest('/api/tickets', {method:'POST', body:JSON.stringify({
+      notebook:nbSel.value==='otro' ? null : nbSel.value, motivo, descripcion:desc
+    })});
+    document.getElementById('fallaForm').reset();
+    await cargarEstadoAPI();
+    renderAll();
+    showToast('Reporte enviado al Administrador.', 'success');
+    switchView('tickets');
+  }catch(error){ showToast(error.message, 'warn'); }
 }
 
 
@@ -1342,15 +1051,9 @@ function renderAdminTickets(){
   }
   tbody.innerHTML = ticketsActivos.map(t=>{
     const nb = notebooks.find(n=>n.id===t.notebook);
-    let equipoCol = '<span class="hint">Sin equipo identificado</span>';
-    if(nb){
-      equipoCol = `<span class="badge ${escapeHtml(badgeClass[nb.estado])}">${escapeHtml(badgeLabel[nb.estado])}</span>`;
-      if(nb.estado==='mantenimiento'){
-        equipoCol += ` <button class="btn btn-sm btn-success-outline" style="margin-left:.4rem;" onclick="habilitarNotebook(${escapeHtml(JSON.stringify(nb.id))})">Habilitar</button>`;
-      } else if(nb.marcarMantenimientoAlDevolver){
-        equipoCol += ` <span class="hint">(pasará a mantenimiento al devolverse)</span>`;
-      }
-    }
+    const equipoCol = nb
+      ? `<span class="badge ${escapeHtml(badgeClass[nb.estado])}">${escapeHtml(badgeLabel[nb.estado])}</span>`
+      : '<span class="hint">Sin equipo identificado</span>';
     return `
     <tr>
       <td class="mono">${escapeHtml(t.id)}</td>
@@ -1358,11 +1061,8 @@ function renderAdminTickets(){
       <td class="mono">${escapeHtml(t.notebook)}</td>
       <td>${escapeHtml(t.motivo)}</td>
       <td>
-        <select class="btn btn-sm" style="font-weight:500;" onchange="adminSetTicketEstado(${escapeHtml(JSON.stringify(t.id))}, this.value)">
-          <option value="abierto" ${t.estado==='abierto'?'selected':''}>Abierto</option>
-          <option value="progreso" ${t.estado==='progreso'?'selected':''}>En progreso</option>
-          <option value="resuelto" ${t.estado==='resuelto'?'selected':''}>Resuelto</option>
-        </select>
+        ${t.estado!=='progreso'?`<button class="btn btn-sm" onclick="adminSetTicketEstado(${escapeHtml(JSON.stringify(t.id))}, 'progreso')">En progreso</button>`:''}
+        <button class="btn btn-sm btn-success-outline" onclick="adminSetTicketEstado(${escapeHtml(JSON.stringify(t.id))}, 'resuelto')">Resuelto</button>
       </td>
       <td>${equipoCol}</td>
     </tr>`;
@@ -1373,19 +1073,12 @@ function renderAdminTickets(){
 async function adminSetTicketEstado(idx, nuevoEstado){
   const t = tickets.find(ticket=>ticket.id===idx);
   if(!t) return;
-  if(authToken){
-    try{
-      await apiRequest('/api/tickets/'+encodeURIComponent(idx), {method:'PATCH', body:JSON.stringify({estado:nuevoEstado})});
-      await cargarEstadoAPI();
-      renderAll();
-      showToast(`Ticket ${t.id} actualizado.`, 'success');
-    }catch(error){ showToast(error.message, 'warn'); }
-    return;
-  }
-  t.estado = nuevoEstado;
-  renderAdminTickets();
-  updateTicketsBadge();
-  showToast(`Ticket ${t.id} actualizado a "${ticketBadgeLabel[nuevoEstado]}".`, 'success');
+  try{
+    await apiRequest('/api/tickets/'+encodeURIComponent(idx), {method:'PATCH', body:JSON.stringify({estado:nuevoEstado})});
+    await cargarEstadoAPI();
+    renderAll();
+    showToast(`Ticket ${t.id} actualizado.`, 'success');
+  }catch(error){ showToast(error.message, 'warn'); }
 }
 
 function updateAdminTicketsBadge(){
@@ -1406,7 +1099,7 @@ function renderTardanzas(){
   const badge = document.getElementById('tardanzasBadge');
   if(!wrap || !tbody) return;
 
-  const todosUsuarios = authToken ? usuariosConTardanzas : estadoUsuarios.filter(u=>u.rol!=='admin');
+  const todosUsuarios = usuariosConTardanzas;
 
   if(porUsuarioBody){
     if(todosUsuarios.length===0){
@@ -1423,34 +1116,39 @@ function renderTardanzas(){
     }
   }
 
-  const conDemoras = todosUsuarios
-    .filter(u=>u.rol!=='admin' && (u.tardanzas||0) > 0)
-    .sort((a,b)=>(b.tardanzas||0)-(a.tardanzas||0));
-
-  if(conDemoras.length===0){
+  const ordenados = [...todosUsuarios].sort((a,b)=>(b.tardanzas||0)-(a.tardanzas||0) || a.nombre.localeCompare(b.nombre));
+  if(ordenados.length===0){
     wrap.innerHTML = `<div class="empty-state">
-      <div class="glyph">✅</div><h4>Nadie tiene entregas tardías registradas</h4><p>Cuando alguien devuelva un equipo fuera de horario, va a aparecer acá.</p>
+      <div class="glyph">✅</div><h4>No hay alumnos ni profesores registrados</h4><p>Las cuentas creadas desde Usuarios aparecerán acá.</p>
     </div>`;
   } else {
-    wrap.innerHTML = conDemoras.map(u=>`
+    wrap.innerHTML = ordenados.map(u=>{
+      const durationControl = `<select class="ban-duration" id="ban-duration-${escapeHtml(u.legajo)}" aria-label="Duración del baneo para ${escapeHtml(u.nombre)}">
+        <option value="1">1 día</option><option value="3">3 días</option><option value="7">7 días</option>
+        <option value="15">15 días</option><option value="30">30 días</option><option value="indefinido">Indefinido</option>
+      </select>`;
+      const banAction = u.baneado
+        ? `<button class="btn btn-sm btn-success-outline" onclick="cambiarBaneo(${escapeHtml(JSON.stringify(u.legajo))}, false)">Desbanear</button>`
+        : `${durationControl}<button class="btn btn-sm btn-danger-outline" onclick="cambiarBaneo(${escapeHtml(JSON.stringify(u.legajo))}, true, document.getElementById('ban-duration-${escapeHtml(u.legajo)}').value)">Banear</button>`;
+      const until = u.baneado ? (u.baneado_hasta ? ` · hasta ${formatBusinessDateTime(u.baneado_hasta)}` : ' · indefinido') : '';
+      return `
       <div class="action-card" style="cursor:default;margin-bottom:.8rem;${u.tardanzas>=3 && !u.baneado ? 'border-color:var(--red-text);' : ''}">
         <div class="action-icon" style="${u.tardanzas>=3 ? 'background:var(--red-bg);color:var(--red-text);' : 'background:var(--orange-bg);color:var(--orange-text);'}">${u.baneado ? '🚫' : '⏰'}</div>
         <div class="action-info">
           <h4>${escapeHtml(u.nombre)} <span class="hint">(${escapeHtml(rolLabel[u.rol] || u.rol)} · ${escapeHtml(u.legajo)})</span></h4>
-          <p>${escapeHtml(u.tardanzas)} entrega${u.tardanzas===1?'':'s'} tardía${u.tardanzas===1?'':'s'} registrada${u.tardanzas===1?'':'s'}${u.tardanzas>=3 ? ' · candidato a sanción' : ''}</p>
+          <p>${escapeHtml(u.tardanzas ?? 0)} entrega${u.tardanzas===1?'':'s'} tardía${u.tardanzas===1?'':'s'} registrada${u.tardanzas===1?'':'s'}${u.tardanzas>=3 ? ' · candidato a sanción' : ''}${escapeHtml(until)}</p>
         </div>
-        ${u.baneado
-          ? `<button class="btn btn-sm btn-success-outline" onclick="cambiarBaneo(${escapeHtml(JSON.stringify(u.legajo))}, false)">Quitar baneo</button>`
-          : `<button class="btn btn-sm btn-danger-outline" onclick="cambiarBaneo(${escapeHtml(JSON.stringify(u.legajo))}, true)">Banear</button>`}
-      </div>`).join('');
+        ${banAction}
+      </div>`;
+    }).join('');
   }
 
-  const pendientesAviso = conDemoras.filter(u=>u.tardanzas>=3 && !u.baneado).length;
+  const pendientesAviso = ordenados.filter(u=>u.tardanzas>=3 && !u.baneado).length;
   if(pendientesAviso>0){ badge.style.display='inline-flex'; badge.textContent = pendientesAviso; }
   else{ badge.style.display='none'; }
 
   if(historialTardanzas.length===0){
-    tbody.innerHTML = `<tr><td colspan="4"><div class="empty-state"><p>${authToken ? 'El endpoint de demoras entrega un resumen por usuario, no el detalle de cada devolución.' : 'Todavía no hay entregas tardías registradas.'}</p></div></td></tr>`;
+    tbody.innerHTML = '<tr><td colspan="4"><div class="empty-state"><p>Todavía no hay entregas tardías registradas.</p></div></td></tr>';
   } else {
     tbody.innerHTML = historialTardanzas.map(h=>`
       <tr>
@@ -1462,25 +1160,19 @@ function renderTardanzas(){
   }
 }
 
-function permabanear(legajo){
-  cambiarBaneo(legajo, true);
-}
-
-async function cambiarBaneo(legajo, baneado){
-  const u = usuariosRegistrados.find(x=>x.legajo===legajo) || estadoUsuarios.find(x=>x.legajo===legajo);
+async function cambiarBaneo(legajo, baneado, duracion){
+  const u = usuariosConTardanzas.find(x=>x.legajo===legajo);
   if(!u) return;
-  if(authToken){
-    try{
-      await apiRequest('/api/admin/users/'+encodeURIComponent(legajo), {method:'PATCH', body:JSON.stringify({baneado})});
-      await cargarEstadoAPI();
-      renderTardanzas();
-      showToast(baneado ? `${u.nombre} fue baneado permanentemente.` : `Baneo de ${u.nombre} quitado.`, baneado ? 'error' : 'success');
-    }catch(error){ showToast(error.message, 'warn'); }
-    return;
+  try{
+    const duracionDias = duracion === 'indefinido' || !baneado ? null : Number(duracion);
+    await apiRequest('/api/admin/users/'+encodeURIComponent(legajo), {
+      method:'PATCH', body:JSON.stringify({baneado, duracionDias})
+    });
+    await refreshAdminLateReturns();
+    showToast(baneado ? `Baneo de ${u.nombre} actualizado.` : `Baneo de ${u.nombre} quitado.`, baneado ? 'error' : 'success');
+  }catch(error){
+    showToast(error.message, 'warn');
   }
-  u.baneado = baneado;
-  renderTardanzas();
-  showToast(baneado ? `${u.nombre} fue baneado permanentemente.` : `Baneo de ${u.nombre} quitado.`, baneado ? 'error' : 'success');
 }
 
 /* ======================================================================
@@ -1504,20 +1196,16 @@ async function actualizarPreferencias(){
     email: document.getElementById('preferenciasEmail').checked,
     recordatorio: document.getElementById('preferenciasRecordatorio').value
   };
-  if(authToken){
-    try{
-      const result = await apiRequest('/api/preferences', {method:'PATCH', body:JSON.stringify(preferencias)});
-      currentUser.preferencias = {
-        email: Boolean(result.preferences.email),
-        recordatorio: String(result.preferences.recordatorio)
-      };
-    }catch(error){
-      renderPerfil();
-      showToast(error.message, 'warn');
-      return;
-    }
-  } else {
-    currentUser.preferencias = preferencias;
+  try{
+    const result = await apiRequest('/api/preferences', {method:'PATCH', body:JSON.stringify(preferencias)});
+    currentUser.preferencias = {
+      email: Boolean(result.preferences.email),
+      recordatorio: String(result.preferences.recordatorio)
+    };
+  }catch(error){
+    renderPerfil();
+    showToast(error.message, 'warn');
+    return;
   }
   showToast('Preferencias actualizadas.', 'success');
 }
@@ -1545,9 +1233,20 @@ function toggleTheme(){
 /* ======================================================================
    INIT
 ====================================================================== */
-const today = businessDateParts(new Date());
-document.getElementById('resFecha').min = `${today.year}-${today.month}-${today.day}`;
-document.getElementById('resFecha').max = `${today.year}-12-31`;
+function updateReservationMinima(){
+  const dateInput = document.getElementById('resFecha');
+  const timeInput = document.getElementById('resHora');
+  const now = businessDateParts(new Date());
+  const today = `${now.year}-${now.month}-${now.day}`;
+  dateInput.min = today;
+  dateInput.max = `${now.year}-12-31`;
+  timeInput.min = dateInput.value===today ? `${now.hour}:${now.minute}` : '08:00';
+  timeInput.max = '17:40';
+}
+
+updateReservationMinima();
+document.getElementById('resFecha').addEventListener('change', updateReservationMinima);
+document.getElementById('resHora').addEventListener('focus', updateReservationMinima);
 
 (function initTheme(){
   let saved = null;

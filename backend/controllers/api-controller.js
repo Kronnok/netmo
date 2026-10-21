@@ -4,7 +4,9 @@ const db = require('../data/database');
 const { AppError } = require('../errors');
 
 const statusCodes = {
-  register: 201,
+  createUser: 201,
+  createCarro: 201,
+  createNotebooks: 201,
   createReservation: 201,
   createTicket: 201,
   requestReturn: 202
@@ -46,14 +48,17 @@ async function handle(request, response, route, corsHeaders) {
       result = { ok: true, service: 'netmo-api' };
     } else if (route.action === 'login') {
       result = await authService.login(body, request);
-    } else if (route.action === 'register') {
-      result = await authService.register(body);
     } else {
       const user = await authService.authenticate(request);
       if (request.url.startsWith('/api/admin/') && user.rol !== 'admin') {
         throw new AppError('Solo admin puede acceder a esta operación', 403);
       }
-      result = await apiService[route.action](body, user, route.params);
+      result = await apiService[route.action](
+        body,
+        user,
+        route.params,
+        new URL(request.url, 'http://api.invalid').searchParams
+      );
     }
     send(response, statusCodes[route.action] || 200, result, corsHeaders);
   } catch (error) {

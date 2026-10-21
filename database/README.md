@@ -15,6 +15,12 @@ aplicadas en `schema_migrations`. `db:seed` carga las cuentas de ejemplo una
 sola vez y requiere las variables `NETMO_SEED_*_PASSWORD`; están listadas en
 [`.env.example`](../.env.example).
 
+Las migraciones posteriores agregan baneos con vencimiento, carros y la
+asignación de notebooks a carros, además del horario de reservas de lunes a
+viernes, 08:00–11:50 y 13:30–17:40 en `America/Argentina/Buenos_Aires`. La
+migración de carros conserva las ubicaciones existentes y rellena `carro_id`
+cuando la ubicación contiene un número de carro válido.
+
 Antes de aplicar cambios en producción, guardá un backup. El script opcional
 [`scripts/backup-loop.sh`](scripts/backup-loop.sh) usa `DATABASE_URL` y requiere
 las herramientas PostgreSQL `pg_dump` y `pg_restore`. En Git Bash, desde la

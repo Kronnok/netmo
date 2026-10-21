@@ -16,6 +16,7 @@ CREATE TABLE users (
   rol user_role NOT NULL,
   password_hash TEXT NOT NULL,
   baneado BOOLEAN NOT NULL DEFAULT FALSE,
+  baneado_hasta TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -26,11 +27,17 @@ CREATE TABLE user_preferences (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE carros (
+  numero INTEGER PRIMARY KEY CHECK (numero BETWEEN 1 AND 999),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE notebooks (
   id BIGSERIAL PRIMARY KEY,
   codigo VARCHAR(32) NOT NULL UNIQUE,
   estado notebook_status NOT NULL DEFAULT 'disponible',
   ubicacion VARCHAR(80) NOT NULL,
+  carro_id INTEGER REFERENCES carros(numero),
   prestado_a BIGINT REFERENCES users(id) ON DELETE SET NULL,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CHECK ((estado IN ('prestada', 'pendiente_devolucion')) = (prestado_a IS NOT NULL))
@@ -82,15 +89,18 @@ DECLARE
   local_time TIME;
   weekday INTEGER;
 BEGIN
+  IF NEW.retiro_at <= now() THEN
+    RAISE EXCEPTION 'La fecha y hora de reserva deben ser futuras';
+  END IF;
   local_time := (NEW.retiro_at AT TIME ZONE 'America/Argentina/Buenos_Aires')::TIME;
   weekday := EXTRACT(ISODOW FROM NEW.retiro_at AT TIME ZONE 'America/Argentina/Buenos_Aires');
   IF weekday > 5 THEN
     RAISE EXCEPTION 'Las reservas solo pueden hacerse de lunes a viernes';
   END IF;
-    IF NOT ((local_time >= TIME '08:00' AND local_time <= TIME '12:10')
-        OR (local_time >= TIME '13:30' AND local_time <= TIME '17:30')) THEN
-      RAISE EXCEPTION 'Solo se pueden hacer reservas de 08:00 a 12:10 y de 13:30 a 17:30';
-    END IF;
+  IF NOT ((local_time >= TIME '08:00' AND local_time <= TIME '11:50')
+      OR (local_time >= TIME '13:30' AND local_time <= TIME '17:40')) THEN
+    RAISE EXCEPTION 'Solo se pueden hacer reservas de 08:00 a 11:50 y de 13:30 a 17:40';
+  END IF;
   RETURN NEW;
 END;
 $$;

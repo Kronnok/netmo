@@ -11,7 +11,7 @@
 <body>
 
 <!-- ============================================================ -->
-<!-- AUTH SHELL: Login / Registro                                  -->
+<!-- AUTH SHELL: Login                                              -->
 <!-- ============================================================ -->
 <div id="auth-shell">
   <button class="icon-btn theme-toggle-btn" style="position:absolute;top:1.5rem;right:1.5rem;" onclick="toggleTheme()" title="Cambiar tema" aria-label="Cambiar tema"></button>
@@ -41,42 +41,7 @@
         <div id="loginError" class="field-error"></div>
         <button type="submit" class="btn btn-primary btn-block" style="margin-top:.6rem;">Ingresar</button>
       </form>
-      <p class="auth-switch">¿No tenés cuenta? <button class="link-btn" onclick="switchAuthView('registro')">Registrate acá</button></p>
-      <div class="demo-hint" id="demoHint">
-        <b>Usuarios demo:</b><br>
-        Alumno → <b>tprado@ottokrause.edu.ar</b> / clave <b>1234</b><br>
-        Alumna → <b>lfernandez@ottokrause.edu.ar</b> / clave <b>1234</b><br>
-        Alumno → <b>mrodriguez@ottokrause.edu.ar</b> / clave <b>5678</b><br>
-        Profesor → <b>agomez@ottokrause.edu.ar</b> / clave <b>1234</b><br>
-        Profesor → <b>dsuarez@ottokrause.edu.ar</b> / clave <b>2468</b><br>
-        Admin → <b>admin@ottokrause.edu.ar</b> / clave <b>admin123</b>
-      </div>
-    </section>
-
-    <!-- ---- REGISTRO ---- -->
-    <section class="auth-view" id="view-registro">
-      <button type="button" class="link-btn auth-back-btn" onclick="switchAuthView('login')" aria-label="Volver a iniciar sesión">← Volver a iniciar sesión</button>
-      <h2>Crear cuenta</h2>
-      <p class="sub">Registrate con tu correo institucional para crear una cuenta de alumno.</p>
-      <form id="registroForm" onsubmit="registrar(event)">
-        <div class="form-grid" style="grid-template-columns:1fr;gap:1rem;">
-          <div class="field">
-            <label for="regNombre">Nombre y apellido</label>
-            <input type="text" id="regNombre" placeholder="Ej: Ana Fernández" required>
-          </div>
-          <div class="field">
-            <label for="regEmail">Correo (Gmail)</label>
-            <input type="email" id="regEmail" placeholder="Ej: tunombre@gmail.com" required>
-          </div>
-          <div class="field">
-            <label for="regPassword">Contraseña</label>
-            <input type="password" id="regPassword" placeholder="Elegí una contraseña" minlength="8" required>
-          </div>
-        </div>
-        <div id="registroError" class="field-error"></div>
-        <button type="submit" class="btn btn-primary btn-block" style="margin-top:.6rem;">Registrarme</button>
-      </form>
-      <p class="auth-switch">¿Ya tenés cuenta? <button class="link-btn" onclick="switchAuthView('login')">Iniciá sesión</button></p>
+      <p class="auth-switch">¿No tenés cuenta? Comunicate con el administrador para obtener una.</p>
     </section>
   </div>
 </div>
@@ -127,7 +92,7 @@
       Devoluciones <span class="nav-badge" id="devBadge" style="display:none;">0</span></button></li>
     <li data-roles="admin"><button class="nav-item" data-view="admin-lotes" onclick="switchView('admin-lotes')">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-      Lotes de profesores <span class="nav-badge" id="lotesBadge" style="display:none;">0</span></button></li>
+      Préstamos <span class="nav-badge" id="lotesBadge" style="display:none;">0</span></button></li>
     <li data-roles="admin"><button class="nav-item" data-view="admin-tickets" onclick="switchView('admin-tickets')">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
       Fallas reportadas <span class="nav-badge" id="adminTicketsBadge" style="display:none;">0</span></button></li>
@@ -154,9 +119,6 @@
     <div class="welcome-text">
       <h2 id="pageTitle">¡Hola!</h2>
       <p id="pageSubtitle">Aquí podés consultar la disponibilidad de notebooks y realizar reservas.</p>
-      <div class="test-mode-banner" id="testModeBanner" style="display:none;">
-        🧪 Modo demo sin BDD: viendo la interfaz como <span id="testModeRole"></span>
-      </div>
     </div>
     <div class="header-right">
       <button class="icon-btn theme-toggle-btn" onclick="toggleTheme()" title="Cambiar tema" aria-label="Cambiar tema"></button>
@@ -304,8 +266,8 @@
               <input type="number" id="resCantidad" min="1" max="40" step="1" value="1" required>
             </div>
             <div class="field" data-roles-el="profesor">
-              <label for="resCursoProfesor">Curso</label>
-              <input type="text" id="resCursoProfesor" placeholder="Ej: 6° Informática A">
+              <label for="resCursoProfesor">Curso / división</label>
+              <input type="text" id="resCursoProfesor" maxlength="120" placeholder="Ej: 6° Informática A">
             </div>
             <div class="field">
               <label for="resFecha">Fecha</label>
@@ -314,20 +276,17 @@
             <div class="field">
               <label for="resHora">Hora de retiro</label>
               <input type="time" id="resHora" required>
+              <span class="hint">Lunes a viernes: 08:00–11:50 y 13:30–17:40 (Buenos Aires).</span>
             </div>
             <div class="field full">
               <label for="resMotivo">Motivo / materia</label>
-              <input type="text" id="resMotivo" placeholder="Ej: Programación — TP integrador">
+              <input type="text" id="resMotivo" maxlength="240" placeholder="Ej: Programación — TP integrador">
             </div>
           </div>
 
           <div class="lote-block" id="loteBlock">
             <h4>👥 Datos del lote</h4>
             <div class="form-grid">
-              <div class="field">
-                <label for="loteCurso">Curso / división</label>
-                <input type="text" id="loteCurso" placeholder="Ej: 6° Informática A">
-              </div>
               <div class="field">
                 <label for="loteCantidad">Cantidad de equipos</label>
                 <input type="number" id="loteCantidad" min="3" max="40" value="10">
@@ -361,13 +320,16 @@
               <label for="fallaNotebook">Notebook afectada</label>
               <select id="fallaNotebook" required>
                 <option value="">Seleccioná una notebook</option>
-                <option>NB-001</option><option>NB-002</option><option>NB-003</option><option>NB-004</option><option>NB-005</option>
                 <option value="otro">No lo sé / equipo del carro</option>
               </select>
             </div>
             <div class="field full">
+              <label for="fallaMotivo">Motivo</label>
+              <input type="text" id="fallaMotivo" maxlength="240" required>
+            </div>
+            <div class="field full">
               <label for="fallaDesc">Descripción</label>
-              <textarea id="fallaDesc" placeholder="Ej: la pantalla parpadea y se apaga sola después de unos minutos." required></textarea>
+              <textarea id="fallaDesc" maxlength="4000" placeholder="Ej: la pantalla parpadea y se apaga sola después de unos minutos." required></textarea>
               <span class="hint">Cuantos más detalles des, más rápido podemos resolverlo.</span>
             </div>
           </div>
@@ -415,7 +377,7 @@
         </div>
         <div class="info-row" data-roles-el="admin"><span class="label">Legajo</span><span class="value" id="profileLegajo">—</span></div>
         <div class="info-row"><span class="label">Email institucional</span><span class="value" id="profileEmail">—</span></div>
-        <p class="hint" style="margin-top:1.3rem;">Tus datos institucionales se cargan desde tu registro y no se pueden modificar desde acá. Si hay un error, contactá a Preceptoría.</p>
+        <p class="hint" style="margin-top:1.3rem;">Tus datos institucionales los administra el equipo de NetMO. Si hay un error, contactá a Preceptoría.</p>
       </div>
 
       <div class="card">
@@ -442,9 +404,32 @@
   <section class="view" id="view-admin-profesores">
     <div class="card">
       <div class="card-header">
-        <div><h3>Usuarios y roles</h3><p>Consultá las cuentas registradas y asigná rol de alumno o profesor.</p></div>
+        <div><h3>Alta de usuarios</h3><p>Solo administración puede crear cuentas de alumnos y profesores.</p></div>
+      </div>
+      <form id="adminUserForm" onsubmit="crearUsuarioAdmin(event)" novalidate>
+        <div class="form-grid">
+          <div class="field"><label for="userNombre">Nombre</label><input id="userNombre" type="text" maxlength="60" required></div>
+          <div class="field"><label for="userApellido">Apellido</label><input id="userApellido" type="text" maxlength="60" required></div>
+          <div class="field"><label for="userEmail">Email</label><input id="userEmail" type="email" maxlength="254" required></div>
+          <div class="field"><label for="userLegajo">Legajo (1 a 10 dígitos)</label><input id="userLegajo" type="text" inputmode="numeric" pattern="[0-9]{1,10}" maxlength="10" required></div>
+          <div class="field"><label for="userRol">Rol</label><select id="userRol" required><option value="alumno">Alumno</option><option value="profesor">Profesor</option></select></div>
+          <div class="field"><label for="userPassword">Contraseña (mínimo 8, sin espacios)</label><input id="userPassword" type="password" minlength="8" required></div>
+        </div>
+        <div id="adminUserError" class="field-error"></div>
+        <button class="btn btn-primary" type="submit">Crear usuario</button>
+      </form>
+    </div>
+    <div class="card" style="margin-top:1.5rem;">
+      <div class="card-header">
+        <div><h3>Usuarios</h3><p>Alumnos y profesores reales registrados.</p></div>
         <input type="search" id="profesoresSearchInput" class="search-bar" placeholder="Buscar usuario" oninput="filterProfesores()" aria-label="Buscar usuario">
       </div>
+      <h4>Alumnos</h4>
+      <table>
+        <thead><tr><th>Nombre</th><th>Correo</th><th>Legajo</th><th>Rol</th><th>Cambiar rol</th></tr></thead>
+        <tbody id="alumnosTable"></tbody>
+      </table>
+      <h4 style="margin-top:1rem;">Profesores</h4>
       <table>
         <thead><tr><th>Nombre</th><th>Correo</th><th>Legajo</th><th>Rol</th><th>Cambiar rol</th></tr></thead>
         <tbody id="profesoresTable"></tbody>
@@ -454,6 +439,32 @@
 
   <!-- ============ VIEW: ADMIN · INVENTARIO ============ -->
   <section class="view" id="view-admin-inventario">
+    <div class="view-grid" style="margin-bottom:1.5rem;">
+      <div class="card">
+        <div class="card-header"><div><h3>Alta de carros</h3><p>Ingresá un número único entre 1 y 999.</p></div></div>
+        <form id="carroForm" onsubmit="crearCarro(event)">
+          <div class="field"><label for="carroNumero">Número de carro</label><input id="carroNumero" type="text" inputmode="numeric" pattern="[0-9]{1,3}" maxlength="3" required></div>
+          <div id="carroError" class="field-error"></div>
+          <button class="btn btn-primary" type="submit">Agregar carro</button>
+        </form>
+      </div>
+      <div class="card">
+        <div class="card-header"><div><h3>Alta de notebooks</h3><p>Asigná los equipos nuevos a un carro existente.</p></div></div>
+        <form id="notebookForm" onsubmit="crearNotebooks(event)">
+          <div class="form-grid">
+            <div class="field"><label for="notebookNumero">Número inicial (1–999)</label><input id="notebookNumero" type="text" inputmode="numeric" pattern="[0-9]{1,3}" maxlength="3" required></div>
+            <div class="field"><label for="notebookCarro">Carro</label><select id="notebookCarro" required></select></div>
+            <div class="field"><label for="notebookCantidad">Cantidad (1–10)</label><input id="notebookCantidad" type="number" min="1" max="10" value="1" required></div>
+          </div>
+          <div id="notebookError" class="field-error"></div>
+          <button class="btn btn-primary" type="submit">Agregar notebooks</button>
+        </form>
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:1.5rem;">
+      <div class="card-header"><div><h3>Carros</h3></div></div>
+      <div id="carrosList"></div>
+    </div>
     <div class="card">
       <div class="card-header">
         <div><h3>Inventario completo</h3><p>Consultá y actualizá el estado operativo de cada notebook. Las acciones de reservas, préstamos, devoluciones y fallas también actualizan este inventario.</p></div>
@@ -489,7 +500,7 @@
   <section class="view" id="view-admin-lotes">
     <div class="card">
       <div class="card-header">
-        <div><h3>Retiros y solicitudes de lote</h3><p>Aprobá lotes y registrá los retiros físicos de las reservas.</p></div>
+        <div><h3>Préstamos</h3><p>Aprobá y registrá el retiro de las solicitudes de préstamo (individuales o por lote).</p></div>
       </div>
       <div id="lotesWrap"></div>
     </div>

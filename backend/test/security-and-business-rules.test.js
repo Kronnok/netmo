@@ -46,11 +46,16 @@ test('las reservas interpretan fechas y horarios en Buenos Aires', () => {
   const mondayMorning = parseBusinessDateTime('2026-01-05T08:00');
   assert.equal(TIME_ZONE, 'America/Argentina/Buenos_Aires');
   assert.equal(mondayMorning.toISOString(), '2026-01-05T11:00:00.000Z');
-  assert.equal(reservationTimeError(mondayMorning, new Date('2026-01-05T12:00:00Z')), null);
-  assert.match(reservationTimeError(parseBusinessDateTime('2026-01-10T09:00'), new Date('2026-01-05T12:00:00Z')), /lunes a viernes/);
-  assert.match(reservationTimeError(parseBusinessDateTime('2026-01-05T12:11'), new Date('2026-01-05T12:00:00Z')), /08:00 a 12:10/);
-  assert.equal(reservationTimeError(parseBusinessDateTime('2026-01-05T13:30'), new Date('2026-01-05T12:00:00Z')), null);
-  assert.match(reservationTimeError(parseBusinessDateTime('2026-01-05T17:31'), new Date('2026-01-05T12:00:00Z')), /08:00 a 12:10/);
+  const beforeOpening = new Date('2026-01-05T06:00:00Z');
+  assert.equal(reservationTimeError(mondayMorning, beforeOpening), null);
+  assert.match(reservationTimeError(parseBusinessDateTime('2026-01-10T09:00'), beforeOpening), /lunes a viernes/);
+  assert.equal(reservationTimeError(parseBusinessDateTime('2026-01-05T11:50'), beforeOpening), null);
+  assert.match(reservationTimeError(parseBusinessDateTime('2026-01-05T11:51'), beforeOpening), /08:00 a 11:50/);
+  assert.equal(reservationTimeError(parseBusinessDateTime('2026-01-05T13:30'), beforeOpening), null);
+  assert.equal(reservationTimeError(parseBusinessDateTime('2026-01-05T17:40'), beforeOpening), null);
+  assert.match(reservationTimeError(parseBusinessDateTime('2026-01-05T17:41'), beforeOpening), /08:00 a 11:50/);
+  assert.match(reservationTimeError(parseBusinessDateTime('2026-01-05T08:59'), new Date('2026-01-05T12:00:00Z')), /deben ser futuras/);
+  assert.match(reservationTimeError(parseBusinessDateTime('2026-01-05T09:00'), new Date('2026-01-05T12:00:00Z')), /deben ser futuras/);
   assert.equal(parseBusinessDateTime('2026-02-30T10:00'), null);
 });
 
@@ -85,6 +90,10 @@ test('todos los servicios detrás de rutas admin rechazan alumnos y aceptan admi
   const paths = [
     ['GET', '/api/admin/professors'],
     ['GET', '/api/admin/users'],
+    ['POST', '/api/admin/users'],
+    ['GET', '/api/admin/carros'],
+    ['POST', '/api/admin/carros'],
+    ['POST', '/api/admin/notebooks'],
     ['GET', '/api/admin/reservations'],
     ['POST', '/api/admin/reservations/8/approve'],
     ['POST', '/api/admin/reservations/8/reject'],
@@ -142,26 +151,183 @@ test('el rechazo de lote modifica el estado y libera equipos dentro de una trans
   }
 });
 
-test('el registro requiere ocho caracteres y crea cuentas de rol alumno', async () => {
+test('las altas administrativas validan cuenta, almacenan hashes y crean preferencias iniciales', async () => {
   const originalTransaction = db.transaction;
-  let insertSql = '';
+  const calls = [];
+  let duplicateAccount = false;
   db.transaction = async (callback) => callback({
-    query: async (sql) => {
+    query: async (sql, params) => {
+      calls.push({ sql, params });
       if (sql.includes('INSERT INTO users')) {
-        insertSql = sql;
-        return { rows: [{ id: '5', legajo: 'U-5', nombre: 'Test User', email: 'user@example.test', rol: 'alumno' }] };
+        if (duplicateAccount) {
+          const error = new Error('duplicate key');
+          error.code = '23505';
+          throw error;
+        }
+        return { rows: [{ id: '5', legajo: '123', nombre: 'Ana Pérez', email: 'user@example.test', rol: 'alumno' }] };
       }
       return { rowCount: 1 };
     }
   });
   try {
     await assert.rejects(
-      authService.register({ nombre: 'Test User', email: 'short@example.test', password: 'short' }),
+      apiService.createUser({ nombre: 'A ', apellido: 'Pérez', email: 'short@example.test', legajo: '123', rol: 'alumno', password: 'short' }, { id: 1, rol: 'admin' }),
       (error) => error.status === 400
     );
-    const result = await authService.register({ nombre: 'Test User', email: 'user@example.test', password: 'long-enough-password' });
+    const result = await apiService.createUser({
+      nombre: 'Ana', apellido: 'Pérez', email: 'USER@example.test', legajo: '123', rol: 'alumno', password: 'long-enough'
+    }, { id: 1, rol: 'admin' });
+    assert.equal(result.user.email, 'user@example.test');
     assert.equal(result.user.rol, 'alumno');
-    assert.match(insertSql, /'alumno'/);
+    assert.equal(calls.length, 2);
+    assert.match(calls[0].sql, /crypt\(\$5, gen_salt\('bf'\)\)/);
+    assert.deepEqual(calls[0].params.slice(0, 4), ['123', 'Ana Pérez', 'user@example.test', 'alumno']);
+    assert.match(calls[1].sql, /INSERT INTO user_preferences/);
+    assert.deepEqual(calls[1].params, ['5']);
+    await assert.rejects(
+      apiService.createUser({ nombre: 'Ana', apellido: 'Pérez', email: 'bad email@example.test', legajo: '123', rol: 'alumno', password: 'long-enough' }, { id: 1, rol: 'admin' }),
+      (error) => error.status === 400
+    );
+    await assert.rejects(
+      apiService.createUser({ nombre: 'Ana', apellido: 'Pérez', email: 'ana@bad@domain.test', legajo: '123', rol: 'alumno', password: 'long-enough' }, { id: 1, rol: 'admin' }),
+      (error) => error.status === 400
+    );
+    await assert.rejects(
+      apiService.createUser({ nombre: 'Ana', apellido: 'Pérez', email: 'ok@example.test', legajo: '123', rol: 'alumno', password: 'long pass' }, { id: 1, rol: 'admin' }),
+      (error) => error.status === 400
+    );
+    duplicateAccount = true;
+    await assert.rejects(
+      apiService.createUser({ nombre: 'Ana', apellido: 'Pérez', email: 'ana@example.test', legajo: '123', rol: 'alumno', password: 'long-enough' }, { id: 1, rol: 'admin' }),
+      (error) => error.status === 409
+    );
+  } finally {
+    db.transaction = originalTransaction;
+  }
+});
+
+test('rechaza reservas pasadas y valida el texto de tickets antes de persistir', async () => {
+  for (const [user, tipo, cantidad] of [
+    [{ id: '7', rol: 'alumno' }, 'individual', 1],
+    [{ id: '8', rol: 'profesor' }, 'lote', 3]
+  ]) {
+    await assert.rejects(
+      apiService.createReservation({ tipo, cantidad, curso: '6° Informática', retiroAt: '2000-01-03T09:00' }, user),
+      (error) => error.status === 400 && /deben ser futuras/.test(error.message)
+    );
+  }
+  const user = { id: '7', rol: 'profesor' };
+  await assert.rejects(
+    apiService.createTicket({ motivo: '   ', descripcion: 'Detalle válido' }, user),
+    (error) => error.status === 400 && /no puede estar vacío/.test(error.message)
+  );
+  await assert.rejects(
+    apiService.createTicket({ motivo: 'Motivo', descripcion: 'x'.repeat(4001) }, user),
+    (error) => error.status === 400 && /4000 caracteres/.test(error.message)
+  );
+});
+
+test('los baneos aceptan solo duraciones previstas y los vencidos vuelven a autenticarse', async () => {
+  const originalQuery = db.query;
+  const queries = [];
+  db.query = async (sql, params) => {
+    queries.push({ sql, params });
+    if (sql.includes('UPDATE users SET baneado = $1')) {
+      return { rowCount: 1, rows: [{ legajo: '123', nombre: 'Ana Pérez', baneado: true, baneado_hasta: null }] };
+    }
+    if (sql.includes('SELECT id, legajo, nombre, email, rol')) {
+      return { rowCount: 1, rows: [{ id: '5', legajo: '123', nombre: 'Ana Pérez', email: 'ana@example.test', rol: 'alumno', baneado: false }] };
+    }
+    return { rowCount: 1, rows: [] };
+  };
+  loginRateLimiter.reset();
+  try {
+    await assert.rejects(
+      apiService.updateUser({ baneado: true, duracionDias: 2 }, { id: 1, rol: 'admin' }, { legajo: '123' }),
+      (error) => error.status === 400
+    );
+    await apiService.updateUser({ baneado: true, duracionDias: 3 }, { id: 1, rol: 'admin' }, { legajo: '123' });
+    assert.deepEqual(queries[0].params, [true, '123', 3]);
+    assert.match(queries[0].sql, /now\(\) \+ \(\$3::text \|\| ' days'\)::interval/);
+
+    const result = await authService.login(
+      { email: 'ANA@example.test', password: 'existing-pass' },
+      { headers: {}, socket: { remoteAddress: '192.0.2.30' } }
+    );
+    assert.equal(result.user.baneado, false);
+    assert.match(queries[1].sql, /baneado_hasta <= now\(\)/);
+    assert.match(queries[2].sql, /baneado_hasta > now\(\)/);
+    assert.equal(queries[2].params[0], 'ana@example.test');
+  } finally {
+    db.query = originalQuery;
+    loginRateLimiter.reset();
+  }
+});
+
+test('carros, series de notebooks y cambios de estado validan entradas', async () => {
+  const originalQuery = db.query;
+  const originalTransaction = db.transaction;
+  const insertedCodes = [];
+  db.query = async (sql, params) => {
+    if (sql.includes('INSERT INTO carros')) return { rowCount: 1, rows: [{ numero: params[0] }] };
+    return { rowCount: 1, rows: [] };
+  };
+  db.transaction = async (callback) => callback({
+    query: async (sql, params) => {
+      if (sql.includes('SELECT numero FROM carros')) return { rowCount: 1, rows: [{ numero: params[0] }] };
+      if (sql.includes('SELECT codigo FROM notebooks')) return { rowCount: 0, rows: [] };
+      if (sql.includes('INSERT INTO notebooks')) {
+        insertedCodes.push(params[0]);
+        return { rowCount: 1, rows: [{ id: params[0], carro_id: params[2] }] };
+      }
+      return { rowCount: 1, rows: [] };
+    }
+  });
+  try {
+    await apiService.createCarro({ numero: 9 }, { id: 1, rol: 'admin' });
+    const created = await apiService.createNotebooks({ numero: '997', carro_id: 9, cantidad: 3 }, { id: 1, rol: 'admin' });
+    assert.deepEqual(insertedCodes, ['NB-997', 'NB-998', 'NB-999']);
+    assert.equal(created.notebooks.length, 3);
+    await assert.rejects(
+      apiService.createNotebooks({ numero: '999', carro_id: 9, cantidad: 2 }, { id: 1, rol: 'admin' }),
+      (error) => error.status === 400
+    );
+    await assert.rejects(
+      apiService.createNotebooks({ numero: '1', carro_id: 9, cantidad: 11 }, { id: 1, rol: 'admin' }),
+      (error) => error.status === 400
+    );
+    await assert.rejects(
+      apiService.updateNotebook({ estado: 'prestada' }, { id: 1, rol: 'admin' }, { code: 'NB-997' }),
+      (error) => error.status === 400
+    );
+  } finally {
+    db.query = originalQuery;
+    db.transaction = originalTransaction;
+  }
+});
+
+test('resolver tickets libera notebooks en una transacción y rechaza estados inválidos', async () => {
+  const originalTransaction = db.transaction;
+  const calls = [];
+  db.transaction = async (callback) => callback({
+    query: async (sql, params) => {
+      calls.push({ sql, params });
+      if (sql.includes('UPDATE tickets SET estado')) {
+        return { rowCount: 1, rows: [{ id: 'TCK-1', estado: 'resuelto', notebook_id: 4 }] };
+      }
+      return { rowCount: 1, rows: [] };
+    }
+  });
+  try {
+    await assert.rejects(
+      apiService.updateTicket({ estado: 'incorrecto' }, { id: 1, rol: 'admin' }, { code: 'TCK-1' }),
+      (error) => error.status === 400
+    );
+    const result = await apiService.updateTicket({ estado: 'resuelto' }, { id: 1, rol: 'admin' }, { code: 'TCK-1' });
+    assert.equal(result.ticket.estado, 'resuelto');
+    assert.equal(calls.length, 2);
+    assert.match(calls[0].sql, /resolved_at = CASE WHEN \$1 = 'resuelto' THEN now\(\)/);
+    assert.match(calls[1].sql, /SET estado = 'disponible'/);
   } finally {
     db.transaction = originalTransaction;
   }

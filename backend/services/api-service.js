@@ -2,6 +2,7 @@ const crypto = require('node:crypto');
 const db = require('../data/database');
 const { AppError } = require('../errors');
 const { parseBusinessDateTime, reservationTimeError } = require('./business-time');
+const { requiredText, personName, accountEmail, accountPassword, numericIdentifier } = require('./validation');
 
 function requireAdmin(user, message) {
   if (user.rol !== 'admin') throw new AppError(message, 403);
@@ -19,16 +20,24 @@ function reservationPayload(body, user) {
   if (user.rol === 'alumno' && quantity !== 1) throw new AppError('Los alumnos solo pueden pedir una notebook', 400);
   if (type === 'lote' && user.rol !== 'profesor') throw new AppError('Solo profesores pueden solicitar lotes', 403);
   if (type === 'lote' && quantity < 3) throw new AppError('Un lote debe tener al menos 3 notebooks', 400);
-  if (user.rol === 'profesor' && (!body.curso || !String(body.curso).trim())) throw new AppError('El profesor debe indicar el curso', 400);
+  const curso = user.rol === 'profesor'
+    ? requiredText(body.curso, 'El curso', 120)
+    : null;
+  let motivo = 'Sin especificar';
+  if (body.motivo !== undefined && body.motivo !== null && body.motivo !== '') {
+    motivo = requiredText(body.motivo, 'El motivo', 240);
+  }
   return {
     code: `RES-${Date.now()}`,
     ownerId: user.id,
     type,
-    carro: body.carro || null,
-    curso: user.rol === 'profesor' ? String(body.curso).trim() : null,
+    carro: body.carro !== undefined && body.carro !== null && body.carro !== ''
+      ? requiredText(body.carro, 'El carro', 80)
+      : null,
+    curso,
     cantidad: quantity,
     retiroAt,
-    motivo: body.motivo || 'Sin especificar',
+    motivo,
     estado: type === 'lote' ? 'pendiente_aprobacion' : 'confirmada'
   };
 }
@@ -42,10 +51,40 @@ const actions = {
     const result = await db.query("SELECT legajo, nombre, email FROM users WHERE rol = 'profesor' ORDER BY nombre");
     return { professors: result.rows };
   },
-  async users(_body, user) {
+  async users(_body, user, _params, query) {
     requireAdmin(user, 'Solo admin puede consultar usuarios');
-    const result = await db.query("SELECT legajo, nombre, email, rol, baneado FROM users WHERE rol <> 'admin' ORDER BY nombre");
+    const role = query?.get('rol');
+    if (role && !['alumno', 'profesor'].includes(role)) throw new AppError('Rol de usuario inválido', 400);
+    const result = await db.query(`SELECT legajo, nombre, email, rol,
+      (baneado AND (baneado_hasta IS NULL OR baneado_hasta > now())) AS baneado,
+      baneado_hasta
+      FROM users WHERE rol <> 'admin' AND ($1::user_role IS NULL OR rol = $1::user_role)
+      ORDER BY nombre`, [role || null]);
     return { users: result.rows };
+  },
+  async createUser(body, user) {
+    requireAdmin(user, 'Solo admin puede crear usuarios');
+    const nombre = personName(body.nombre, 'El nombre');
+    const apellido = personName(body.apellido, 'El apellido');
+    const nombreCompleto = `${nombre} ${apellido}`;
+    if (nombreCompleto.length > 120) throw new AppError('El nombre y apellido no pueden superar 120 caracteres en conjunto', 400);
+    const email = accountEmail(body.email);
+    const legajo = numericIdentifier(body.legajo);
+    const password = accountPassword(body.password);
+    if (!['alumno', 'profesor'].includes(body.rol)) throw new AppError('Rol inválido', 400);
+    try {
+      return await db.transaction(async (client) => {
+        const inserted = await client.query(`INSERT INTO users (legajo, nombre, email, rol, password_hash, baneado)
+          VALUES ($1, $2, $3, $4, crypt($5, gen_salt('bf')), FALSE)
+          RETURNING id, legajo, nombre, email, rol, baneado`, [legajo, nombreCompleto, email, body.rol, password]);
+        await client.query(`INSERT INTO user_preferences (user_id, email_notifications, return_reminder_minutes)
+          VALUES ($1, TRUE, 30)`, [inserted.rows[0].id]);
+        return { user: inserted.rows[0] };
+      });
+    } catch (error) {
+      if (error.code === '23505') throw new AppError('El email o el legajo ya están registrados', 409);
+      throw error;
+    }
   },
   async preferences(_body, user) {
     const result = await db.query('SELECT email_notifications AS email, return_reminder_minutes AS recordatorio FROM user_preferences WHERE user_id = $1', [user.id]);
@@ -65,27 +104,93 @@ const actions = {
         THEN 'reservada' ELSE estado::text END AS estado,
       CASE WHEN EXISTS (SELECT 1 FROM reservation_notebooks rn WHERE rn.notebook_id = n.id AND rn.active)
         THEN 'Reservada' ELSE ubicacion END AS ubicacion,
-      updated_at AS actualizada, u.nombre AS prestado_a
+      updated_at AS actualizada, u.nombre AS prestado_a, carro_id
       FROM notebooks n LEFT JOIN users u ON u.id = n.prestado_a ORDER BY codigo`);
     return { notebooks: result.rows };
+  },
+  async carros(_body, user) {
+    requireAdmin(user, 'Solo admin puede consultar carros');
+    const result = await db.query('SELECT numero FROM carros ORDER BY numero');
+    return { carros: result.rows };
+  },
+  async createCarro(body, user) {
+    requireAdmin(user, 'Solo admin puede crear carros');
+    const numero = typeof body.numero === 'number' ? body.numero
+      : typeof body.numero === 'string' && /^\d{1,3}$/.test(body.numero) ? Number(body.numero) : NaN;
+    if (!Number.isInteger(numero) || numero < 1 || numero > 999) {
+      throw new AppError('El número de carro debe ser un entero entre 1 y 999', 400);
+    }
+    try {
+      const result = await db.query('INSERT INTO carros (numero) VALUES ($1) RETURNING numero', [numero]);
+      return { carro: result.rows[0] };
+    } catch (error) {
+      if (error.code === '23505') throw new AppError('Ya existe un carro con ese número', 409);
+      throw error;
+    }
+  },
+  async createNotebooks(body, user) {
+    requireAdmin(user, 'Solo admin puede crear notebooks');
+    if (typeof body.numero !== 'string' || !/^\d{1,3}$/.test(body.numero)) {
+      throw new AppError('El número inicial debe contener de 1 a 3 dígitos', 400);
+    }
+    const numero = Number(body.numero);
+    const carroId = body.carro_id;
+    const cantidad = Number(body.cantidad);
+    if (numero < 1 || numero > 999 || numero + cantidad - 1 > 999) {
+      throw new AppError('La numeración debe estar entre 1 y 999 y no puede superar 999', 400);
+    }
+    if (!Number.isInteger(carroId) || carroId < 1 || carroId > 999) {
+      throw new AppError('Seleccioná un carro válido', 400);
+    }
+    if (!Number.isInteger(cantidad) || cantidad < 1 || cantidad > 10) {
+      throw new AppError('La cantidad debe ser un entero entre 1 y 10', 400);
+    }
+    const codes = Array.from({ length: cantidad }, (_value, index) => `NB-${String(numero + index).padStart(3, '0')}`);
+    try {
+      return await db.transaction(async (client) => {
+        const carro = await client.query('SELECT numero FROM carros WHERE numero = $1 FOR SHARE', [carroId]);
+        if (!carro.rowCount) throw new AppError('El carro seleccionado no existe', 400);
+        const existing = await client.query('SELECT codigo FROM notebooks WHERE codigo = ANY($1::text[])', [codes]);
+        if (existing.rowCount) throw new AppError(`Ya existe la notebook ${existing.rows[0].codigo}`, 409);
+        const created = [];
+        for (const codigo of codes) {
+          const result = await client.query(`INSERT INTO notebooks (codigo, estado, ubicacion, carro_id)
+            VALUES ($1, 'disponible', $2, $3) RETURNING codigo AS id, estado, ubicacion, carro_id`,
+          [codigo, `Carro ${carroId}`, carroId]);
+          created.push(result.rows[0]);
+        }
+        return { notebooks: created };
+      });
+    } catch (error) {
+      if (error.code === '23505') throw new AppError('Una o más notebooks de esa serie ya existen', 409);
+      if (error.code === '23503') throw new AppError('El carro seleccionado no existe', 400);
+      throw error;
+    }
   },
   async updateNotebook(body, user, { code }) {
     requireAdmin(user, 'Solo admin puede cambiar estados');
     if (!['disponible', 'mantenimiento'].includes(body.estado)) {
       throw new AppError('Estado de notebook inválido', 400);
     }
-    const result = await db.query(`UPDATE notebooks SET estado = $1,
-      ubicacion = CASE WHEN $1 = 'mantenimiento' THEN 'Taller' WHEN $1 = 'disponible' THEN 'Carro 1' ELSE ubicacion END,
-      prestado_a = CASE WHEN $1 IN ('disponible', 'mantenimiento') THEN NULL ELSE prestado_a END,
-      updated_at = now() WHERE codigo = $2 RETURNING codigo AS id, estado, ubicacion`, [body.estado, code]);
-    if (!result.rowCount) throw new AppError('Notebook no encontrada', 404);
-    if (body.estado === 'disponible' || body.estado === 'mantenimiento') {
-      await db.query('UPDATE reservation_notebooks SET active = FALSE WHERE notebook_id = (SELECT id FROM notebooks WHERE codigo = $1) AND active', [code]);
-    }
-    if (body.estado === 'disponible') {
-      await db.query("UPDATE tickets SET estado = 'resuelto', resolved_at = now(), resolved_by = $1 WHERE notebook_id = (SELECT id FROM notebooks WHERE codigo = $2) AND estado <> 'resuelto'", [user.id, code]);
-    }
-    return { notebook: result.rows[0] };
+    return db.transaction(async (client) => {
+      const current = await client.query('SELECT id, estado FROM notebooks WHERE codigo = $1 FOR UPDATE', [code]);
+      if (!current.rowCount) throw new AppError('Notebook no encontrada', 404);
+      if (!['disponible', 'mantenimiento'].includes(current.rows[0].estado)) {
+        throw new AppError('No se puede cambiar manualmente el estado de una notebook prestada', 409);
+      }
+      const result = await client.query(`UPDATE notebooks SET estado = $1,
+        ubicacion = CASE WHEN $1 = 'mantenimiento' THEN 'Taller'
+          ELSE COALESCE('Carro ' || carro_id::text, ubicacion) END,
+        prestado_a = NULL, updated_at = now()
+        WHERE id = $2 RETURNING codigo AS id, estado, ubicacion`, [body.estado, current.rows[0].id]);
+      if (body.estado === 'disponible' || body.estado === 'mantenimiento') {
+        await client.query('UPDATE reservation_notebooks SET active = FALSE WHERE notebook_id = $1 AND active', [current.rows[0].id]);
+      }
+      if (body.estado === 'disponible') {
+        await client.query("UPDATE tickets SET estado = 'resuelto', resolved_at = now(), resolved_by = $1 WHERE notebook_id = $2 AND estado <> 'resuelto'", [user.id, current.rows[0].id]);
+      }
+      return { notebook: result.rows[0] };
+    });
   },
   async reservations(_body, user) {
     const result = await db.query(`SELECT r.codigo AS id, r.tipo, r.carro, r.curso, r.cantidad, r.retiro_at, r.motivo, r.estado,
@@ -134,10 +239,31 @@ const actions = {
   },
   async approveReservation(_body, user, { id }) {
     requireAdmin(user, 'Solo admin puede aprobar reservas');
-    const result = await db.query(`UPDATE reservations SET estado = 'aprobada'
-      WHERE id = $1 AND tipo = 'lote' AND estado = 'pendiente_aprobacion' RETURNING owner_id`, [id]);
-    if (!result.rowCount) throw new AppError('Solicitud de lote no encontrada', 404);
-    return { message: 'Lote aprobado' };
+    return db.transaction(async (client) => {
+      const reservation = await client.query(`SELECT id, cantidad FROM reservations
+        WHERE id = $1 AND tipo = 'lote' AND estado = 'pendiente_aprobacion' FOR UPDATE`, [id]);
+      if (!reservation.rowCount) throw new AppError('Solicitud de lote no encontrada', 404);
+      await client.query(`UPDATE reservation_notebooks rn SET active = FALSE
+        FROM notebooks n WHERE rn.reservation_id = $1 AND rn.active AND n.id = rn.notebook_id
+          AND n.estado <> 'disponible'`, [id]);
+      const assigned = await client.query(`SELECT notebook_id FROM reservation_notebooks
+        WHERE reservation_id = $1 AND active FOR UPDATE`, [id]);
+      if (assigned.rowCount < reservation.rows[0].cantidad) {
+        const missing = reservation.rows[0].cantidad - assigned.rowCount;
+        const available = await client.query(`SELECT n.id FROM notebooks n
+          WHERE n.estado = 'disponible'
+            AND NOT EXISTS (SELECT 1 FROM reservation_notebooks rn WHERE rn.notebook_id = n.id AND rn.active)
+          ORDER BY n.codigo FOR UPDATE SKIP LOCKED LIMIT $1`, [missing]);
+        if (available.rowCount < missing) throw new AppError('No hay suficientes notebooks disponibles para completar el lote', 409);
+        for (const notebook of available.rows) {
+          await client.query(`INSERT INTO reservation_notebooks (reservation_id, notebook_id, active)
+            VALUES ($1, $2, TRUE) ON CONFLICT (reservation_id, notebook_id) DO UPDATE SET active = TRUE`,
+          [id, notebook.id]);
+        }
+      }
+      await client.query("UPDATE reservations SET estado = 'aprobada' WHERE id = $1", [id]);
+      return { message: 'Lote aprobado' };
+    });
   },
   async rejectReservation(_body, user, { id }) {
     requireAdmin(user, 'Solo admin puede rechazar reservas');
@@ -158,9 +284,27 @@ const actions = {
       const reservation = reservationResult.rows[0];
       const existingLoans = await client.query('SELECT id FROM loans WHERE reservation_id = $1', [id]);
       if (existingLoans.rowCount) return { message: 'El retiro ya estaba registrado', loansCreated: 0 };
-      const notebooks = await client.query(`SELECT n.id, n.codigo FROM reservation_notebooks rn JOIN notebooks n ON n.id = rn.notebook_id
+      await client.query(`UPDATE reservation_notebooks rn SET active = FALSE
+        FROM notebooks n WHERE rn.reservation_id = $1 AND rn.active AND n.id = rn.notebook_id
+          AND n.estado <> 'disponible'`, [id]);
+      let notebooks = await client.query(`SELECT n.id, n.codigo FROM reservation_notebooks rn JOIN notebooks n ON n.id = rn.notebook_id
         WHERE rn.reservation_id = $1 AND rn.active FOR UPDATE`, [id]);
-      if (notebooks.rowCount !== reservation.cantidad) throw new AppError('La reserva no tiene todos los equipos asignados', 409);
+      if (notebooks.rowCount < reservation.cantidad) {
+        const missing = reservation.cantidad - notebooks.rowCount;
+        const available = await client.query(`SELECT n.id, n.codigo FROM notebooks n
+          WHERE n.estado = 'disponible'
+            AND NOT EXISTS (SELECT 1 FROM reservation_notebooks rn WHERE rn.notebook_id = n.id AND rn.active)
+          ORDER BY n.codigo FOR UPDATE SKIP LOCKED LIMIT $1`, [missing]);
+        if (available.rowCount < missing) {
+          throw new AppError('No hay suficientes notebooks disponibles para completar esta reserva', 409);
+        }
+        for (const notebook of available.rows) {
+          await client.query(`INSERT INTO reservation_notebooks (reservation_id, notebook_id, active)
+            VALUES ($1, $2, TRUE) ON CONFLICT (reservation_id, notebook_id) DO UPDATE SET active = TRUE`,
+          [id, notebook.id]);
+        }
+        notebooks = { rows: [...notebooks.rows, ...available.rows], rowCount: reservation.cantidad };
+      }
       const retiradaAt = new Date();
       const venceAt = new Date(retiradaAt.getTime() + 8 * 60 * 60 * 1000);
       for (const notebook of notebooks.rows) {
@@ -181,12 +325,15 @@ const actions = {
     return { loans: result.rows };
   },
   async requestReturn(_body, user, { id }) {
-    const result = await db.query(`UPDATE loans SET estado = 'devolucion_pendiente'
-      WHERE id = $1 AND user_id = $2 AND estado = 'activo' RETURNING id`, [id, user.id]);
-    if (!result.rowCount) throw new AppError('Préstamo activo no encontrado', 404);
-    await db.query("INSERT INTO returns (loan_id) VALUES ($1) ON CONFLICT (loan_id) DO NOTHING", [id]);
-    await db.query("UPDATE notebooks SET estado = 'pendiente_devolucion', updated_at = now() WHERE id = (SELECT notebook_id FROM loans WHERE id = $1)", [id]);
-    return { message: 'Devolución pendiente de confirmación' };
+    return db.transaction(async (client) => {
+      const result = await client.query(`UPDATE loans SET estado = 'devolucion_pendiente'
+        WHERE id = $1 AND user_id = $2 AND estado = 'activo' RETURNING id, notebook_id`, [id, user.id]);
+      if (!result.rowCount) throw new AppError('Préstamo activo no encontrado', 404);
+      await client.query("INSERT INTO returns (loan_id) VALUES ($1) ON CONFLICT (loan_id) DO NOTHING", [id]);
+      await client.query(`UPDATE notebooks SET estado = 'pendiente_devolucion', updated_at = now()
+        WHERE id = $1 AND estado = 'prestada'`, [result.rows[0].notebook_id]);
+      return { message: 'Devolución pendiente de confirmación' };
+    });
   },
   async adminReturns(_body, user) {
     requireAdmin(user, 'Solo admin puede consultar devoluciones');
@@ -203,7 +350,9 @@ const actions = {
       if (!result.rowCount) throw new AppError('Devolución pendiente no encontrada', 404);
       const loanId = result.rows[0].loan_id;
       await client.query("UPDATE loans SET estado = 'devuelto', devuelta_at = now() WHERE id = $1", [loanId]);
-      await client.query("UPDATE notebooks SET estado = 'disponible', ubicacion = 'Carro 1', prestado_a = NULL, updated_at = now() WHERE id = (SELECT notebook_id FROM loans WHERE id = $1)", [loanId]);
+      await client.query(`UPDATE notebooks SET estado = 'disponible',
+        ubicacion = COALESCE('Carro ' || carro_id::text, ubicacion), prestado_a = NULL, updated_at = now()
+        WHERE id = (SELECT notebook_id FROM loans WHERE id = $1)`, [loanId]);
       return { message: 'Devolución confirmada' };
     });
   },
@@ -220,40 +369,70 @@ const actions = {
     return { tickets: result.rows };
   },
   async createTicket(body, user) {
-    if (!String(body.motivo || '').trim() || !String(body.descripcion || '').trim()) {
-      throw new AppError('Motivo y descripción son obligatorios', 400);
+    const motivo = requiredText(body.motivo, 'El motivo', 240);
+    const descripcion = requiredText(body.descripcion, 'La descripción', 4000);
+    let notebook = null;
+    if (body.notebook !== undefined && body.notebook !== null && body.notebook !== '') {
+      notebook = requiredText(body.notebook, 'La notebook', 32);
     }
-    if (String(body.motivo).length > 240) throw new AppError('El motivo no puede superar 240 caracteres', 400);
-    const result = await db.query(`INSERT INTO tickets (codigo, notebook_id, owner_id, motivo, descripcion)
-      VALUES ($1, (SELECT id FROM notebooks WHERE codigo = $2), $3, $4, $5) RETURNING codigo AS id, estado`,
-    [`TCK-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`, body.notebook, user.id, body.motivo, body.descripcion]);
-    if (body.notebook) {
-      await db.query("UPDATE notebooks SET estado = CASE WHEN estado = 'disponible' THEN 'mantenimiento' ELSE estado END, updated_at = now() WHERE codigo = $1", [body.notebook]);
-    }
-    return { ticket: result.rows[0] };
+    return db.transaction(async (client) => {
+      let notebookId = null;
+      if (notebook) {
+        const existing = await client.query('SELECT id FROM notebooks WHERE codigo = $1 FOR UPDATE', [notebook]);
+        if (!existing.rowCount) throw new AppError('La notebook seleccionada no existe', 400);
+        notebookId = existing.rows[0].id;
+      }
+      const result = await client.query(`INSERT INTO tickets (codigo, notebook_id, owner_id, motivo, descripcion)
+        VALUES ($1, $2, $3, $4, $5) RETURNING codigo AS id, estado`,
+      [`TCK-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`, notebookId, user.id, motivo, descripcion]);
+      if (notebookId) {
+        await client.query(`UPDATE notebooks SET estado = CASE WHEN estado = 'disponible' THEN 'mantenimiento' ELSE estado END,
+          updated_at = now() WHERE id = $1`, [notebookId]);
+      }
+      return { ticket: result.rows[0] };
+    });
   },
   async updateTicket(body, user, { code }) {
     requireAdmin(user, 'Solo admin puede actualizar tickets');
     if (!['abierto', 'progreso', 'resuelto'].includes(body.estado)) throw new AppError('Estado de ticket inválido', 400);
-    const result = await db.query(`UPDATE tickets SET estado = $1, resolved_at = CASE WHEN $1 = 'resuelto' THEN now() ELSE NULL END,
-      resolved_by = CASE WHEN $1 = 'resuelto' THEN $2 ELSE NULL END WHERE codigo = $3 RETURNING codigo AS id, estado`,
-    [body.estado, user.id, code]);
-    if (!result.rowCount) throw new AppError('Ticket no encontrado', 404);
-    if (body.estado === 'resuelto') {
-      await db.query("UPDATE notebooks SET estado = 'disponible', ubicacion = 'Carro 1', updated_at = now() WHERE id = (SELECT notebook_id FROM tickets WHERE codigo = $1) AND estado = 'mantenimiento'", [code]);
-    }
-    return { ticket: result.rows[0] };
+    return db.transaction(async (client) => {
+      const result = await client.query(`UPDATE tickets SET estado = $1,
+        resolved_at = CASE WHEN $1 = 'resuelto' THEN now() ELSE NULL END,
+        resolved_by = CASE WHEN $1 = 'resuelto' THEN $2 ELSE NULL END
+        WHERE codigo = $3 RETURNING codigo AS id, estado, notebook_id`,
+      [body.estado, user.id, code]);
+      if (!result.rowCount) throw new AppError('Ticket no encontrado', 404);
+      if (body.estado === 'resuelto' && result.rows[0].notebook_id) {
+        await client.query(`UPDATE notebooks SET estado = 'disponible',
+          ubicacion = COALESCE('Carro ' || carro_id::text, ubicacion), prestado_a = NULL, updated_at = now()
+          WHERE id = $1 AND estado = 'mantenimiento'`, [result.rows[0].notebook_id]);
+      }
+      return { ticket: { id: result.rows[0].id, estado: result.rows[0].estado } };
+    });
   },
   async lateReturns(_body, user) {
     requireAdmin(user, 'Solo admin puede consultar demoras');
-    const result = await db.query(`SELECT summary.*, users.baneado FROM user_late_return_summary summary
-      JOIN users ON users.id = summary.id ORDER BY summary.tardanzas DESC, summary.nombre`);
-    return { users: result.rows };
+    const users = await db.query(`SELECT summary.*, (u.baneado AND (u.baneado_hasta IS NULL OR u.baneado_hasta > now())) AS baneado,
+      u.baneado_hasta
+      FROM user_late_return_summary summary JOIN users u ON u.id = summary.id
+      ORDER BY summary.tardanzas DESC, summary.nombre`);
+    const history = await db.query(`SELECT u.nombre, u.rol, u.legajo, n.codigo AS notebook_id,
+      lr.returned_at AS fecha FROM late_returns lr JOIN users u ON u.id = lr.user_id
+      JOIN notebooks n ON n.id = lr.notebook_id ORDER BY lr.returned_at DESC`);
+    return { users: users.rows, history: history.rows };
   },
   async updateUser(body, user, { legajo }) {
     requireAdmin(user, 'Solo admin puede suspender usuarios');
-    const result = await db.query(`UPDATE users SET baneado = $1 WHERE legajo = $2 AND rol <> 'admin'
-      RETURNING legajo, nombre, baneado`, [Boolean(body.baneado), legajo]);
+    if (typeof body.baneado !== 'boolean') throw new AppError('El estado de baneo es inválido', 400);
+    let duration = null;
+    if (body.baneado && body.duracionDias !== undefined && body.duracionDias !== null) {
+      duration = Number(body.duracionDias);
+      if (![1, 3, 7, 15, 30].includes(duration)) throw new AppError('La duración debe ser 1, 3, 7, 15 o 30 días, o indefinida', 400);
+    }
+    const result = await db.query(`UPDATE users SET baneado = $1,
+      baneado_hasta = CASE WHEN NOT $1 OR $3::integer IS NULL THEN NULL ELSE now() + ($3::text || ' days')::interval END
+      WHERE legajo = $2 AND rol <> 'admin'
+      RETURNING legajo, nombre, baneado, baneado_hasta`, [body.baneado, legajo, duration]);
     if (!result.rowCount) throw new AppError('Usuario no encontrado o no modificable', 404);
     return { user: result.rows[0] };
   },

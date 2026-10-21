@@ -11,18 +11,25 @@ INSERT INTO user_preferences (user_id, email_notifications, return_reminder_minu
 SELECT id, TRUE, 30 FROM users
 ON CONFLICT (user_id) DO NOTHING;
 
-INSERT INTO notebooks (codigo, estado, ubicacion, prestado_a) VALUES
-  ('NB-001', 'disponible', 'Carro 1', NULL),
-  ('NB-002', 'disponible', 'Carro 1', NULL),
-  ('NB-003', 'prestada', '—', (SELECT id FROM users WHERE legajo = 'PRF-010')),
-  ('NB-004', 'mantenimiento', 'Taller', NULL),
-  ('NB-005', 'disponible', 'Carro 2', NULL),
-  ('NB-014', 'prestada', '—', (SELECT id FROM users WHERE legajo = '2024-0417'))
+INSERT INTO carros (numero) VALUES (1), (2) ON CONFLICT (numero) DO NOTHING;
+
+INSERT INTO notebooks (codigo, estado, ubicacion, prestado_a, carro_id) VALUES
+  ('NB-001', 'disponible', 'Carro 1', NULL, 1),
+  ('NB-002', 'disponible', 'Carro 1', NULL, 1),
+  ('NB-003', 'prestada', '—', (SELECT id FROM users WHERE legajo = 'PRF-010'), NULL),
+  ('NB-004', 'mantenimiento', 'Taller', NULL, NULL),
+  ('NB-005', 'disponible', 'Carro 2', NULL, 2),
+  ('NB-014', 'prestada', '—', (SELECT id FROM users WHERE legajo = '2024-0417'), NULL)
 ON CONFLICT (codigo) DO NOTHING;
 
 INSERT INTO reservations (codigo, owner_id, tipo, carro, cantidad, retiro_at, motivo, estado)
 SELECT 'RES-01', id, 'individual', 'Carro 2', 1,
-       make_timestamptz(EXTRACT(YEAR FROM CURRENT_DATE)::INTEGER, 8, 26, 9, 0, 0, 'UTC'),
+       (date_trunc('day', now() AT TIME ZONE 'America/Argentina/Buenos_Aires')
+        + CASE EXTRACT(ISODOW FROM now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::integer
+            WHEN 5 THEN INTERVAL '3 days'
+            WHEN 6 THEN INTERVAL '2 days'
+            ELSE INTERVAL '1 day'
+          END + INTERVAL '9 hours') AT TIME ZONE 'America/Argentina/Buenos_Aires',
        'Física — laboratorio', 'confirmada'
 FROM users WHERE legajo = '2024-0417'
 ON CONFLICT (codigo) DO NOTHING;

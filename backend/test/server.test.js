@@ -19,6 +19,11 @@ async function unusedPort() {
 test('resuelve rutas de API y sus parámetros', () => {
   assert.equal(routes.resolve('GET', '/api/notebooks').action, 'notebooks');
   assert.deepEqual(routes.resolve('POST', '/api/admin/reservations/42/checkout').params, { id: 42 });
+  assert.equal(routes.resolve('POST', '/api/auth/register'), null);
+  assert.equal(routes.resolve('POST', '/api/admin/users').action, 'createUser');
+  assert.equal(routes.resolve('GET', '/api/admin/carros').action, 'carros');
+  assert.equal(routes.resolve('POST', '/api/admin/carros').action, 'createCarro');
+  assert.equal(routes.resolve('POST', '/api/admin/notebooks').action, 'createNotebooks');
   assert.equal(routes.resolve('GET', '/api/missing'), null);
 });
 
@@ -77,6 +82,13 @@ test('sirve frontend en desarrollo, valida JSON y responde CORS', async (context
   });
   assert.equal(invalidJson.status, 400);
   assert.match((await invalidJson.json()).error, /JSON/);
+
+  const publicRegistration = await fetch(`${baseUrl}/api/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ nombre: 'Test', email: 'test@example.test', password: 'password' })
+  });
+  assert.equal(publicRegistration.status, 404);
 
   const health = await fetch(`${baseUrl}/health`);
   assert.equal(health.status, 500);
