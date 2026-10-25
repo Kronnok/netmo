@@ -245,7 +245,8 @@ ON reservation_notebooks(notebook_id) WHERE active;
 CREATE OR REPLACE FUNCTION validate_reservation_year()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
-  IF EXTRACT(YEAR FROM NEW.retiro_at) <> EXTRACT(YEAR FROM CURRENT_DATE) THEN
+  IF EXTRACT(YEAR FROM NEW.retiro_at AT TIME ZONE 'America/Argentina/Buenos_Aires')
+    <> EXTRACT(YEAR FROM now() AT TIME ZONE 'America/Argentina/Buenos_Aires') THEN
     RAISE EXCEPTION 'Las reservas solo pueden hacerse durante el año actual';
   END IF;
   RETURN NEW;
@@ -262,8 +263,8 @@ DECLARE
   local_time TIME;
   weekday INTEGER;
 BEGIN
-  local_time := NEW.retiro_at::TIME;
-  weekday := EXTRACT(ISODOW FROM NEW.retiro_at);
+  local_time := (NEW.retiro_at AT TIME ZONE 'America/Argentina/Buenos_Aires')::TIME;
+  weekday := EXTRACT(ISODOW FROM NEW.retiro_at AT TIME ZONE 'America/Argentina/Buenos_Aires');
   IF weekday > 5 THEN
     RAISE EXCEPTION 'Las reservas solo pueden hacerse de lunes a viernes';
   END IF;
@@ -357,4 +358,4 @@ FROM users u
 LEFT JOIN late_returns lr ON lr.user_id = u.id
 WHERE u.rol <> 'admin'
 GROUP BY u.id, u.legajo, u.nombre, u.rol;
->>>>>>> 219c483 (Publish deployment cleanup with sanitized credentials)
+>>>>>>> e4eeee9 (Harden auth, admin workflows, and business time rules)

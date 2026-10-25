@@ -112,7 +112,10 @@ async function migrate() {
       await client.query("INSERT INTO schema_migrations (version) VALUES ('000-initial-schema')");
       console.log('Esquema inicial aplicado.');
     }
-    const migrations = ['001-course-belongs-to-operations.sql'];
+    const migrations = [
+      '001-course-belongs-to-operations.sql',
+      '002-business-timezone.sql'
+    ];
     for (const version of migrations) {
       const applied = await client.query('SELECT 1 FROM schema_migrations WHERE version = $1', [version]);
       if (applied.rowCount) continue;
@@ -183,4 +186,4 @@ main().catch((error) => {
   console.error(error.message);
   process.exitCode = 1;
 });
->>>>>>> 219c483 (Publish deployment cleanup with sanitized credentials)
+>>>>>>> e4eeee9 (Harden auth, admin workflows, and business time rules)

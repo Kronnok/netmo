@@ -42,6 +42,7 @@ if (!config.databaseUrl) throw new Error('DATABASE_URL es obligatorio');
 
 const pool = new Pool({
   connectionString: config.databaseUrl,
+  options: '-c timezone=America/Argentina/Buenos_Aires',
   ssl: /localhost|127\.0\.0\.1/.test(new URL(config.databaseUrl).hostname) ? false : { rejectUnauthorized: false }
 });
 
@@ -69,4 +70,4 @@ async function transaction(callback) {
 }
 
 module.exports = { pool, query, transaction };
->>>>>>> 219c483 (Publish deployment cleanup with sanitized credentials)
+>>>>>>> e4eeee9 (Harden auth, admin workflows, and business time rules)

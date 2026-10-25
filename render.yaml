@@ -15,8 +15,6 @@ services:
         sync: false
       - key: CORS_ORIGIN
         sync: false
-      - key: JWT_SECRET
-        generateValue: true
 =======
 services:
   - type: web
@@ -34,4 +32,6 @@ services:
         sync: false
       - key: CORS_ORIGIN
         sync: false
->>>>>>> 219c483 (Publish deployment cleanup with sanitized credentials)
+      - key: JWT_SECRET
+        generateValue: true
+>>>>>>> e4eeee9 (Harden auth, admin workflows, and business time rules)

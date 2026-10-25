@@ -112,11 +112,14 @@ async function handle(request, response, route, corsHeaders) {
       await db.query('SELECT 1');
       result = { ok: true, service: 'netmo-api' };
     } else if (route.action === 'login') {
-      result = await authService.login(body);
+      result = await authService.login(body, request);
     } else if (route.action === 'register') {
       result = await authService.register(body);
     } else {
       const user = await authService.authenticate(request);
+      if (request.url.startsWith('/api/admin/') && user.rol !== 'admin') {
+        throw new AppError('Solo admin puede acceder a esta operación', 403);
+      }
       result = await apiService[route.action](body, user, route.params);
     }
     send(response, statusCodes[route.action] || 200, result, corsHeaders);
@@ -127,4 +130,4 @@ async function handle(request, response, route, corsHeaders) {
 }
 
 module.exports = { handle, send };
->>>>>>> 219c483 (Publish deployment cleanup with sanitized credentials)
+>>>>>>> e4eeee9 (Harden auth, admin workflows, and business time rules)

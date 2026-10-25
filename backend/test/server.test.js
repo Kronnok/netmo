@@ -116,6 +116,7 @@ test('sirve frontend en desarrollo, valida JSON y responde CORS', async (context
       ...process.env,
       PORT: String(port),
       NODE_ENV: 'development',
+      JWT_SECRET: 'test-only-secret-that-is-long-enough-for-hmac',
       DATABASE_URL: 'postgresql://test:test@127.0.0.1:1/netmo',
       CORS_ORIGIN: 'https://frontend.test'
     },
@@ -142,6 +143,9 @@ test('sirve frontend en desarrollo, valida JSON y responde CORS', async (context
 
   const page = await fetch(baseUrl);
   assert.match(await page.text(), /NetMO/);
+  assert.equal(page.headers.get('x-content-type-options'), 'nosniff');
+  assert.equal(page.headers.get('x-frame-options'), 'DENY');
+  assert.equal(page.headers.get('referrer-policy'), 'no-referrer');
   assert.equal((await fetch(`${baseUrl}/app.js`)).status, 200);
   assert.equal((await fetch(`${baseUrl}/styles.css`)).status, 200);
 
@@ -164,4 +168,4 @@ test('sirve frontend en desarrollo, valida JSON y responde CORS', async (context
   assert.equal(health.status, 500);
   assert.equal((await health.json()).error, 'Error interno del servidor');
 });
->>>>>>> 219c483 (Publish deployment cleanup with sanitized credentials)
+>>>>>>> e4eeee9 (Harden auth, admin workflows, and business time rules)

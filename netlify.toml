@@ -1,11 +1,4 @@
-<<<<<<< HEAD
 [build]
   base = "frontend"
   publish = "."
   command = "echo Static frontend"
-=======
-[build]
-  base = "frontend"
-  publish = "."
-  command = "echo Static frontend"
->>>>>>> 219c483 (Publish deployment cleanup with sanitized credentials)
