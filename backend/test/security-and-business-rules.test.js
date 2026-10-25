@@ -86,6 +86,89 @@ test('cinco fallos de login por IP y correo bloquean el siguiente intento durant
   }
 });
 
+test('el alta y el login preservan la clave, y solo los fallos cuentan para el limitador', async () => {
+  const originalQuery = db.query;
+  const originalTransaction = db.transaction;
+  const password = 'Abcd1234';
+  const legacyPassword = ' x ';
+  const createdUser = {
+    id: '909',
+    legajo: '990099',
+    nombre: 'Usuario Prueba',
+    email: 'login-regression@example.test',
+    rol: 'alumno',
+    baneado: false
+  };
+  let savedPassword;
+  let loginQuery;
+  const request = { headers: {}, socket: { remoteAddress: '192.0.2.12' } };
+  loginRateLimiter.reset();
+  db.transaction = async (callback) => callback({
+    query: async (sql, params) => {
+      if (sql.includes('INSERT INTO users')) {
+        savedPassword = params[4];
+        return { rows: [createdUser], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 1 };
+    }
+  });
+  db.query = async (sql, params) => {
+    if (sql.includes('SELECT id, legajo, nombre, email, rol')) {
+      loginQuery = { sql, params };
+      return [password, legacyPassword].includes(params[1])
+        ? { rows: [createdUser], rowCount: 1 }
+        : { rows: [], rowCount: 0 };
+    }
+    return { rows: [], rowCount: 1 };
+  };
+
+  try {
+    await apiService.createUser({
+      nombre: 'Usuario',
+      apellido: 'Prueba',
+      email: createdUser.email,
+      legajo: createdUser.legajo,
+      rol: 'alumno',
+      password
+    }, { id: '1', rol: 'admin' });
+    assert.equal(savedPassword, password);
+
+    const accepted = await authService.login(
+      { email: 'LOGIN-REGRESSION@EXAMPLE.TEST', password },
+      request
+    );
+    assert.equal(accepted.user.id, createdUser.id);
+    assert.match(loginQuery.sql, /password_hash = crypt\(\$2, password_hash\)/);
+    assert.deepEqual(loginQuery.params, [createdUser.email, password]);
+
+    await assert.rejects(
+      authService.login({ email: createdUser.email, password: 'incorrecta' }, request),
+      (error) => error.status === 401
+    );
+    const legacyLogin = await authService.login(
+      { email: createdUser.email, password: legacyPassword },
+      request
+    );
+    assert.equal(legacyLogin.user.id, createdUser.id);
+    assert.equal(loginQuery.params[1], legacyPassword);
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      await assert.rejects(
+        authService.login({ email: createdUser.email, password: 'incorrecta' }, request),
+        (error) => error.status === 401
+      );
+    }
+    await assert.rejects(
+      authService.login({ email: createdUser.email, password: 'incorrecta' }, request),
+      (error) => error.status === 429
+    );
+  } finally {
+    db.query = originalQuery;
+    db.transaction = originalTransaction;
+    loginRateLimiter.reset();
+  }
+});
+
 test('todos los servicios detrás de rutas admin rechazan alumnos y aceptan administradores', async () => {
   const paths = [
     ['GET', '/api/admin/professors'],

@@ -399,11 +399,37 @@ async function runFlows(users) {
       legajo: '990010', rol: 'alumno', password: 'new-user-pass-2026'
     }, tokens.admin);
     assert.equal(created.status, 201);
+    await pool.query('UPDATE users SET email = upper(email) WHERE id = $1', [created.payload.user.id]);
+    const successfulLogin = await request('POST', '/api/auth/login', {
+      email: 'NEW-USER@NETMO.INVALID',
+      password: 'Abcd1234'
+    });
+    assert.equal(successfulLogin.status, 200);
+    const invalidLogin = await request('POST', '/api/auth/login', {
+      email: 'new-user@netmo.invalid',
+      password: 'incorrecta'
+    });
+    assert.equal(invalidLogin.status, 401);
     const duplicate = await request('POST', '/api/admin/users', {
       nombre: 'Otro', apellido: 'Usuario', email: 'new-user@netmo.invalid',
       legajo: '990011', rol: 'alumno', password: 'new-user-pass-2026'
     }, tokens.admin);
     assert.equal(duplicate.status, 409);
+  });
+
+  await report('login no aplica las reglas de formato de claves nuevas', async () => {
+    const legacy = await insertUser(
+      '990012',
+      'Usuario Clave Histórica',
+      'legacy-password@netmo.invalid',
+      'alumno',
+      ' x '
+    );
+    const response = await request('POST', '/api/auth/login', {
+      email: legacy.email,
+      password: legacy.password
+    });
+    assert.equal(response.status, 200);
   });
 
   await report('inventario: carros, notebooks y cambios de estado', async () => {
