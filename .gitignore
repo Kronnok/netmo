@@ -4,6 +4,8 @@ node_modules/
 database/postgres-data/
 database/backups/
 **/backups/
+backups/
+*.backup.json
 *.dump
 *.backup
 *.bak

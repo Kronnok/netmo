@@ -308,6 +308,9 @@
   .auth-switch{margin-top:1.3rem;text-align:center;font-size:.85rem;color:var(--text-muted);background:none;border:0;width:100%;}
   .password-input-wrap{display:flex;align-items:center;gap:.5rem;}
   .password-input-wrap input{flex:1;min-width:0;}
+  .backup-preview{margin:1rem 0;padding:1rem;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--surface-2);}
+  .backup-preview ul{margin:.5rem 0 0 1.2rem;columns:2;}
+  .backup-warning{margin:1rem 0;padding:1rem;border:1px solid var(--red-text);border-radius:var(--radius-md);background:var(--red-bg);color:var(--red-text);font-weight:700;}
   .link-btn{background:none;border:none;color:var(--brand);font-weight:600;cursor:pointer;padding:0;text-decoration:underline;font-size:inherit;}
   .auth-back-btn{display:inline-block;margin-bottom:1rem;text-decoration:none;font-size:.85rem;}
   .auth-back-btn:hover{text-decoration:underline;}

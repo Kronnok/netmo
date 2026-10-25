@@ -20,6 +20,7 @@ let historialTardanzas = [];
 let reservas = [];
 let tickets = [];
 let lateReturnsInterval = null;
+let pendingRestoreBackup = null;
 
 const badgeClass = {disponible:'badge-disponible', prestada:'badge-prestada', reservada:'badge-pendiente_devolucion', mantenimiento:'badge-mantenimiento', pendiente_devolucion:'badge-pendiente_devolucion'};
 const badgeLabel = {disponible:'Disponible', prestada:'Prestada', reservada:'Reservada', mantenimiento:'En mantenimiento', pendiente_devolucion:'Pend. devolución'};
@@ -59,6 +60,7 @@ const pageMeta = {
   'admin-lotes':        ['Préstamos', 'Aprobá y registrá el retiro de las solicitudes de préstamo (individuales o por lote).'],
   'admin-tickets':      ['Fallas reportadas', 'Tickets enviados por alumnos y profesores. Actualizá el estado del equipo según corresponda.'],
   'admin-tardanzas':    ['Devoluciones tardías', 'Historial de demoras y sanciones a alumnos y profesores.'],
+  'admin-backup':       ['Backup', 'Descargá una copia o restaurá los datos del sistema.'],
 };
 
 /* ======================================================================
@@ -453,6 +455,13 @@ function switchView(name){
   if(name==='admin-devoluciones') renderDevoluciones();
   if(name==='admin-lotes') renderLotes();
   if(name==='admin-tickets') renderAdminTickets();
+  if(name==='admin-backup'){
+    document.getElementById('backupFile').value = '';
+    document.getElementById('backupPreview').hidden = true;
+    document.getElementById('restoreBackupForm').hidden = true;
+    document.getElementById('restoreBackupError').textContent = '';
+    pendingRestoreBackup = null;
+  }
   if(lateReturnsInterval) clearInterval(lateReturnsInterval);
   lateReturnsInterval = null;
   if(name==='admin-tardanzas'){
@@ -478,6 +487,101 @@ async function refreshAdminLateReturns(){
     renderTardanzas();
   }catch(error){
     showToast(error.message, 'warn');
+  }
+}
+
+async function descargarBackup(){
+  try{
+    const response = await fetch(API_BASE+'/api/admin/backup', {
+      headers:{Authorization:'Bearer '+authToken}
+    });
+    if(!response.ok){
+      const payload = await response.json().catch(()=>({}));
+      throw new Error(payload.error || 'No se pudo descargar el backup.');
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = response.headers.get('content-disposition')?.match(/filename="([^"]+)"/)?.[1] || 'netmo-backup.json';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }catch(error){
+    showToast(error.message, 'warn');
+  }
+}
+
+async function previsualizarBackup(event){
+  const file = event.target.files?.[0];
+  const preview = document.getElementById('backupPreview');
+  const form = document.getElementById('restoreBackupForm');
+  const error = document.getElementById('restoreBackupError');
+  pendingRestoreBackup = null;
+  form.hidden = true;
+  error.textContent = '';
+  if(!file){
+    preview.hidden = true;
+    return;
+  }
+  if(file.size > 25 * 1024 * 1024){
+    preview.textContent = 'El archivo supera el límite permitido de 25 MB.';
+    preview.hidden = false;
+    return;
+  }
+  try{
+    const backup = JSON.parse(await file.text());
+    if(!backup || typeof backup !== 'object' || !backup.metadata || typeof backup.metadata !== 'object' ||
+      !backup.metadata.conteos || typeof backup.metadata.conteos !== 'object'){
+      throw new Error('El archivo no tiene metadatos de backup válidos.');
+    }
+    pendingRestoreBackup = backup;
+    const fecha = backup.metadata.fecha && Number.isFinite(Date.parse(backup.metadata.fecha))
+      ? new Date(backup.metadata.fecha).toLocaleString('es-AR')
+      : backup.metadata.fecha || 'No disponible';
+    const counts = Object.entries(backup.metadata.conteos)
+      .map(([table, count])=>`<li><span>${escapeHtml(table)}</span>: ${escapeHtml(count)}</li>`).join('');
+    preview.innerHTML = `<h4>Vista previa</h4>
+      <p>Fecha: ${escapeHtml(fecha)}</p>
+      <p>Versión del esquema: ${escapeHtml(backup.metadata.version_esquema || 'No disponible')}</p>
+      <ul>${counts}</ul>`;
+    preview.hidden = false;
+    form.hidden = false;
+  }catch(parseError){
+    preview.textContent = parseError instanceof SyntaxError ? 'El archivo no contiene JSON válido.' : parseError.message;
+    preview.hidden = false;
+  }
+}
+
+async function restaurarBackup(event){
+  event.preventDefault();
+  const error = document.getElementById('restoreBackupError');
+  if(!pendingRestoreBackup){
+    error.textContent = 'Seleccioná un archivo de backup válido.';
+    return;
+  }
+  if(document.getElementById('restoreConfirmation').value !== 'RESTAURAR'){
+    error.textContent = 'La frase debe ser exactamente RESTAURAR.';
+    return;
+  }
+  const confirmation = window.confirm('Esta operación reemplazará todos los datos actuales. ¿Continuar?');
+  if(!confirmation) return;
+  try{
+    const response = await fetch(API_BASE+'/api/admin/restore', {
+      method:'POST',
+      headers:{'Content-Type':'application/json', Authorization:'Bearer '+authToken},
+      body:JSON.stringify({
+        backup:pendingRestoreBackup,
+        password:document.getElementById('restoreAdminPassword').value,
+        confirmation:document.getElementById('restoreConfirmation').value
+      })
+    });
+    const payload = await response.json().catch(()=>({}));
+    if(!response.ok) throw new Error(payload.error || 'No se pudo restaurar el backup.');
+    window.location.reload();
+  }catch(restoreError){
+    error.textContent = restoreError.message;
   }
 }
 

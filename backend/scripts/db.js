@@ -22,7 +22,8 @@ async function migrate() {
       '002-business-timezone.sql',
       '003-admin-accounts-and-carros.sql',
       '004-reservation-schedule.sql',
-      '005-password-resets.sql'
+      '005-password-resets.sql',
+      '006-admin-backup-audit.sql'
     ];
     for (const version of migrations) {
       const applied = await client.query('SELECT 1 FROM schema_migrations WHERE version = $1', [version]);

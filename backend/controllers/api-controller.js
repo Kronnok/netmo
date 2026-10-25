@@ -1,6 +1,7 @@
 const authService = require('../services/auth-service');
 const apiService = require('../services/api-service');
 const passwordResetService = require('../services/password-reset-service');
+const backupService = require('../services/backup-service');
 const db = require('../data/database');
 const { AppError } = require('../errors');
 
@@ -13,13 +14,17 @@ const statusCodes = {
   requestReturn: 202
 };
 
-async function readBody(request) {
+async function readBody(request, limit = 1024 * 1024) {
   if (!['POST', 'PATCH'].includes(request.method)) return {};
-  let body = '';
+  const chunks = [];
+  let size = 0;
   for await (const chunk of request) {
-    body += chunk;
-    if (body.length > 1024 * 1024) throw new AppError('El cuerpo de la solicitud supera el límite permitido', 413);
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += buffer.length;
+    if (size > limit) throw new AppError('El cuerpo de la solicitud supera el límite permitido', 413);
+    chunks.push(buffer);
   }
+  const body = Buffer.concat(chunks).toString('utf8');
   if (!body) return {};
   try {
     const parsed = JSON.parse(body);
@@ -42,7 +47,12 @@ function send(response, status, payload, corsHeaders) {
 
 async function handle(request, response, route, corsHeaders) {
   try {
-    const body = await readBody(request);
+    let authenticatedUser = null;
+    if (route.action === 'restoreAdminBackup') {
+      authenticatedUser = await authService.authenticate(request);
+      if (authenticatedUser.rol !== 'admin') throw new AppError('Solo admin puede acceder a esta operación', 403);
+    }
+    const body = await readBody(request, route.action === 'restoreAdminBackup' ? 25 * 1024 * 1024 : 1024 * 1024);
     let result;
     if (route.action === 'health') {
       await db.query('SELECT 1');
@@ -54,11 +64,25 @@ async function handle(request, response, route, corsHeaders) {
     } else if (route.action === 'resetPassword') {
       result = await passwordResetService.resetPassword(body, request);
     } else {
-      const user = await authService.authenticate(request);
+      const user = authenticatedUser || await authService.authenticate(request);
       if (request.url.startsWith('/api/admin/') && user.rol !== 'admin') {
         throw new AppError('Solo admin puede acceder a esta operación', 403);
       }
-      if (route.action === 'requestPasswordChange') {
+      if (route.action === 'downloadAdminBackup') {
+        result = await backupService.createBackup(user);
+        const content = result.content;
+        response.writeHead(200, {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Content-Length': Buffer.byteLength(content),
+          'Content-Disposition': `attachment; filename="${result.filename}"`,
+          'Cache-Control': 'no-store',
+          ...corsHeaders
+        });
+        response.end(content);
+        return;
+      } else if (route.action === 'restoreAdminBackup') {
+        result = await backupService.restoreBackup(body, user);
+      } else if (route.action === 'requestPasswordChange') {
         result = await passwordResetService.requestChange(body, user, request);
       } else if (route.action === 'changePassword') {
         result = await passwordResetService.changePassword(body, user, request);
@@ -78,4 +102,4 @@ async function handle(request, response, route, corsHeaders) {
   }
 }
 
-module.exports = { handle, send };
+module.exports = { handle, send, readBody };

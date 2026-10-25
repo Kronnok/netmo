@@ -26,6 +26,8 @@ test('resuelve rutas de API y sus parámetros', () => {
   assert.equal(routes.resolve('POST', '/api/auth/change-password').action, 'changePassword');
   assert.equal(routes.resolve('POST', '/api/admin/users').action, 'createUser');
   assert.equal(routes.resolve('GET', '/api/admin/carros').action, 'carros');
+  assert.equal(routes.resolve('GET', '/api/admin/backup').action, 'downloadAdminBackup');
+  assert.equal(routes.resolve('POST', '/api/admin/restore').action, 'restoreAdminBackup');
   assert.equal(routes.resolve('POST', '/api/admin/carros').action, 'createCarro');
   assert.equal(routes.resolve('POST', '/api/admin/notebooks').action, 'createNotebooks');
   assert.equal(routes.resolve('GET', '/api/missing'), null);

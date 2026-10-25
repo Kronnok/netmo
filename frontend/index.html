@@ -130,6 +130,9 @@
     <li data-roles="admin"><button class="nav-item" data-view="admin-tardanzas" onclick="switchView('admin-tardanzas')">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
       Devoluciones tardías <span class="nav-badge" id="tardanzasBadge" style="display:none;">0</span></button></li>
+    <li data-roles="admin"><button class="nav-item" data-view="admin-backup" onclick="switchView('admin-backup')">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 19h14"/></svg>
+      Backup</button></li>
 
     <li data-roles="alumno,profesor,admin"><button class="nav-item" data-view="perfil" onclick="switchView('perfil')">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
@@ -593,6 +596,39 @@
         <thead><tr><th>Usuario</th><th>Rol</th><th>Notebook</th><th>Fecha</th></tr></thead>
         <tbody id="historialTardanzasTable"></tbody>
       </table>
+    </div>
+  </section>
+
+  <!-- ============ VIEW: ADMIN · BACKUP ============ -->
+  <section class="view" id="view-admin-backup">
+    <div class="card">
+      <div class="card-header">
+        <div><h3>Backup de datos</h3><p>Descargá una copia JSON de los datos actuales del sistema.</p></div>
+        <button type="button" class="btn btn-primary" onclick="descargarBackup()">Descargar backup</button>
+      </div>
+      <p class="hint">El archivo contiene hashes de contraseñas. Guardalo como dato sensible y no lo compartas.</p>
+    </div>
+    <div class="card" style="margin-top:1.5rem;">
+      <div class="card-header"><div><h3>Restaurar backup</h3><p>Seleccioná un backup JSON para revisar sus datos antes de confirmar.</p></div></div>
+      <div class="field">
+        <label for="backupFile">Archivo JSON</label>
+        <input type="file" id="backupFile" accept=".json,application/json" onchange="previsualizarBackup(event)">
+      </div>
+      <div id="backupPreview" class="backup-preview" hidden></div>
+      <form id="restoreBackupForm" onsubmit="restaurarBackup(event)" hidden>
+        <div class="backup-warning" role="alert">ATENCIÓN: esta acción reemplaza TODOS los datos actuales del sistema. Descargá un backup antes de continuar.</div>
+        <button type="button" class="btn" onclick="descargarBackup()">Descargar backup actual</button>
+        <div class="field">
+          <label for="restoreAdminPassword">Contraseña actual de administrador</label>
+          <input type="password" id="restoreAdminPassword" autocomplete="current-password" required>
+        </div>
+        <div class="field">
+          <label for="restoreConfirmation">Escribí exactamente RESTAURAR</label>
+          <input type="text" id="restoreConfirmation" autocomplete="off" required>
+        </div>
+        <div id="restoreBackupError" class="field-error" role="status"></div>
+        <button type="submit" class="btn btn-danger-outline">Restaurar y reemplazar datos</button>
+      </form>
     </div>
   </section>
 

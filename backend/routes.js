@@ -32,6 +32,8 @@ const routes = [
   ['POST', /^\/api\/tickets$/, 'createTicket'],
   ['PATCH', /^\/api\/tickets\/([^/]+)$/, 'updateTicket', ['code']],
   ['GET', /^\/api\/admin\/late-returns$/, 'lateReturns'],
+  ['GET', /^\/api\/admin\/backup$/, 'downloadAdminBackup'],
+  ['POST', /^\/api\/admin\/restore$/, 'restoreAdminBackup'],
   ['PATCH', /^\/api\/admin\/users\/([^/]+)$/, 'updateUser', ['legajo']],
   ['PATCH', /^\/api\/admin\/users\/([^/]+)\/rol$/, 'updateUserRole', ['legajo']]
 ];

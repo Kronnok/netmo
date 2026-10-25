@@ -102,14 +102,15 @@ de ejemplo, ambos comandos sirven frontend y API localmente; Render establece
 
 ## Backups y restauración
 
-El backup es opcional y requiere `pg_dump`/`pg_restore` instalados. Desde Git
-Bash, con `DATABASE_URL` y `BACKUP_ONCE=1`, ejecutá
-`sh database/scripts/backup-loop.sh`. Para restaurar un dump custom, verificá
-el destino y ejecutá:
+Desde el panel de administración, abrí **Backup** y seleccioná **Descargar
+backup**. El JSON incluye todas las tablas de negocio y hashes de contraseñas;
+tratá el archivo como dato sensible, guardalo en un lugar privado y no lo
+subas a Git ni lo compartas.
 
-```sh
-pg_restore --clean --if-exists --no-owner --dbname="$DATABASE_URL" backup.dump
-```
-
-`--clean` reemplaza objetos; primero probá la restauración en una base vacía.
+Para restaurar, cargá el archivo en esa misma sección, revisá la fecha y los
+conteos, descargá primero el backup actual y confirmá la contraseña vigente de
+administrador junto con la frase exacta `RESTAURAR`. La operación reemplaza
+todos los datos de negocio y se revierte por completo si falla. No se requieren
+`pg_dump` ni `pg_restore`. Aplicá migraciones con `npm run db:migrate` antes
+de usar esta función; backups de esquemas posteriores al actual se rechazan.
 #

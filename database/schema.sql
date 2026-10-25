@@ -20,6 +20,14 @@ CREATE TABLE users (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE audit_log (
+  id BIGSERIAL PRIMARY KEY,
+  user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+  accion VARCHAR(80) NOT NULL,
+  detalle TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE password_resets (
   id BIGSERIAL PRIMARY KEY,
   user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -85,6 +93,9 @@ ON reservation_notebooks(notebook_id) WHERE active;
 CREATE OR REPLACE FUNCTION validate_reservation_year()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
+  IF current_setting('netmo.restore_mode', TRUE) = 'on' THEN
+    RETURN NEW;
+  END IF;
   IF EXTRACT(YEAR FROM NEW.retiro_at AT TIME ZONE 'America/Argentina/Buenos_Aires')
     <> EXTRACT(YEAR FROM now() AT TIME ZONE 'America/Argentina/Buenos_Aires') THEN
     RAISE EXCEPTION 'Las reservas solo pueden hacerse durante el año actual';
@@ -103,6 +114,9 @@ DECLARE
   local_time TIME;
   weekday INTEGER;
 BEGIN
+  IF current_setting('netmo.restore_mode', TRUE) = 'on' THEN
+    RETURN NEW;
+  END IF;
   IF NEW.retiro_at <= now() THEN
     RAISE EXCEPTION 'La fecha y hora de reserva deben ser futuras';
   END IF;
