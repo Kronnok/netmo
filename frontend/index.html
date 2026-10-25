@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -590,3 +591,624 @@
 <script src="app.js"></script>
 </body>
 </html>
+=======
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NetMO · Gestión de notebooks</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- ============================================================ -->
+<!-- AUTH SHELL: Login / Registro                                  -->
+<!-- ============================================================ -->
+<div id="auth-shell">
+  <button class="icon-btn theme-toggle-btn" style="position:absolute;top:1.5rem;right:1.5rem;" onclick="toggleTheme()" title="Cambiar tema" aria-label="Cambiar tema"></button>
+  <div class="auth-card">
+    <div class="auth-brand">
+      <div class="logo-mark">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+      </div>
+      <h1>NetMO<span>Gestión de notebooks</span></h1>
+    </div>
+
+    <!-- ---- LOGIN ---- -->
+    <section class="auth-view active" id="view-login">
+      <h2>Iniciar sesión</h2>
+      <p class="sub">Ingresá con tu correo de Gmail para acceder al sistema de préstamos.</p>
+      <form id="loginForm" onsubmit="login(event)">
+        <div class="form-grid" style="grid-template-columns:1fr;gap:1rem;">
+          <div class="field">
+            <label for="loginEmail">Correo (Gmail)</label>
+            <input type="email" id="loginEmail" placeholder="Ej: tunombre@gmail.com" required>
+          </div>
+          <div class="field">
+            <label for="loginPassword">Contraseña</label>
+            <input type="password" id="loginPassword" placeholder="••••••••" required>
+          </div>
+        </div>
+        <div id="loginError" class="field-error"></div>
+        <button type="submit" class="btn btn-primary btn-block" style="margin-top:.6rem;">Ingresar</button>
+      </form>
+      <p class="auth-switch">¿No tenés cuenta? <button class="link-btn" onclick="switchAuthView('registro')">Registrate acá</button></p>
+      <div class="demo-hint" id="demoHint">
+        <b>Usuarios demo:</b><br>
+        Alumno → <b>tprado@ottokrause.edu.ar</b> / clave <b>1234</b><br>
+        Alumna → <b>lfernandez@ottokrause.edu.ar</b> / clave <b>1234</b><br>
+        Alumno → <b>mrodriguez@ottokrause.edu.ar</b> / clave <b>5678</b><br>
+        Profesor → <b>agomez@ottokrause.edu.ar</b> / clave <b>1234</b><br>
+        Profesor → <b>dsuarez@ottokrause.edu.ar</b> / clave <b>2468</b><br>
+        Admin → <b>admin@ottokrause.edu.ar</b> / clave <b>admin123</b>
+      </div>
+    </section>
+
+    <!-- ---- REGISTRO ---- -->
+    <section class="auth-view" id="view-registro">
+      <button type="button" class="link-btn auth-back-btn" onclick="switchAuthView('login')" aria-label="Volver a iniciar sesión">← Volver a iniciar sesión</button>
+      <h2>Crear cuenta</h2>
+      <p class="sub">Registrate con tu correo institucional para poder solicitar equipos como profesor.</p>
+      <form id="registroForm" onsubmit="registrar(event)">
+        <div class="form-grid" style="grid-template-columns:1fr;gap:1rem;">
+          <div class="field">
+            <label for="regNombre">Nombre y apellido</label>
+            <input type="text" id="regNombre" placeholder="Ej: Ana Fernández" required>
+          </div>
+          <div class="field">
+            <label for="regEmail">Correo (Gmail)</label>
+            <input type="email" id="regEmail" placeholder="Ej: tunombre@gmail.com" required>
+          </div>
+          <div class="field">
+            <label for="regPassword">Contraseña</label>
+            <input type="password" id="regPassword" placeholder="Elegí una contraseña" required>
+          </div>
+        </div>
+        <div id="registroError" class="field-error"></div>
+        <button type="submit" class="btn btn-primary btn-block" style="margin-top:.6rem;">Registrarme</button>
+      </form>
+      <p class="auth-switch">¿Ya tenés cuenta? <button class="link-btn" onclick="switchAuthView('login')">Iniciá sesión</button></p>
+    </section>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- APP ROOT (visible sólo con sesión iniciada)                   -->
+<!-- ============================================================ -->
+<div id="app-root">
+
+<aside class="sidebar">
+  <div class="logo">
+    <div class="logo-mark">
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+    </div>
+    <h1>NetMO<span>Gestión de notebooks</span></h1>
+  </div>
+
+  <div class="role-pill-wrap">
+    <span class="role-pill" id="sidebarRolePill">Alumno</span>
+  </div>
+
+  <ul class="nav-menu">
+    <li data-roles="alumno,profesor,admin"><button class="nav-item" data-view="inicio" onclick="switchView('inicio')">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12l9-9 9 9"/><path d="M5 10v10h14V10"/></svg>
+      Inicio</button></li>
+    <li data-roles="alumno,profesor"><button class="nav-item" data-view="prestamos" onclick="switchView('prestamos')">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><line x1="2" y1="9" x2="22" y2="9"/></svg>
+      Mis préstamos</button></li>
+    <li data-roles="alumno,profesor"><button class="nav-item" data-view="reservas" onclick="switchView('reservas')">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="17" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="16" y1="2" x2="16" y2="6"/></svg>
+      Reservas</button></li>
+    <li data-roles="alumno,profesor"><button class="nav-item" data-view="falla" onclick="switchView('falla')">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      Reportar falla</button></li>
+    <li data-roles="alumno,profesor"><button class="nav-item" data-view="tickets" onclick="switchView('tickets')">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v5a2 2 0 0 1 0 4v1a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-1a2 2 0 0 1 0-4z"/></svg>
+      Mis tickets <span class="nav-badge" id="ticketsBadge" style="display:none;">0</span></button></li>
+
+    <li data-roles="admin"><span class="nav-section-label">Administración</span></li>
+    <li data-roles="admin"><button class="nav-item" data-view="admin-profesores" onclick="switchView('admin-profesores')">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="16" y1="11" x2="22" y2="11"/></svg>
+      Profesores</button></li>
+    <li data-roles="admin"><button class="nav-item" data-view="admin-inventario" onclick="switchView('admin-inventario')">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+      Inventario</button></li>
+    <li data-roles="admin"><button class="nav-item" data-view="admin-devoluciones" onclick="switchView('admin-devoluciones')">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9"/><path d="M3 4v8h8"/></svg>
+      Devoluciones <span class="nav-badge" id="devBadge" style="display:none;">0</span></button></li>
+    <li data-roles="admin"><button class="nav-item" data-view="admin-lotes" onclick="switchView('admin-lotes')">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      Lotes de profesores <span class="nav-badge" id="lotesBadge" style="display:none;">0</span></button></li>
+    <li data-roles="admin"><button class="nav-item" data-view="admin-tickets" onclick="switchView('admin-tickets')">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      Fallas reportadas <span class="nav-badge" id="adminTicketsBadge" style="display:none;">0</span></button></li>
+    <li data-roles="admin"><button class="nav-item" data-view="admin-tardanzas" onclick="switchView('admin-tardanzas')">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      Devoluciones tardías <span class="nav-badge" id="tardanzasBadge" style="display:none;">0</span></button></li>
+
+    <li data-roles="alumno,profesor,admin"><button class="nav-item" data-view="perfil" onclick="switchView('perfil')">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      Perfil</button></li>
+  </ul>
+
+  <div class="logout">
+    <button class="nav-item" onclick="openModal('logoutModal')">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+      Cerrar sesión</button>
+  </div>
+</aside>
+
+<main class="main-content">
+
+  <!-- ============ HEADER (common) ============ -->
+  <header class="header">
+    <div class="welcome-text">
+      <h2 id="pageTitle">¡Hola!</h2>
+      <p id="pageSubtitle">Aquí podés consultar la disponibilidad de notebooks y realizar reservas.</p>
+      <div class="test-mode-banner" id="testModeBanner" style="display:none;">
+        🧪 Modo demo sin BDD: viendo la interfaz como <span id="testModeRole"></span>
+      </div>
+    </div>
+    <div class="header-right">
+      <button class="icon-btn theme-toggle-btn" onclick="toggleTheme()" title="Cambiar tema" aria-label="Cambiar tema"></button>
+      <button class="icon-btn" onclick="switchView('tickets')" title="Notificaciones">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+        <span class="dot-alert"></span>
+      </button>
+      <div class="user-profile" onclick="switchView('perfil')">
+        <div class="avatar" id="headerAvatar">--</div>
+        <div>
+          <h4 id="headerNombre">—</h4>
+          <p id="headerRolCurso">—</p>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ============ VIEW: INICIO ============ -->
+  <section class="view active" id="view-inicio">
+
+    <!-- ---- ADMIN: panel completo de inventario ---- -->
+    <div id="statsGridAdmin" class="stats-grid">
+      <div class="stat-card"><div class="stat-icon icon-green">💻</div><div class="stat-info"><span>Disponibles</span><h3 id="statDisponibles">0</h3><p>En este momento</p></div></div>
+      <div class="stat-card"><div class="stat-icon icon-blue">🖥️</div><div class="stat-info"><span>Prestadas</span><h3 id="statPrestadas">0</h3><p>Actualmente</p></div></div>
+      <div class="stat-card"><div class="stat-icon icon-orange">🔧</div><div class="stat-info"><span>En mantenimiento</span><h3 id="statMantenimiento">0</h3><p>No disponibles</p></div></div>
+      <div class="stat-card"><div class="stat-icon icon-purple">📊</div><div class="stat-info"><span>Total</span><h3 id="statTotal">0</h3><p>Notebooks en total</p></div></div>
+    </div>
+
+    <!-- ---- ALUMNO / PROFESOR: solo lo que les importa ---- -->
+    <div id="statsGridUsuario" class="stats-grid" style="grid-template-columns:minmax(200px,280px);">
+      <div class="stat-card"><div class="stat-icon icon-green">💻</div><div class="stat-info"><span>Disponibles</span><h3 id="statDisponiblesUsuario">0</h3><p>En este momento</p></div></div>
+    </div>
+
+    <div class="content-grid">
+      <div class="card" id="cardEstadoNotebooks">
+        <div class="card-header">
+          <div>
+            <h3>Estado de notebooks</h3>
+            <p>Información actualizada en tiempo real.</p>
+          </div>
+          <div class="search-bar-wrap">
+            <input type="text" id="searchInput" class="search-bar" placeholder="Buscar por número o estado" oninput="filterNotebooks()">
+            <select class="btn btn-sm" id="filterEstado" onchange="filterNotebooks()" style="font-weight:500;">
+              <option value="">Todos</option>
+              <option value="disponible">Disponible</option>
+              <option value="prestada">Prestada</option>
+              <option value="mantenimiento">Mantenimiento</option>
+              <option value="pendiente_devolucion">Pendiente devolución</option>
+            </select>
+          </div>
+        </div>
+        <table>
+          <thead><tr><th>N° de notebook</th><th>Estado</th><th>Ubicación</th><th>Última actualización</th></tr></thead>
+          <tbody id="notebookTable"></tbody>
+        </table>
+      </div>
+
+      <div class="card" id="cardMiActividad">
+        <div class="card-header">
+          <div>
+            <h3>Tu actividad</h3>
+            <p>Tus próximas reservas y tickets abiertos.</p>
+          </div>
+        </div>
+        <div id="miActividadWrap"></div>
+      </div>
+
+      <div class="actions-section">
+        <h3>Acciones rápidas</h3>
+        <button class="action-card" data-roles="alumno,profesor" onclick="switchView('reservas')">
+          <div class="action-icon">📅</div>
+          <div class="action-info"><h4>Reservar notebook</h4><p>Reservá una notebook o un lote</p></div>
+          <span class="action-arrow">›</span>
+        </button>
+        <button class="action-card" data-roles="alumno,profesor" onclick="switchView('prestamos')">
+          <div class="action-icon" style="background:var(--blue-bg);color:var(--blue-text);">↩️</div>
+          <div class="action-info"><h4>Devolver notebook</h4><p>Registrá una devolución</p></div>
+          <span class="action-arrow">›</span>
+        </button>
+        <button class="action-card" data-roles="alumno,profesor" onclick="switchView('falla')">
+          <div class="action-icon" style="background:var(--orange-bg);color:var(--orange-text);">⚠️</div>
+          <div class="action-info"><h4>Reportar falla</h4><p>Informar un problema</p></div>
+          <span class="action-arrow">›</span>
+        </button>
+        <button class="action-card" data-roles="admin" onclick="switchView('admin-devoluciones')">
+          <div class="action-icon" style="background:var(--red-bg);color:var(--red-text);">📥</div>
+          <div class="action-info"><h4>Confirmar devoluciones</h4><p>Revisar la cola de pendientes</p></div>
+          <span class="action-arrow">›</span>
+        </button>
+        <button class="action-card" data-roles="admin" onclick="switchView('admin-lotes')">
+          <div class="action-icon" style="background:var(--purple-bg);color:var(--purple-text);">👥</div>
+          <div class="action-info"><h4>Aprobar lotes</h4><p>Solicitudes de profesores</p></div>
+          <span class="action-arrow">›</span>
+        </button>
+        <button class="action-card" data-roles="alumno,profesor,admin" onclick="openModal('normasModal')">
+          <div class="action-icon" style="background:var(--purple-bg);color:var(--purple-text);">ℹ️</div>
+          <div class="action-info"><h4>Normas de uso</h4><p>Leé las normas</p></div>
+          <span class="action-arrow">›</span>
+        </button>
+
+        <div class="alert-box">
+          <h4>📢 Avisos importantes</h4>
+          <ul>
+            <li>Recordá devolver la notebook en la fecha y hora acordada.</li>
+            <li>Si tenés problemas, creá un ticket.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ VIEW: MIS PRÉSTAMOS (alumno) ============ -->
+  <section class="view" id="view-prestamos">
+    <div class="card">
+      <div class="card-header">
+        <div><h3>Préstamo activo</h3><p>Notebook que tenés actualmente en tu poder.</p></div>
+      </div>
+      <div id="prestamoActivoWrap"></div>
+    </div>
+
+    <div class="card" style="margin-top:1.5rem;">
+      <div class="card-header"><div><h3>Historial de préstamos</h3><p>Últimos movimientos registrados a tu nombre.</p></div></div>
+      <table>
+        <thead><tr><th>Notebook</th><th>Retirada</th><th>Devuelta</th><th>Estado</th></tr></thead>
+        <tbody id="historialPrestamosTable"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============ VIEW: RESERVAS (alumno + profesor) ============ -->
+  <section class="view" id="view-reservas">
+    <div class="view-grid">
+      <div class="card">
+        <div class="card-header"><div><h3>Nueva reserva</h3><p>Elegí carro, fecha y horario de retiro.</p></div></div>
+
+        <div class="toggle-row" id="loteToggleWrap" style="display:none;margin-bottom:1.1rem;">
+          <input type="checkbox" id="loteToggle" onchange="toggleLoteBlock()">
+          <label for="loteToggle" style="margin:0;">Solicitar un <b>lote</b> de notebooks para un curso completo</label>
+        </div>
+
+        <form id="reservaForm" onsubmit="crearReserva(event)">
+          <div class="form-grid">
+            <div class="field" id="resCantidadWrap">
+              <label for="resCantidad">Cantidad de equipos</label>
+              <input type="number" id="resCantidad" min="1" max="40" step="1" value="1" required>
+            </div>
+            <div class="field" data-roles-el="profesor">
+              <label for="resCursoProfesor">Curso</label>
+              <input type="text" id="resCursoProfesor" placeholder="Ej: 6° Informática A">
+            </div>
+            <div class="field">
+              <label for="resFecha">Fecha</label>
+              <input type="date" id="resFecha" required>
+            </div>
+            <div class="field">
+              <label for="resHora">Hora de retiro</label>
+              <input type="time" id="resHora" required>
+            </div>
+            <div class="field full">
+              <label for="resMotivo">Motivo / materia</label>
+              <input type="text" id="resMotivo" placeholder="Ej: Programación — TP integrador">
+            </div>
+          </div>
+
+          <div class="lote-block" id="loteBlock">
+            <h4>👥 Datos del lote</h4>
+            <div class="form-grid">
+              <div class="field">
+                <label for="loteCurso">Curso / división</label>
+                <input type="text" id="loteCurso" placeholder="Ej: 6° Informática A">
+              </div>
+              <div class="field">
+                <label for="loteCantidad">Cantidad de equipos</label>
+                <input type="number" id="loteCantidad" min="3" max="40" value="10">
+              </div>
+            </div>
+            <p class="hint" style="margin-top:.6rem;">La solicitud de lote queda <b>pendiente de aprobación</b> del Administrador antes de confirmarse.</p>
+          </div>
+
+          <div id="resFechaError" class="field-error"></div>
+          <div class="modal-actions" style="justify-content:flex-start;margin-top:1rem;">
+            <button type="submit" class="btn btn-primary" id="resSubmitBtn">Confirmar reserva</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><div><h3>Mis reservas</h3><p>Próximos retiros programados.</p></div></div>
+        <div id="reservasListWrap"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ VIEW: REPORTAR FALLA ============ -->
+  <section class="view" id="view-falla">
+    <div class="view-grid">
+      <div class="card">
+        <div class="card-header"><div><h3>Reportar un problema</h3><p>Contanos qué pasó para poder darle seguimiento.</p></div></div>
+        <form id="fallaForm" onsubmit="crearTicket(event)">
+          <div class="form-grid">
+            <div class="field full">
+              <label for="fallaNotebook">Notebook afectada</label>
+              <select id="fallaNotebook" required>
+                <option value="">Seleccioná una notebook</option>
+                <option>NB-001</option><option>NB-002</option><option>NB-003</option><option>NB-004</option><option>NB-005</option>
+                <option value="otro">No lo sé / equipo del carro</option>
+              </select>
+            </div>
+            <div class="field full">
+              <label for="fallaDesc">Descripción</label>
+              <textarea id="fallaDesc" placeholder="Ej: la pantalla parpadea y se apaga sola después de unos minutos." required></textarea>
+              <span class="hint">Cuantos más detalles des, más rápido podemos resolverlo.</span>
+            </div>
+          </div>
+          <div class="modal-actions" style="justify-content:flex-start;margin-top:.3rem;">
+            <button type="submit" class="btn btn-primary">Enviar reporte</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><div><h3>¿Qué pasa después?</h3></div></div>
+        <ul class="alert-box" style="border:none;padding:0;">
+          <li>Se genera un ticket con seguimiento en <b>Mis tickets</b>.</li>
+          <li>El taller revisa el equipo dentro de las 48&nbsp;hs hábiles.</li>
+          <li>Recibís una notificación cuando cambie el estado.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ VIEW: MIS TICKETS ============ -->
+  <section class="view" id="view-tickets">
+    <div class="card">
+      <div class="card-header">
+        <div><h3>Mis tickets</h3><p>Seguimiento de fallas y solicitudes que reportaste.</p></div>
+        <button class="btn btn-primary btn-sm" onclick="switchView('falla')">+ Nuevo ticket</button>
+      </div>
+      <table>
+        <thead><tr><th>Ticket</th><th>Notebook</th><th>Motivo</th><th>Estado</th><th>Fecha</th></tr></thead>
+        <tbody id="ticketsTable"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============ VIEW: PERFIL ============ -->
+  <section class="view" id="view-perfil">
+    <div class="view-grid">
+      <div class="card">
+        <div class="profile-hero">
+          <div class="avatar-lg" id="profileAvatarLg">--</div>
+          <div>
+            <h3 id="profileNombre">—</h3>
+            <p id="profileRolCurso">—</p>
+          </div>
+        </div>
+        <div class="info-row" data-roles-el="admin"><span class="label">Legajo</span><span class="value" id="profileLegajo">—</span></div>
+        <div class="info-row"><span class="label">Email institucional</span><span class="value" id="profileEmail">—</span></div>
+        <p class="hint" style="margin-top:1.3rem;">Tus datos institucionales se cargan desde tu registro y no se pueden modificar desde acá. Si hay un error, contactá a Preceptoría.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><div><h3>Preferencias</h3></div></div>
+        <div class="info-row">
+          <label class="label" for="preferenciasEmail">Notificaciones por email</label>
+          <input type="checkbox" id="preferenciasEmail" onchange="actualizarPreferencias()">
+        </div>
+        <div class="info-row">
+          <label class="label" for="preferenciasRecordatorio">Recordatorio de devolución</label>
+          <select id="preferenciasRecordatorio" class="btn btn-sm" onchange="actualizarPreferencias()">
+            <option value="0">Sin recordatorio</option>
+            <option value="15">15 min antes</option>
+            <option value="30">30 min antes</option>
+            <option value="60">1 hora antes</option>
+          </select>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ VIEW: ADMIN · PROFESORES ============ -->
+  <section class="view" id="view-admin-profesores">
+    <div class="card">
+      <div class="card-header">
+        <div><h3>Profesores registrados</h3><p>Consulta de las cuentas de profesor existentes en el sistema.</p></div>
+        <input type="search" id="profesoresSearchInput" class="search-bar" placeholder="Buscar profesor" oninput="filterProfesores()" aria-label="Buscar profesor">
+      </div>
+      <table>
+        <thead><tr><th>Nombre</th><th>Correo</th><th>Legajo</th></tr></thead>
+        <tbody id="profesoresTable"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============ VIEW: ADMIN · INVENTARIO ============ -->
+  <section class="view" id="view-admin-inventario">
+    <div class="card">
+      <div class="card-header">
+        <div><h3>Inventario completo</h3><p>Consultá y actualizá el estado operativo de cada notebook. Las acciones de reservas, préstamos, devoluciones y fallas también actualizan este inventario.</p></div>
+        <div class="search-bar-wrap">
+          <input type="text" id="adminSearchInput" class="search-bar" placeholder="Buscar por número o estado" oninput="filterAdminNotebooks()">
+          <select class="btn btn-sm" id="adminFilterEstado" onchange="filterAdminNotebooks()" style="font-weight:500;">
+            <option value="">Todos</option>
+            <option value="disponible">Disponible</option>
+            <option value="prestada">Prestada</option>
+            <option value="mantenimiento">Mantenimiento</option>
+            <option value="pendiente_devolucion">Pendiente devolución</option>
+          </select>
+          <button class="btn btn-primary btn-sm" onclick="openModal('addNotebookModal')">+ Agregar notebook</button>
+        </div>
+      </div>
+      <table>
+        <thead><tr><th>N° de notebook</th><th>Estado</th><th>Ubicación</th><th>En poder de</th><th>Última actualización</th><th>Cambiar estado</th></tr></thead>
+        <tbody id="adminInventoryTable"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============ VIEW: ADMIN · DEVOLUCIONES PENDIENTES ============ -->
+  <section class="view" id="view-admin-devoluciones">
+    <div class="card">
+      <div class="card-header">
+        <div><h3>Notificaciones de devolución</h3><p>Confirmá la recepción física del equipo para liberar al alumno de la deuda.</p></div>
+      </div>
+      <div id="devolucionesWrap"></div>
+    </div>
+  </section>
+
+  <!-- ============ VIEW: ADMIN · LOTES DE PROFESORES ============ -->
+  <section class="view" id="view-admin-lotes">
+    <div class="card">
+      <div class="card-header">
+        <div><h3>Retiros y solicitudes de lote</h3><p>Aprobá lotes y registrá los retiros físicos de las reservas.</p></div>
+      </div>
+      <div id="lotesWrap"></div>
+    </div>
+  </section>
+
+  <!-- ============ VIEW: ADMIN · FALLAS / TICKETS REPORTADOS ============ -->
+  <section class="view" id="view-admin-tickets">
+    <div class="card">
+      <div class="card-header">
+        <div><h3>Fallas reportadas por alumnos y profesores</h3><p>Actualizá el estado del ticket y, si corresponde, el estado físico del equipo.</p></div>
+      </div>
+      <table>
+        <thead><tr><th>Ticket</th><th>Reportado por</th><th>Notebook</th><th>Motivo</th><th>Estado ticket</th><th>Estado equipo</th></tr></thead>
+        <tbody id="adminTicketsTable"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============ VIEW: ADMIN · DEVOLUCIONES TARDÍAS / SANCIONES ============ -->
+  <section class="view" id="view-admin-tardanzas">
+    <div class="card" style="margin-bottom:1.5rem;">
+      <div class="card-header">
+        <div><h3>Usuarios con entregas tardías</h3><p>A partir de 3 demoras registradas, el sistema te avisa para que evalúes una sanción.</p></div>
+      </div>
+      <div id="usuariosTardiosWrap"></div>
+    </div>
+
+    <div class="card" style="margin-bottom:1.5rem;">
+      <div class="card-header"><div><h3>Historial por usuario</h3><p>Notebooks retiradas y porcentaje de devoluciones a tiempo, por alumno y profesor.</p></div></div>
+      <table>
+        <thead><tr><th>Usuario</th><th>Rol</th><th>Legajo</th><th>Notebooks retiradas (histórico)</th><th>Devoluciones a tiempo</th></tr></thead>
+        <tbody id="historialPorUsuarioTable"></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><div><h3>Historial completo de demoras</h3><p>Cada entrega confirmada después de la hora límite queda registrada acá.</p></div></div>
+      <table>
+        <thead><tr><th>Usuario</th><th>Rol</th><th>Notebook</th><th>Fecha</th></tr></thead>
+        <tbody id="historialTardanzasTable"></tbody>
+      </table>
+    </div>
+  </section>
+
+</main>
+</div><!-- /#app-root -->
+
+<!-- ============ MODALS ============ -->
+<div class="modal-overlay" id="normasModal">
+  <div class="modal">
+    <h3>Normas de uso</h3>
+    <p>
+      1. Retirá y devolvé la notebook en el horario reservado.<br>
+      2. No instales software fuera de lo pedido por la cátedra.<br>
+      3. Reportá cualquier falla apenas la detectes.<br>
+      4. El extravío o rotura por mal uso es responsabilidad del alumno.
+    </p>
+    <div class="modal-actions"><button class="btn btn-primary" onclick="closeModal('normasModal')">Entendido</button></div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="logoutModal">
+  <div class="modal">
+    <h3>¿Cerrar sesión?</h3>
+    <p>Vas a salir de tu cuenta de NetMO. Podés volver a ingresar cuando quieras con tu usuario institucional.</p>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal('logoutModal')">Cancelar</button>
+      <button class="btn btn-danger-outline" onclick="closeModal('logoutModal');logout();">Cerrar sesión</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="returnModal">
+  <div class="modal">
+    <h3>Confirmar devolución</h3>
+    <p id="returnModalText">¿Confirmás la devolución de esta notebook?</p>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal('returnModal')">Cancelar</button>
+      <button class="btn btn-primary" onclick="confirmarDevolucion()">Confirmar</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="addNotebookModal">
+  <div class="modal">
+    <h3>Agregar notebook al inventario</h3>
+    <p>Sumá un equipo nuevo al stock del sistema. Los equipos nuevos siempre ingresan como <b>disponibles</b>.</p>
+    <form id="addNotebookForm" onsubmit="agregarNotebook(event)">
+      <div class="form-grid" style="grid-template-columns:1fr;gap:1rem;">
+        <div class="field">
+          <label for="newNbId">N° de notebook</label>
+          <input type="text" id="newNbId" placeholder="Ej: NB-050" required>
+        </div>
+        <div class="field">
+          <label for="newNbUbicacion">Ubicación</label>
+          <select id="newNbUbicacion">
+            <option value="Carro 1">Carro 1</option>
+            <option value="Carro 2">Carro 2</option>
+            <option value="Carro 3">Carro 3</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn" onclick="closeModal('addNotebookModal')">Cancelar</button>
+        <button type="submit" class="btn btn-primary">Agregar al stock</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="modal-overlay" id="rejectLoteModal">
+  <div class="modal">
+    <h3>Rechazar solicitud de lote</h3>
+    <p id="rejectLoteText">¿Seguro que querés rechazar esta solicitud?</p>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal('rejectLoteModal')">Cancelar</button>
+      <button class="btn btn-danger-outline" id="rejectLoteConfirmBtn" onclick="">Rechazar</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast-wrap"></div>
+
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
+>>>>>>> 219c483 (Publish deployment cleanup with sanitized credentials)

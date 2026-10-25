@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 services:
   - type: web
     name: netmo-api
@@ -16,3 +17,21 @@ services:
         sync: false
       - key: JWT_SECRET
         generateValue: true
+=======
+services:
+  - type: web
+    name: netmo-api
+    runtime: node
+    plan: free
+    rootDir: backend
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: CORS_ORIGIN
+        sync: false
+>>>>>>> 219c483 (Publish deployment cleanup with sanitized credentials)
