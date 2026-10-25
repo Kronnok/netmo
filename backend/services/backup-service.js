@@ -340,8 +340,14 @@ async function restoreBackup(body, user) {
       throw new AppError(`El conteo informado para ${table} no coincide con sus datos.`, 400);
     }
   }
-  if (confirmation !== 'RESTAURAR') throw new AppError('La frase de confirmación debe ser exactamente RESTAURAR.', 400);
-  if (typeof password !== 'string' || !password) throw new AppError('Ingresá tu contraseña actual.', 400);
+  const normalizedConfirmation = typeof confirmation === 'string' ? confirmation.trim() : '';
+  if (!normalizedConfirmation) throw new AppError('La confirmación no puede estar vacía.', 400);
+  if (normalizedConfirmation.length > 50) {
+    throw new AppError('La confirmación no puede superar 50 caracteres.', 400);
+  }
+  if (normalizedConfirmation !== 'RESTAURAR') throw new AppError('La frase de confirmación debe ser exactamente RESTAURAR.', 400);
+  if (typeof password !== 'string' || !password.trim()) throw new AppError('Ingresá tu contraseña actual.', 400);
+  if (password.length > 50) throw new AppError('La contraseña actual no puede superar 50 caracteres.', 400);
 
   try {
     await db.transaction(async (client) => {

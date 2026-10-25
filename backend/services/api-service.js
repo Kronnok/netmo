@@ -2,7 +2,14 @@ const crypto = require('node:crypto');
 const db = require('../data/database');
 const { AppError } = require('../errors');
 const { parseBusinessDateTime, reservationTimeError } = require('./business-time');
-const { requiredText, personName, accountEmail, accountPassword, numericIdentifier } = require('./validation');
+const {
+  requiredText,
+  personName,
+  accountEmail,
+  accountPassword,
+  courseDivision,
+  numericIdentifier
+} = require('./validation');
 const { sendMail } = require('./mail-service');
 
 async function notifyByEmail(userId, subject, html) {
@@ -38,6 +45,11 @@ function requireAdmin(user, message) {
   if (user.rol !== 'admin') throw new AppError(message, 403);
 }
 
+function reservationCarroId(value) {
+  const match = String(value ?? '').match(/^\s*(?:Carro\s*)?(\d{1,3})\s*$/i);
+  return match && Number(match[1]) >= 1 ? String(Number(match[1])) : null;
+}
+
 function reservationPayload(body, user) {
   const type = body.tipo || 'individual';
   if (!['individual', 'lote'].includes(type)) throw new AppError('Tipo de reserva inválido', 400);
@@ -51,19 +63,21 @@ function reservationPayload(body, user) {
   if (type === 'lote' && user.rol !== 'profesor') throw new AppError('Solo profesores pueden solicitar lotes', 403);
   if (type === 'lote' && quantity < 3) throw new AppError('Un lote debe tener al menos 3 notebooks', 400);
   const curso = user.rol === 'profesor'
-    ? requiredText(body.curso, 'El curso', 120)
+    ? courseDivision(body.curso)
     : null;
   let motivo = 'Sin especificar';
   if (body.motivo !== undefined && body.motivo !== null && body.motivo !== '') {
-    motivo = requiredText(body.motivo, 'El motivo', 240);
+    motivo = requiredText(body.motivo, 'El motivo');
+  }
+  const carro = requiredText(body.carro, 'El carro');
+  if (!/^\d{1,3}$/.test(carro) || Number(carro) < 1) {
+    throw new AppError('Seleccioná un carro válido', 400);
   }
   return {
     code: `RES-${Date.now()}`,
     ownerId: user.id,
     type,
-    carro: body.carro !== undefined && body.carro !== null && body.carro !== ''
-      ? requiredText(body.carro, 'El carro', 80)
-      : null,
+    carro: String(Number(carro)),
     curso,
     cantidad: quantity,
     retiroAt,
@@ -97,7 +111,6 @@ const actions = {
     const nombre = personName(body.nombre, 'El nombre');
     const apellido = personName(body.apellido, 'El apellido');
     const nombreCompleto = `${nombre} ${apellido}`;
-    if (nombreCompleto.length > 120) throw new AppError('El nombre y apellido no pueden superar 120 caracteres en conjunto', 400);
     const email = accountEmail(body.email);
     const legajo = numericIdentifier(body.legajo);
     const password = accountPassword(body.password);
@@ -143,10 +156,19 @@ const actions = {
     const result = await db.query('SELECT numero FROM carros ORDER BY numero');
     return { carros: result.rows };
   },
+  async availableCarros() {
+    const result = await db.query(`SELECT c.numero,
+      (SELECT COUNT(*)::integer FROM notebooks n
+        WHERE n.carro_id = c.numero AND n.estado = 'disponible'
+          AND NOT EXISTS (SELECT 1 FROM reservation_notebooks rn
+            WHERE rn.notebook_id = n.id AND rn.active)) AS disponibles
+      FROM carros c ORDER BY c.numero`);
+    return { carros: result.rows };
+  },
   async createCarro(body, user) {
     requireAdmin(user, 'Solo admin puede crear carros');
     const numero = typeof body.numero === 'number' ? body.numero
-      : typeof body.numero === 'string' && /^\d{1,3}$/.test(body.numero) ? Number(body.numero) : NaN;
+      : typeof body.numero === 'string' && /^\d{1,3}$/.test(body.numero.trim()) ? Number(body.numero.trim()) : NaN;
     if (!Number.isInteger(numero) || numero < 1 || numero > 999) {
       throw new AppError('El número de carro debe ser un entero entre 1 y 999', 400);
     }
@@ -160,10 +182,11 @@ const actions = {
   },
   async createNotebooks(body, user) {
     requireAdmin(user, 'Solo admin puede crear notebooks');
-    if (typeof body.numero !== 'string' || !/^\d{1,3}$/.test(body.numero)) {
+    const initialNumber = typeof body.numero === 'string' ? body.numero.trim() : '';
+    if (!/^\d{1,3}$/.test(initialNumber)) {
       throw new AppError('El número inicial debe contener de 1 a 3 dígitos', 400);
     }
-    const numero = Number(body.numero);
+    const numero = Number(initialNumber);
     const carroId = body.carro_id;
     const cantidad = Number(body.cantidad);
     if (numero < 1 || numero > 999 || numero + cantidad - 1 > 999) {
@@ -235,10 +258,15 @@ const actions = {
       const pending = await client.query(`SELECT 1 FROM loans WHERE user_id = $1 AND estado <> 'devuelto'
         UNION ALL SELECT 1 FROM reservations WHERE owner_id = $1 AND estado IN ('confirmada', 'pendiente_aprobacion', 'aprobada') LIMIT 1`, [user.id]);
       if (pending.rowCount) throw new AppError('No podés solicitar equipos hasta completar la entrega pendiente', 409);
+      const selectedCarro = await client.query('SELECT numero FROM carros WHERE numero = $1 FOR SHARE', [Number(reservation.carro)]);
+      if (!selectedCarro.rowCount) throw new AppError('El carro seleccionado no existe', 400);
       const available = await client.query(`SELECT n.id FROM notebooks n WHERE n.estado = 'disponible'
+        AND n.carro_id = $1
         AND NOT EXISTS (SELECT 1 FROM reservation_notebooks rn WHERE rn.notebook_id = n.id AND rn.active)
-        ORDER BY n.codigo FOR UPDATE SKIP LOCKED LIMIT $1`, [reservation.cantidad]);
-      if (available.rowCount < reservation.cantidad) throw new AppError('No hay suficientes notebooks disponibles', 409);
+        ORDER BY n.codigo FOR UPDATE SKIP LOCKED LIMIT $2`, [Number(reservation.carro), reservation.cantidad]);
+      if (available.rowCount < reservation.cantidad) {
+        throw new AppError('No hay suficientes notebooks disponibles en el carro seleccionado', 409);
+      }
       const inserted = await client.query(`INSERT INTO reservations (codigo, owner_id, tipo, carro, curso, cantidad, retiro_at, motivo, estado)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         RETURNING id, codigo AS id_codigo, tipo, carro, curso, cantidad, retiro_at, motivo, estado`, Object.values(reservation));
@@ -264,7 +292,7 @@ const actions = {
   },
   async adminReservations(_body, user) {
     requireAdmin(user, 'Solo admin puede consultar reservas');
-    const result = await db.query(`SELECT r.id, r.codigo, r.tipo, r.curso, r.cantidad, r.retiro_at, r.motivo, r.estado,
+    const result = await db.query(`SELECT r.id, r.codigo, r.tipo, r.carro, r.curso, r.cantidad, r.retiro_at, r.motivo, r.estado,
       u.legajo, u.nombre, COUNT(rn.notebook_id)::integer AS equipos_asignados
       FROM reservations r JOIN users u ON u.id = r.owner_id LEFT JOIN reservation_notebooks rn ON rn.reservation_id = r.id AND rn.active
       GROUP BY r.id, u.legajo, u.nombre ORDER BY r.retiro_at`);
@@ -273,20 +301,26 @@ const actions = {
   async approveReservation(_body, user, { id }) {
     requireAdmin(user, 'Solo admin puede aprobar reservas');
     const result = await db.transaction(async (client) => {
-      const reservation = await client.query(`SELECT id, owner_id, cantidad FROM reservations
+      const reservation = await client.query(`SELECT id, owner_id, cantidad, carro FROM reservations
         WHERE id = $1 AND tipo = 'lote' AND estado = 'pendiente_aprobacion' FOR UPDATE`, [id]);
       if (!reservation.rowCount) throw new AppError('Solicitud de lote no encontrada', 404);
+      const carroId = reservationCarroId(reservation.rows[0].carro);
       await client.query(`UPDATE reservation_notebooks rn SET active = FALSE
         FROM notebooks n WHERE rn.reservation_id = $1 AND rn.active AND n.id = rn.notebook_id
-          AND n.estado <> 'disponible'`, [id]);
-      const assigned = await client.query(`SELECT notebook_id FROM reservation_notebooks
-        WHERE reservation_id = $1 AND active FOR UPDATE`, [id]);
+          AND (n.estado <> 'disponible' OR ($2::text IS NOT NULL AND n.carro_id::text <> $2))`,
+      [id, carroId]);
+      const assigned = await client.query(`SELECT rn.notebook_id FROM reservation_notebooks rn
+        JOIN notebooks n ON n.id = rn.notebook_id
+        WHERE rn.reservation_id = $1 AND rn.active
+          AND ($2::text IS NULL OR n.carro_id::text = $2) FOR UPDATE OF rn`,
+      [id, carroId]);
       if (assigned.rowCount < reservation.rows[0].cantidad) {
         const missing = reservation.rows[0].cantidad - assigned.rowCount;
         const available = await client.query(`SELECT n.id FROM notebooks n
           WHERE n.estado = 'disponible'
+            AND ($2::text IS NULL OR n.carro_id::text = $2)
             AND NOT EXISTS (SELECT 1 FROM reservation_notebooks rn WHERE rn.notebook_id = n.id AND rn.active)
-          ORDER BY n.codigo FOR UPDATE SKIP LOCKED LIMIT $1`, [missing]);
+          ORDER BY n.codigo FOR UPDATE SKIP LOCKED LIMIT $1`, [missing, carroId]);
         if (available.rowCount < missing) throw new AppError('No hay suficientes notebooks disponibles para completar el lote', 409);
         for (const notebook of available.rows) {
           await client.query(`INSERT INTO reservation_notebooks (reservation_id, notebook_id, active)
@@ -313,23 +347,27 @@ const actions = {
   async checkoutReservation(_body, user, { id }) {
     requireAdmin(user, 'Solo admin puede registrar retiros');
     return db.transaction(async (client) => {
-      const reservationResult = await client.query(`SELECT id, owner_id, tipo, curso, cantidad, retiro_at, estado
+      const reservationResult = await client.query(`SELECT id, owner_id, tipo, curso, cantidad, retiro_at, estado, carro
         FROM reservations WHERE id = $1 AND estado IN ('confirmada', 'aprobada', 'retirada') FOR UPDATE`, [id]);
       if (!reservationResult.rowCount) throw new AppError('Reserva no encontrada o no lista para retiro', 404);
       const reservation = reservationResult.rows[0];
+      const carroId = reservationCarroId(reservation.carro);
       const existingLoans = await client.query('SELECT id FROM loans WHERE reservation_id = $1', [id]);
       if (existingLoans.rowCount) return { message: 'El retiro ya estaba registrado', loansCreated: 0 };
       await client.query(`UPDATE reservation_notebooks rn SET active = FALSE
         FROM notebooks n WHERE rn.reservation_id = $1 AND rn.active AND n.id = rn.notebook_id
-          AND n.estado <> 'disponible'`, [id]);
+          AND (n.estado <> 'disponible' OR ($2::text IS NOT NULL AND n.carro_id::text <> $2))`,
+      [id, carroId]);
       let notebooks = await client.query(`SELECT n.id, n.codigo FROM reservation_notebooks rn JOIN notebooks n ON n.id = rn.notebook_id
-        WHERE rn.reservation_id = $1 AND rn.active FOR UPDATE`, [id]);
+        WHERE rn.reservation_id = $1 AND rn.active
+          AND ($2::text IS NULL OR n.carro_id::text = $2) FOR UPDATE OF rn`, [id, carroId]);
       if (notebooks.rowCount < reservation.cantidad) {
         const missing = reservation.cantidad - notebooks.rowCount;
         const available = await client.query(`SELECT n.id, n.codigo FROM notebooks n
           WHERE n.estado = 'disponible'
+            AND ($2::text IS NULL OR n.carro_id::text = $2)
             AND NOT EXISTS (SELECT 1 FROM reservation_notebooks rn WHERE rn.notebook_id = n.id AND rn.active)
-          ORDER BY n.codigo FOR UPDATE SKIP LOCKED LIMIT $1`, [missing]);
+          ORDER BY n.codigo FOR UPDATE SKIP LOCKED LIMIT $1`, [missing, carroId]);
         if (available.rowCount < missing) {
           throw new AppError('No hay suficientes notebooks disponibles para completar esta reserva', 409);
         }
@@ -406,11 +444,11 @@ const actions = {
     return { tickets: result.rows };
   },
   async createTicket(body, user) {
-    const motivo = requiredText(body.motivo, 'El motivo', 240);
-    const descripcion = requiredText(body.descripcion, 'La descripción', 4000);
+    const motivo = requiredText(body.motivo, 'El motivo');
+    const descripcion = requiredText(body.descripcion, 'La descripción');
     let notebook = null;
     if (body.notebook !== undefined && body.notebook !== null && body.notebook !== '') {
-      notebook = requiredText(body.notebook, 'La notebook', 32);
+      notebook = requiredText(body.notebook, 'La notebook');
     }
     return db.transaction(async (client) => {
       let notebookId = null;

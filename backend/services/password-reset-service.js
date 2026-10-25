@@ -44,6 +44,8 @@ function recordRequest(request, email, namespace) {
 
 async function requestForgot(body, request) {
   const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
+  if (!email) throw new AppError('El email no puede estar vacío.', 400);
+  if (email.length > 50) throw new AppError('El email no puede superar 50 caracteres.', 400);
   if (!recordRequest(request, email, 'password-forgot')) return GENERIC_FORGOT_RESPONSE;
   let normalizedEmail;
   try {
@@ -111,8 +113,8 @@ async function applyPasswordChange({ email, userId, purpose, code, password, req
   const rateKey = email || String(userId);
   const rateNamespace = purpose === 'reset' ? 'password-reset' : 'password-change';
   if (!recordRequest(request, rateKey, rateNamespace)) throw new AppError(genericError, 429);
+  accountPassword(password);
   try {
-    accountPassword(password);
     const updated = await db.transaction(async (client) => {
       const userResult = email
         ? await client.query('SELECT id FROM users WHERE email = $1 FOR UPDATE', [email])
@@ -150,7 +152,7 @@ async function applyPasswordChange({ email, userId, purpose, code, password, req
 }
 
 async function resetPassword(body, request) {
-  const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
+  const email = accountEmail(body.email);
   return applyPasswordChange({ email, purpose: 'reset', code: body.code, password: body.password, request });
 }
 

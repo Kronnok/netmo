@@ -235,6 +235,7 @@
   .field label{font-size:.82rem;font-weight:600;color:var(--text);}
   .field .hint{font-size:.76rem;color:var(--text-faint);}
   .hint{font-size:.76rem;color:var(--text-faint);}
+  .char-counter{display:block;text-align:right;}
   select,input[type=text],input[type=search],input[type=date],input[type=time],input[type=email],input[type=password],input[type=number],textarea{
     padding:.65rem .8rem;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:.88rem;
     background:var(--surface-2);color:var(--text);outline:none;font-family:var(--font-body);width:100%;

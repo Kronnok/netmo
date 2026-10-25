@@ -42,10 +42,11 @@ test('flujo API reserva, retiro, préstamo, devolución e historial', async () =
   const execute = async (sql, params = []) => {
     const statement = sql.replace(/\s+/g, ' ').trim();
     if (statement.startsWith('SELECT 1 FROM loans WHERE user_id')) return { rowCount: 0, rows: [] };
+    if (statement.startsWith('SELECT numero FROM carros WHERE numero =')) return { rowCount: 1, rows: [{ numero: params[0] }] };
     if (statement.startsWith('SELECT n.id FROM notebooks n')) return { rowCount: notebook.estado === 'disponible' ? 1 : 0, rows: notebook.estado === 'disponible' ? [{ id: notebook.id }] : [] };
     if (statement.startsWith('INSERT INTO reservations')) {
       reservation = {
-        id: '77', codigo: params[0], owner_id: params[1], tipo: params[2], curso: params[4],
+        id: '77', codigo: params[0], owner_id: params[1], tipo: params[2], carro: params[3], curso: params[4],
         cantidad: params[5], retiro_at: params[6], motivo: params[7], estado: params[8]
       };
       return { rowCount: 1, rows: [reservation] };
@@ -54,7 +55,7 @@ test('flujo API reserva, retiro, préstamo, devolución e historial', async () =
       reservationLink = { reservation_id: params[0], notebook_id: params[1], active: true };
       return { rowCount: 1, rows: [] };
     }
-    if (statement.startsWith('SELECT id, owner_id, tipo, curso, cantidad, retiro_at, estado FROM reservations')) {
+    if (statement.startsWith('SELECT id, owner_id, tipo, curso, cantidad, retiro_at, estado, carro FROM reservations')) {
       return { rowCount: reservation ? 1 : 0, rows: reservation ? [reservation] : [] };
     }
     if (statement.startsWith('SELECT id FROM loans WHERE reservation_id')) return { rowCount: loan ? 1 : 0, rows: loan ? [{ id: loan.id }] : [] };
@@ -118,12 +119,13 @@ test('flujo API reserva, retiro, préstamo, devolución e historial', async () =
   db.transaction = async (callback) => callback({ query: execute });
   db.query = async (sql) => {
     const statement = sql.replace(/\s+/g, ' ').trim();
+    if (statement.startsWith('SELECT c.numero,')) return { rowCount: 1, rows: [{ numero: 2, disponibles: 1 }] };
     if (statement.startsWith('SELECT u.email FROM users u')) return { rowCount: 0, rows: [] };
     if (statement.startsWith('SELECT u.email FROM loans l')) return { rowCount: 0, rows: [] };
     if (statement.startsWith('SELECT r.codigo AS id')) return {
       rowCount: reservation ? 1 : 0,
       rows: reservation ? [{
-        id: reservation.codigo, tipo: reservation.tipo, curso: reservation.curso, cantidad: reservation.cantidad,
+        id: reservation.codigo, tipo: reservation.tipo, carro: reservation.carro, curso: reservation.curso, cantidad: reservation.cantidad,
         retiro_at: reservation.retiro_at, motivo: reservation.motivo, estado: reservation.estado, notebook_ids: [notebook.id]
       }] : []
     };
@@ -151,8 +153,12 @@ test('flujo API reserva, retiro, préstamo, devolución e historial', async () =
   }
 
   try {
+    const availableCars = await apiCall('GET', '/api/carros');
+    assert.equal(availableCars.status, 200);
+    assert.equal(availableCars.payload.carros[0].disponibles, 1);
+
     const created = await apiCall('POST', '/api/reservations', {
-      tipo: 'individual', cantidad: 1, curso: '6° Informática', retiroAt: nextBusinessReservationTime().toISOString(), motivo: 'Práctica'
+      tipo: 'individual', cantidad: 1, curso: '6°14°', carro: '2', retiroAt: nextBusinessReservationTime().toISOString(), motivo: 'Práctica'
     }, 'profesor');
     assert.equal(created.status, 201);
     assert.equal(created.payload.reservation.id, reservation.id);

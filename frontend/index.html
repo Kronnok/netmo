@@ -51,7 +51,7 @@
       <form id="forgotPasswordForm" onsubmit="event.preventDefault();solicitarCodigoRecuperacion()">
         <div class="field">
           <label for="forgotEmail">Correo electrónico</label>
-          <input type="email" id="forgotEmail" required autocomplete="email">
+          <input type="email" id="forgotEmail" maxlength="50" required autocomplete="email">
         </div>
         <div id="forgotCodeFields" hidden>
           <div class="field">
@@ -60,11 +60,11 @@
           </div>
           <div class="field">
             <label for="forgotPassword">Nueva contraseña</label>
-            <div class="password-input-wrap"><input type="password" id="forgotPassword" minlength="8" autocomplete="new-password"><button type="button" class="btn btn-sm" onclick="togglePasswordVisibility('forgotPassword', this)">Mostrar</button></div>
+            <div class="password-input-wrap"><input type="password" id="forgotPassword" maxlength="50" minlength="8" autocomplete="new-password"><button type="button" class="btn btn-sm" onclick="togglePasswordVisibility('forgotPassword', this)">Mostrar</button></div>
           </div>
           <div class="field">
             <label for="forgotPasswordRepeat">Repetir nueva contraseña</label>
-            <div class="password-input-wrap"><input type="password" id="forgotPasswordRepeat" minlength="8" autocomplete="new-password"><button type="button" class="btn btn-sm" onclick="togglePasswordVisibility('forgotPasswordRepeat', this)">Mostrar</button></div>
+            <div class="password-input-wrap"><input type="password" id="forgotPasswordRepeat" maxlength="50" minlength="8" autocomplete="new-password"><button type="button" class="btn btn-sm" onclick="togglePasswordVisibility('forgotPasswordRepeat', this)">Mostrar</button></div>
           </div>
         </div>
         <div id="forgotPasswordMessage" class="field-error" role="status"></div>
@@ -194,7 +194,7 @@
             <p>Información actualizada en tiempo real.</p>
           </div>
           <div class="search-bar-wrap">
-            <input type="text" id="searchInput" class="search-bar" placeholder="Buscar por número o estado" oninput="filterNotebooks()">
+            <input type="text" id="searchInput" class="search-bar" maxlength="50" placeholder="Buscar por número o estado" oninput="filterNotebooks()">
             <select class="btn btn-sm" id="filterEstado" onchange="filterNotebooks()" style="font-weight:500;">
               <option value="">Todos</option>
               <option value="disponible">Disponible</option>
@@ -300,8 +300,16 @@
               <input type="number" id="resCantidad" min="1" max="40" step="1" value="1" required>
             </div>
             <div class="field" data-roles-el="profesor">
-              <label for="resCursoProfesor">Curso / división</label>
-              <input type="text" id="resCursoProfesor" maxlength="120" placeholder="Ej: 6° Informática A">
+              <label>Curso / división</label>
+              <div class="form-grid">
+                <div class="field"><label for="resCursoAnio">Año</label><input type="number" id="resCursoAnio" min="1" max="7" step="1" placeholder="2"></div>
+                <div class="field"><label for="resCursoDivision">División</label><input type="number" id="resCursoDivision" min="1" max="99" step="1" placeholder="14"></div>
+              </div>
+              <span id="resCursoPreview" class="hint">Se enviará como A°D° (por ejemplo, 2°14°).</span>
+            </div>
+            <div class="field">
+              <label for="resCarro">Carro</label>
+              <select id="resCarro" required><option value="">Seleccioná un carro</option></select>
             </div>
             <div class="field">
               <label for="resFecha">Fecha</label>
@@ -314,7 +322,7 @@
             </div>
             <div class="field full">
               <label for="resMotivo">Motivo / materia</label>
-              <input type="text" id="resMotivo" maxlength="240" placeholder="Ej: Programación — TP integrador">
+              <input type="text" id="resMotivo" maxlength="50" placeholder="Ej: Programación — TP integrador">
             </div>
           </div>
 
@@ -359,11 +367,11 @@
             </div>
             <div class="field full">
               <label for="fallaMotivo">Motivo</label>
-              <input type="text" id="fallaMotivo" maxlength="240" required>
+              <input type="text" id="fallaMotivo" maxlength="50" required>
             </div>
             <div class="field full">
               <label for="fallaDesc">Descripción</label>
-              <textarea id="fallaDesc" maxlength="4000" placeholder="Ej: la pantalla parpadea y se apaga sola después de unos minutos." required></textarea>
+              <textarea id="fallaDesc" maxlength="50" placeholder="Ej: la pantalla parpadea y se apaga sola después de unos minutos." required></textarea>
               <span class="hint">Cuantos más detalles des, más rápido podemos resolverlo.</span>
             </div>
           </div>
@@ -441,11 +449,11 @@
           </div>
           <div class="field">
             <label for="changePasswordNew">Nueva contraseña</label>
-            <div class="password-input-wrap"><input type="password" id="changePasswordNew" minlength="8" required autocomplete="new-password"><button type="button" class="btn btn-sm" onclick="togglePasswordVisibility('changePasswordNew', this)">Mostrar</button></div>
+            <div class="password-input-wrap"><input type="password" id="changePasswordNew" maxlength="50" minlength="8" required autocomplete="new-password"><button type="button" class="btn btn-sm" onclick="togglePasswordVisibility('changePasswordNew', this)">Mostrar</button></div>
           </div>
           <div class="field">
             <label for="changePasswordRepeat">Repetir nueva contraseña</label>
-            <div class="password-input-wrap"><input type="password" id="changePasswordRepeat" minlength="8" required autocomplete="new-password"><button type="button" class="btn btn-sm" onclick="togglePasswordVisibility('changePasswordRepeat', this)">Mostrar</button></div>
+            <div class="password-input-wrap"><input type="password" id="changePasswordRepeat" maxlength="50" minlength="8" required autocomplete="new-password"><button type="button" class="btn btn-sm" onclick="togglePasswordVisibility('changePasswordRepeat', this)">Mostrar</button></div>
           </div>
           <button type="submit" class="btn btn-primary">Cambiar contraseña</button>
           <button type="button" class="btn btn-sm" onclick="solicitarCambioPassword()">Reenviar código</button>
@@ -462,12 +470,12 @@
       </div>
       <form id="adminUserForm" onsubmit="crearUsuarioAdmin(event)" novalidate>
         <div class="form-grid">
-          <div class="field"><label for="userNombre">Nombre</label><input id="userNombre" type="text" maxlength="60" required></div>
-          <div class="field"><label for="userApellido">Apellido</label><input id="userApellido" type="text" maxlength="60" required></div>
-          <div class="field"><label for="userEmail">Email</label><input id="userEmail" type="email" maxlength="254" required></div>
+          <div class="field"><label for="userNombre">Nombre</label><input id="userNombre" type="text" maxlength="50" required></div>
+          <div class="field"><label for="userApellido">Apellido</label><input id="userApellido" type="text" maxlength="50" required></div>
+          <div class="field"><label for="userEmail">Email</label><input id="userEmail" type="email" maxlength="50" required></div>
           <div class="field"><label for="userLegajo">Legajo (1 a 10 dígitos)</label><input id="userLegajo" type="text" inputmode="numeric" pattern="[0-9]{1,10}" maxlength="10" required></div>
           <div class="field"><label for="userRol">Rol</label><select id="userRol" required><option value="alumno">Alumno</option><option value="profesor">Profesor</option></select></div>
-          <div class="field"><label for="userPassword">Contraseña (mínimo 8, sin espacios)</label><input id="userPassword" type="password" minlength="8" required></div>
+          <div class="field"><label for="userPassword">Contraseña (8 a 50 caracteres, sin espacios)</label><input id="userPassword" type="password" maxlength="50" minlength="8" required></div>
         </div>
         <div id="adminUserError" class="field-error"></div>
         <button class="btn btn-primary" type="submit">Crear usuario</button>
@@ -476,7 +484,7 @@
     <div class="card" style="margin-top:1.5rem;">
       <div class="card-header">
         <div><h3>Usuarios</h3><p>Alumnos y profesores reales registrados.</p></div>
-        <input type="search" id="profesoresSearchInput" class="search-bar" placeholder="Buscar usuario" oninput="filterProfesores()" aria-label="Buscar usuario">
+        <input type="search" id="profesoresSearchInput" class="search-bar" maxlength="50" placeholder="Buscar usuario" oninput="filterProfesores()" aria-label="Buscar usuario">
       </div>
       <h4>Alumnos</h4>
       <table>
@@ -523,7 +531,7 @@
       <div class="card-header">
         <div><h3>Inventario completo</h3><p>Consultá y actualizá el estado operativo de cada notebook. Las acciones de reservas, préstamos, devoluciones y fallas también actualizan este inventario.</p></div>
         <div class="search-bar-wrap">
-          <input type="text" id="adminSearchInput" class="search-bar" placeholder="Buscar por número o estado" oninput="filterAdminNotebooks()">
+          <input type="text" id="adminSearchInput" class="search-bar" maxlength="50" placeholder="Buscar por número o estado" oninput="filterAdminNotebooks()">
           <select class="btn btn-sm" id="adminFilterEstado" onchange="filterAdminNotebooks()" style="font-weight:500;">
             <option value="">Todos</option>
             <option value="disponible">Disponible</option>
@@ -620,11 +628,11 @@
         <button type="button" class="btn" onclick="descargarBackup()">Descargar backup actual</button>
         <div class="field">
           <label for="restoreAdminPassword">Contraseña actual de administrador</label>
-          <input type="password" id="restoreAdminPassword" autocomplete="current-password" required>
+          <input type="password" id="restoreAdminPassword" maxlength="50" autocomplete="current-password" required>
         </div>
         <div class="field">
           <label for="restoreConfirmation">Escribí exactamente RESTAURAR</label>
-          <input type="text" id="restoreConfirmation" autocomplete="off" required>
+          <input type="text" id="restoreConfirmation" maxlength="50" autocomplete="off" required>
         </div>
         <div id="restoreBackupError" class="field-error" role="status"></div>
         <button type="submit" class="btn btn-danger-outline">Restaurar y reemplazar datos</button>

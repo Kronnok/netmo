@@ -1,146 +1,83 @@
-# Especificación: validaciones, tickets y reservas por carro
+# Especificación: tickets, límites de texto y reservas
 
 ## Estado
 
-Borrador pendiente de aprobación. No implementar cambios de código hasta que
-esta especificación sea aprobada.
+Aprobada por el dueño del proyecto para implementación.
 
-## Objetivo y alcance
+Esta especificación reemplaza cualquier alcance anterior contradictorio en
+este archivo. No incluye cambios de esquema ni migraciones.
 
-Completar las validaciones de cuentas y solicitudes, permitir la gestión de
-estados de tickets desde un selector administrativo y asignar reservas a un
-carro elegido por el usuario. Mantener compatibilidad con las cuentas y filas
-existentes, los roles actuales y las reglas de negocio que no se modifican aquí.
+## Alcance y comportamiento esperado
 
-## Hechos observados
+### A. Fallas reportadas
 
-- `backend/services/validation.js` valida nombres de hasta 60 caracteres y
-  emails de hasta 254; el formulario administrativo usa esos mismos máximos.
-- `PATCH /api/tickets/:codigo` ya está registrado y limitado a administradores
-  por el controlador; el servicio valida los estados `abierto`, `progreso` y
-  `resuelto`. La interfaz administrativa aún usa botones separados.
-- El esquema ya contiene `tickets.resolved_at` y `tickets.resolved_by`, y el
-  servicio registra esos datos al resolver y los limpia al cambiar a otro
-  estado. La resolución ya devuelve a disponible una notebook relacionada solo
-  si estaba en mantenimiento.
-- La API de carros actual es `/api/admin/carros` y solo permite consultas de
-  administradores. Las reservas asignan notebooks disponibles sin filtrar por
-  carro; la API ya rechaza con 409 si no alcanza la disponibilidad general.
-- Los motivos de reserva y tickets ya se recortan y rechazan si quedan vacíos.
-  Ambos límites actuales son 240 caracteres.
-- El curso del profesor admite texto libre de hasta 120 caracteres.
-- No se encontró `CONTEXT.md` en el repositorio. La documentación funcional
-  está en `reportes y cosas extra/documentacion-netmo.txt`.
-- El esquema existente no debe modificarse para imponer restricciones que
-  afecten registros anteriores.
+- En la cola administrativa, cada ticket tendrá un selector con Abierto,
+  En progreso y Resuelto, con estado actual seleccionado; retirar los botones
+  individuales y permitir reabrir tickets resueltos.
+- Guardar cada cambio mediante `PATCH /api/tickets/:codigo`; solo admin puede
+  actualizar y el backend acepta únicamente `abierto`, `progreso` y `resuelto`.
+- Resolver registra actor y fecha y devuelve a disponible únicamente una
+  notebook asociada que esté en mantenimiento. Reabrir limpia esos metadatos y
+  no cambia automáticamente la notebook.
+- Confirmar visualmente el guardado. “Mis tickets” consultará la API al entrar
+  y después de cada acción.
 
-## Comportamiento esperado
+### B. Límite global de texto
 
-### 1. Alta de usuarios
+- Máximo 50 caracteres para todos los inputs y textareas de texto, incluyendo
+  nombres, apellido, email, legajo, curso/división, motivos, descripción de
+  fallas, búsquedas, contraseñas, carros, notebooks y otros campos de texto.
+- Frontend: `maxlength=50` y contador visible en campos de texto libre.
+- Backend: recortar extremos, rechazar vacío/solo espacios y responder 400
+  con mensaje claro cuando se excedan 50 caracteres. Aplicar a datos de entrada
+  nuevos y cambios. Para preservar cuentas previas, el email y la contraseña
+  del login no se limitan ni se validan por longitud en frontend o backend.
+- Excluir fechas, horas, cantidades, selectores, campos no textuales y archivos
+  de backup. No imponer restricciones de BDD ni invalidar filas existentes.
 
-- Nombre, apellido y email tendrán un máximo de 50 caracteres cada uno.
-- Backend: rechazar con HTTP 400 y mensaje claro todo valor que exceda el
-  máximo. La regla aplica al alta de nuevas cuentas, no requiere migrar ni
-  validar retroactivamente cuentas existentes.
-- Frontend: `maxlength="50"` en los tres campos y contador visible por campo.
+### C. Reservas por carro
 
-### 2. Estado de tickets
+- `GET /api/carros` requiere autenticación y está disponible para cualquier rol
+  autenticado. Devuelve carros y cantidad de notebooks disponibles.
+- Alumnos y profesores elegirán carro en el formulario; indicar disponibilidad
+  y deshabilitar carros con cero unidades.
+- Asignar notebooks disponibles solo del carro elegido, dentro de la
+  transacción, en reservas individuales y lotes. Disponibilidad insuficiente:
+  HTTP 409 claro, sin reserva ni asignación parcial.
 
-- Cada ticket de la vista administrativa tendrá un selector con `Abierto`,
-  `En progreso` y `Resuelto`, mostrando su estado actual.
-- Al cambiarlo se usará `PATCH /api/tickets/:codigo`. Solo administradores
-  pueden actualizar tickets y el backend rechazará con HTTP 400 estados ajenos
-  a `abierto`, `progreso` y `resuelto`.
-- Retirar los botones individuales de cambio de estado.
-- Al resolver, guardar quién y cuándo lo resolvió. Si la notebook asociada
-  estaba en mantenimiento, devolverla a disponible. Al reabrir, limpiar los
-  datos de resolución sin cambiar automáticamente el estado de la notebook.
-- Mostrar estados en español legible y confirmar visualmente el guardado.
-- Refrescar el estado visible en “Mis tickets” al entrar a la vista y después
-  de cada acción que pueda actualizar tickets.
+### D. Curso/división
 
-### 3. Motivos
+- El curso de profesores cumple `^[1-7]°(?:[1-9]|[1-9]\d)°$`.
+- La interfaz tendrá dos campos numéricos (Año y División) y formará
+  automáticamente el valor, por ejemplo `2°14°`.
+- El backend rechaza formato inválido con HTTP 400. No alterar filas existentes.
 
-- El motivo de reserva tendrá un máximo de 100 caracteres; recortar espacios
-  extremos y rechazar un valor presente que quede vacío tras el recorte.
-- Aplicar la validación en backend y frontend, con `maxlength="100"` y contador.
-- Para el motivo del ticket, conservar el límite actual de 240 caracteres, ya
-  que existe y no hace falta elevarlo. Mantener trim y rechazo de solo espacios.
+### E. Pruebas y documentación
 
-### 4. Selección de carro en reservas
+- Añadir o ajustar pruebas de A-D, actualizar la documentación funcional y
+  ejecutar la suite completa. Corregir fallas relacionadas.
+- No introducir dependencias nuevas ni acceder/modificar la BDD remota.
 
-- `GET /api/carros` estará disponible para cualquier usuario autenticado y
-  devolverá los carros con la cantidad de notebooks disponibles en cada uno.
-- El formulario de reservas tendrá un selector para alumnos y profesores;
-  mostrará esa cantidad y deshabilitará carros sin notebooks disponibles.
-- La API asignará notebooks disponibles únicamente del carro elegido, dentro
-  de la transacción de creación, tanto para reservas individuales como para
-  lotes. Si no alcanza la cantidad solicitada, responderá HTTP 409 con mensaje
-  claro y no dejará una reserva parcial.
-- Los lotes mantienen su aprobación administrativa; la selección inicial de
-  equipos será del carro solicitado.
+## Criterios de aceptación
 
-### 5. Curso / división
+1. Los estados se pueden cambiar y reabrir desde el selector; actor/fecha se
+   conservan al resolver, se limpian al reabrir y solo se libera notebook en
+   mantenimiento al resolver. Mis tickets se refresca al entrar y tras acciones.
+2. Todos los inputs/textareas de texto auditados, excepto los dos campos de
+   login por compatibilidad con cuentas existentes, tienen máximo 50 en UI;
+   los campos de texto libre muestran contador. Backend devuelve 400 para
+   texto de más de 50 o solo espacios, excepto las credenciales del login.
+3. Usuarios autenticados de cualquier rol consultan disponibilidad por carro;
+   reserva individual y lote asignan exclusivamente dentro del carro elegido,
+   o fallan con 409 sin efectos parciales.
+4. Curso válido acepta el patrón indicado; inválido responde 400 y UI lo genera
+   con Año/División numéricos.
+5. Pruebas específicas y suite completa pasan; documentación describe el
+   comportamiento. Sin migraciones ni restricciones nuevas de BDD.
 
-- El valor persistido deberá cumplir `^[1-7]°(?:[1-9]|[1-9]\d)°$` y no superar
-  5 caracteres. El backend responderá HTTP 400 ante cualquier valor inválido.
-- El frontend reemplazará el texto libre por campos numéricos de Año y
-  División, solo dígitos, con máximos de 1 y 2 dígitos. Armará el valor con
-  `°` automáticamente y mostrará un ejemplo como `2°14°`.
-- No agregar restricciones de base de datos que puedan invalidar filas
-  existentes.
+## Archivos previstos
 
-### 6. Pruebas y documentación
-
-- Agregar o ajustar pruebas de servicios, rutas/controlador y validaciones de
-  interfaz según los mecanismos ya presentes en el repositorio.
-- Ejecutar toda la suite (`npm test`) y corregir fallas relacionadas con estos
-  cambios.
-- Actualizar `reportes y cosas extra/documentacion-netmo.txt` para reflejar los
-  contratos y comportamientos nuevos.
-
-## Archivos y módulos previstos
-
-- `backend/services/validation.js`
-- `backend/services/api-service.js`
-- `backend/routes.js`
-- `backend/test/`
-- `frontend/index.html`
-- `frontend/app.js`
+- `frontend/index.html`, `frontend/app.js`
+- `backend/routes.js`, `backend/services/validation.js`,
+  `backend/services/api-service.js`, pruebas backend
 - `reportes y cosas extra/documentacion-netmo.txt`
-
-No se prevé cambio de esquema ni migración. Si durante la implementación se
-descubre que los datos o el esquema existentes impiden cumplir estos requisitos
-sin afectar filas anteriores, detenerse y actualizar esta especificación antes
-de cambiar la base de datos.
-
-## Criterios de aceptación verificables
-
-1. Altas con nombre, apellido o email de 51 caracteres responden 400; los
-   valores de 50 se aceptan si cumplen las demás reglas.
-2. Frontend muestra máximo y contador de 50 para cada dato de usuario.
-3. PATCH acepta solo los tres estados definidos, exige rol admin y el selector
-   refleja el estado persistido. Resolver registra actor/fecha y libera solo
-   notebooks asociadas que estén en mantenimiento; reabrir limpia actor/fecha
-   y no cambia el estado de notebook.
-4. Motivo de reserva vacío tras trim y de más de 100 caracteres se rechaza; un
-   motivo de ticket vacío tras trim se rechaza y su límite de 240 permanece.
-   Ambos formularios muestran su maxlength y contador correspondiente.
-5. GET `/api/carros` requiere autenticación, funciona para cualquier rol
-   autenticado e informa disponibilidad. Las reservas individuales y por lote
-   solo asignan notebooks disponibles del carro pedido; una cantidad
-   insuficiente produce 409 sin cambios parciales.
-6. El backend acepta cursos conformes al patrón y rechaza los que no cumplen;
-   la interfaz genera valores conformes desde los dos campos numéricos.
-7. Las pruebas existentes y nuevas pasan con `npm test`; ninguna migración
-   altera registros existentes.
-
-## Riesgos y decisiones pendientes
-
-- Aprobar este borrador antes de implementar.
-- Confirmar durante la implementación el formato exacto de la respuesta de
-  `/api/carros`; se propone `{ carros: [{ numero, disponibles }] }`, siguiendo
-  el formato habitual de la API.
-- Los lotes conservan el proceso de aprobación ya existente; la disponibilidad
-  puede cambiar antes de aprobarlos. La aprobación deberá mantener sus
-  validaciones transaccionales actuales y no sustituye la validación al crear.

@@ -56,21 +56,15 @@ activa mientras la devolucion esta pendiente.
 
 2.2 Tickets y notebooks habilitadas
 
-En la vista administrativa de fallas reportadas, los tickets resueltos ya no se
-muestran en la cola de tickets activos.
+La cola administrativa muestra todos los tickets, incluidos los resueltos, con
+un selector que permite abrir, poner en progreso, resolver o reabrir cada caso.
+El cambio se guarda en `PATCH /api/tickets/:codigo`, muestra una confirmacion
+visual y solo lo puede realizar un administrador. "Mis tickets" vuelve a
+consultar la API al entrar y despues de crear un reporte.
 
-Cuando una notebook se habilita desde mantenimiento:
-
-- El estado de la notebook pasa a "disponible".
-- La ubicacion vuelve a ser "Carro 1".
-- Se limpian los datos de prestamo.
-- Los tickets abiertos relacionados con esa notebook pasan a "resuelto".
-
-La accion de habilitar tambien se persiste en la API, por lo que el ticket no
-vuelve a aparecer al recargar la pagina.
-
-Esto evita que el equipo figure disponible mientras su falla continua apareciendo
-como pendiente.
+Al resolver se guardan el usuario administrador y la fecha. La notebook
+relacionada vuelve a disponible solo si estaba en mantenimiento. Al reabrir,
+se limpian los datos de resolucion y la notebook no cambia automaticamente.
 
 2.3 Baneo de usuarios
 
@@ -242,6 +236,13 @@ Un trigger de PostgreSQL rechaza las reservas cuyo año no sea el año actual.
 Esto protege la regla incluso si una solicitud llega desde otro cliente que no
 sea la pagina actual.
 
+Alumnos y profesores seleccionan un carro. La API autenticada `GET /api/carros`
+informa las notebooks disponibles y la interfaz deshabilita los carros sin
+stock. La creacion de reservas individuales y lotes asigna equipos disponibles
+del carro elegido dentro de una transaccion; si no alcanza el stock, responde
+409 sin crear una reserva parcial. El curso de profesores se compone de año y
+division y debe cumplir `^[1-7]°(?:[1-9]|[1-9]\d)°$` (por ejemplo, `2°14°`).
+
 No existe una restriccion de espera de 30 minutos en la base.
 
 3.5 Prestamos
@@ -295,10 +296,20 @@ Los estados son abierto, progreso y resuelto.
 Cuando un equipo disponible recibe un reporte, pasa automaticamente a
 mantenimiento.
 
-Cuando el admin habilita el equipo, los tickets abiertos de ese equipo se marcan
-como resueltos.
+Al resolver un ticket, se conservan el actor y la fecha de resolucion. Si la
+notebook estaba en mantenimiento, vuelve a disponible; al reabrir el ticket se
+limpian esos datos sin cambiar el estado de la notebook.
 
-3.8 Devoluciones tardias
+3.8 Limites de texto
+
+Los campos de texto de la interfaz y las entradas de API tienen un maximo de 50
+caracteres. El backend recorta los extremos y rechaza texto vacio, solo espacios
+o valores que excedan el limite con HTTP 400. Esto no agrega restricciones a la
+base de datos ni valida la longitud de credenciales durante el login de cuentas
+existentes. Fechas, horas, cantidades, selectores y archivos de backup quedan
+fuera de este limite.
+
+3.9 Devoluciones tardias
 
 La tabla late_returns registra cada devolucion realizada despues de la fecha
 limite.
@@ -411,7 +422,14 @@ PATCH /api/tickets/:codigo
 
 GET /api/admin/tickets
 
-Consulta, crea y actualiza tickets. Solo el administrador puede cambiar su estado.
+Consulta, crea y actualiza tickets. Solo el administrador puede cambiar su
+estado mediante los valores `abierto`, `progreso` y `resuelto`.
+
+GET /api/carros
+
+Devuelve carros y notebooks disponibles para cualquier usuario autenticado.
+Las altas y consultas administrativas de inventario permanecen en
+`/api/admin/carros`.
 
 GET /api/admin/late-returns
 
@@ -604,7 +622,8 @@ hizo y que todavia no se hizo.
 - La pagina carga notebooks, reservas, prestamos y tickets desde la API.
 - Crear y cancelar reservas, informar devoluciones, crear tickets, cambiar estados
   de notebooks, confirmar devoluciones y aprobar lotes ya tienen llamadas a la API.
-- Se actualizo la interfaz para que el profesor escriba el curso y la cantidad.
+- Se actualizo la interfaz para que el profesor elija año y division, y pueda
+  reservar equipos de un carro seleccionado.
 - Se corrigio la documentacion para distinguir integracion realizada y pendientes.
 
 11.2 Lo que no hicimos todavia

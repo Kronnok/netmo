@@ -2,7 +2,7 @@ const db = require('../data/database');
 const { AppError } = require('../errors');
 const { createToken, verifyToken } = require('./session-token');
 const loginRateLimiter = require('./login-rate-limiter');
-const { accountEmail } = require('./validation');
+const { loginEmail } = require('./validation');
 
 async function authenticate(request) {
   const token = request.headers.authorization?.replace(/^Bearer\s+/i, '');
@@ -20,7 +20,7 @@ async function authenticate(request) {
 }
 
 async function login(body, request) {
-  const email = accountEmail(body.email);
+  const email = loginEmail(body.email);
   if (loginRateLimiter.isRateLimited(request, email)) {
     throw new AppError('Demasiados intentos. Intentá nuevamente en 15 minutos.', 429);
   }

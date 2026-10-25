@@ -1,4 +1,6 @@
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const { Readable } = require('node:stream');
 const { spawnSync } = require('node:child_process');
 const path = require('node:path');
 const { after, test } = require('node:test');
@@ -9,10 +11,12 @@ process.env.JWT_SECRET = 'test-only-secret-that-is-long-enough-for-hmac';
 const db = require('../data/database');
 const authService = require('../services/auth-service');
 const apiService = require('../services/api-service');
+const controller = require('../controllers/api-controller');
 const loginRateLimiter = require('../services/login-rate-limiter');
 const routes = require('../routes');
 const { createToken, verifyToken, TOKEN_LIFETIME_SECONDS } = require('../services/session-token');
 const { parseBusinessDateTime, reservationTimeError, TIME_ZONE } = require('../services/business-time');
+const { accountEmail, accountPassword, courseDivision, personName, requiredText } = require('../services/validation');
 
 after(() => db.pool.end());
 
@@ -306,8 +310,132 @@ test('rechaza reservas pasadas y valida el texto de tickets antes de persistir',
   );
   await assert.rejects(
     apiService.createTicket({ motivo: 'Motivo', descripcion: 'x'.repeat(4001) }, user),
-    (error) => error.status === 400 && /4000 caracteres/.test(error.message)
+    (error) => error.status === 400 && /50 caracteres/.test(error.message)
   );
+});
+
+test('los valores de texto nuevos se recortan y respetan 50 caracteres', () => {
+  assert.equal(personName(` ${'A'.repeat(50)} `, 'El nombre'), 'A'.repeat(50));
+  assert.throws(() => personName('A'.repeat(51), 'El nombre'), (error) => error.status === 400 && /50 caracteres/.test(error.message));
+  assert.equal(accountEmail(`${'a'.repeat(37)}@example.test`), `${'a'.repeat(37)}@example.test`);
+  assert.throws(() => accountEmail(`${'a'.repeat(38)}@example.test`), (error) => error.status === 400 && /50 caracteres/.test(error.message));
+  assert.equal(accountPassword('x'.repeat(50)), 'x'.repeat(50));
+  assert.throws(() => accountPassword('x'.repeat(51)), (error) => error.status === 400 && /50 caracteres/.test(error.message));
+  assert.equal(requiredText('x'.repeat(50), 'El motivo'), 'x'.repeat(50));
+  assert.throws(() => requiredText('x'.repeat(51), 'El motivo'), (error) => error.status === 400 && /50 caracteres/.test(error.message));
+  assert.throws(() => requiredText('   ', 'El motivo'), (error) => error.status === 400 && /vacío/.test(error.message));
+  assert.equal(courseDivision(' 2°14° '), '2°14°');
+  for (const invalid of ['2°0°', '8°1°', '2°100°', '6° Informática']) {
+    assert.throws(() => courseDivision(invalid), (error) => error.status === 400);
+  }
+});
+
+test('el login no aplica el máximo de 50 caracteres a cuentas preexistentes', async () => {
+  const originalQuery = db.query;
+  const email = `${'a'.repeat(42)}@example.test`;
+  const password = 'p'.repeat(64);
+  loginRateLimiter.reset();
+  db.query = async (sql, params) => sql.includes('password_hash = crypt')
+    ? { rows: [{ id: '77', email, password, rol: 'alumno', baneado: false }], rowCount: 1 }
+    : { rows: [], rowCount: 1 };
+  try {
+    const result = await authService.login({ email, password }, { headers: {}, socket: { remoteAddress: '192.0.2.77' } });
+    assert.equal(result.user.id, '77');
+  } finally {
+    db.query = originalQuery;
+    loginRateLimiter.reset();
+  }
+});
+
+test('GET /api/carros requiere autenticación y devuelve disponibilidad por carro', async () => {
+  const originalQuery = db.query;
+  const originalAuthenticate = authService.authenticate;
+  const calls = [];
+  db.query = async (sql) => {
+    calls.push(sql);
+    return { rows: [{ numero: 2, disponibles: 4 }], rowCount: 1 };
+  };
+  try {
+    const route = routes.resolve('GET', '/api/carros');
+    assert.equal(route.action, 'availableCarros');
+    assert.deepEqual(await apiService[route.action]({}, { id: 7, rol: 'alumno' }), {
+      carros: [{ numero: 2, disponibles: 4 }]
+    });
+    assert.match(calls[0], /NOT EXISTS/);
+    authService.authenticate = async () => {
+      const error = new Error('No autenticado');
+      error.status = 401;
+      throw error;
+    };
+    const request = Readable.from([]);
+    request.method = 'GET';
+    request.url = '/api/carros';
+    request.headers = {};
+    const response = {
+      writeHead(status) { this.status = status; },
+      end(serialized) { this.payload = serialized ? JSON.parse(serialized) : null; }
+    };
+    await controller.handle(request, response, route, {});
+    assert.equal(response.status, 401);
+  } finally {
+    authService.authenticate = originalAuthenticate;
+    db.query = originalQuery;
+  }
+});
+
+test('las reservas individuales y por lote asignan solo el carro seleccionado', async () => {
+  const originalQuery = db.query;
+  const originalTransaction = db.transaction;
+  const calls = [];
+  let availableCount = 0;
+  let insertedReservations = 0;
+  db.query = async () => ({ rowCount: 0, rows: [] });
+  db.transaction = async (callback) => callback({
+    query: async (sql, params) => {
+      calls.push({ sql, params });
+      if (sql.includes('SELECT 1 FROM loans WHERE user_id')) return { rowCount: 0, rows: [] };
+      if (sql.includes('SELECT numero FROM carros WHERE numero =')) return { rowCount: 1, rows: [{ numero: params[0] }] };
+      if (sql.includes('SELECT n.id FROM notebooks n')) {
+        return { rowCount: availableCount, rows: Array.from({ length: availableCount }, (_value, index) => ({ id: index + 1 })) };
+      }
+      if (sql.includes('INSERT INTO reservations')) {
+        insertedReservations += 1;
+        return { rowCount: 1, rows: [{ id: insertedReservations, estado: params[8] }] };
+      }
+      return { rowCount: 1, rows: [] };
+    }
+  });
+  const now = new Date();
+  const retiroAt = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+  retiroAt.setUTCHours(14, 0, 0, 0);
+  const request = (tipo, cantidad) => ({
+    tipo, cantidad, carro: '2', curso: tipo === 'lote' ? '6°14°' : undefined,
+    retiroAt: retiroAt.toISOString(), motivo: 'Trabajo'
+  });
+  try {
+    for (const [user, tipo, cantidad] of [
+      [{ id: 1, rol: 'alumno' }, 'individual', 1],
+      [{ id: 2, rol: 'profesor' }, 'lote', 3]
+    ]) {
+      availableCount = cantidad - 1;
+      await assert.rejects(
+        apiService.createReservation(request(tipo, cantidad), user),
+        (error) => error.status === 409 && /carro seleccionado/.test(error.message)
+      );
+    }
+    assert.equal(insertedReservations, 0);
+    availableCount = 1;
+    await apiService.createReservation(request('individual', 1), { id: 1, rol: 'alumno' });
+    availableCount = 3;
+    await apiService.createReservation(request('lote', 3), { id: 2, rol: 'profesor' });
+    assert.equal(insertedReservations, 2);
+    const allocationCalls = calls.filter(call => call.sql.includes('SELECT n.id FROM notebooks n'));
+    assert.ok(allocationCalls.every(call => call.params[0] === 2 && /n\.carro_id = \$1/.test(call.sql)));
+    assert.ok(allocationCalls.every(call => /FOR UPDATE SKIP LOCKED/.test(call.sql)));
+  } finally {
+    db.query = originalQuery;
+    db.transaction = originalTransaction;
+  }
 });
 
 test('los baneos aceptan solo duraciones previstas y los vencidos vuelven a autenticarse', async () => {
@@ -396,7 +524,7 @@ test('resolver tickets libera notebooks en una transacción y rechaza estados in
     query: async (sql, params) => {
       calls.push({ sql, params });
       if (sql.includes('UPDATE tickets SET estado')) {
-        return { rowCount: 1, rows: [{ id: 'TCK-1', estado: 'resuelto', notebook_id: 4 }] };
+        return { rowCount: 1, rows: [{ id: 'TCK-1', estado: params[0], notebook_id: 4 }] };
       }
       return { rowCount: 1, rows: [] };
     }
@@ -406,12 +534,38 @@ test('resolver tickets libera notebooks en una transacción y rechaza estados in
       apiService.updateTicket({ estado: 'incorrecto' }, { id: 1, rol: 'admin' }, { code: 'TCK-1' }),
       (error) => error.status === 400
     );
+    await assert.rejects(
+      apiService.updateTicket({ estado: 'resuelto' }, { id: 2, rol: 'alumno' }, { code: 'TCK-1' }),
+      (error) => error.status === 403
+    );
     const result = await apiService.updateTicket({ estado: 'resuelto' }, { id: 1, rol: 'admin' }, { code: 'TCK-1' });
     assert.equal(result.ticket.estado, 'resuelto');
     assert.equal(calls.length, 2);
     assert.match(calls[0].sql, /resolved_at = CASE WHEN \$1 = 'resuelto' THEN now\(\)/);
+    assert.match(calls[0].sql, /resolved_by = CASE WHEN \$1 = 'resuelto' THEN \$2 ELSE NULL END/);
     assert.match(calls[1].sql, /SET estado = 'disponible'/);
+    calls.length = 0;
+    const reopened = await apiService.updateTicket({ estado: 'abierto' }, { id: 1, rol: 'admin' }, { code: 'TCK-1' });
+    assert.equal(reopened.ticket.estado, 'abierto');
+    assert.equal(calls.length, 1);
+    assert.match(calls[0].sql, /resolved_at = CASE WHEN \$1 = 'resuelto' THEN now\(\) ELSE NULL END/);
+    assert.deepEqual(calls[0].params, ['abierto', 1, 'TCK-1']);
   } finally {
     db.transaction = originalTransaction;
   }
+});
+
+test('la interfaz muestra selector reabrible, contador de texto, carro y curso estructurado', () => {
+  const root = path.resolve(__dirname, '..', '..');
+  const html = fs.readFileSync(path.join(root, 'frontend', 'index.html'), 'utf8');
+  const app = fs.readFileSync(path.join(root, 'frontend', 'app.js'), 'utf8');
+  assert.match(html, /id="resCarro"/);
+  assert.match(html, /type="number" id="resCursoAnio"/);
+  assert.match(html, /type="number" id="resCursoDivision"/);
+  assert.match(html, /id="fallaDesc" maxlength="50"/);
+  assert.match(html, /id="userNombre" type="text" maxlength="50"/);
+  assert.match(app, /adminSetTicketEstado\(this,/);
+  assert.match(app, /refreshOwnTickets\(\)/);
+  assert.match(app, /initializeTextLimits\(\)/);
+  assert.doesNotMatch(app, /adminSetTicketEstado\([^,]+,\s*'resuelto'\)/);
 });

@@ -80,7 +80,7 @@ async function cargarEstadoAPI(){
   const esAdmin = currentUser.rol==='admin';
   const [notebooksData, reservationsData, loansData, ticketsData, preferencesData, carrosData] = await Promise.all([
     apiRequest('/api/notebooks'), apiRequest(esAdmin ? '/api/admin/reservations' : '/api/reservations'), apiRequest('/api/loans'), apiRequest(esAdmin ? '/api/admin/tickets' : '/api/tickets'), apiRequest('/api/preferences')
-    , ...(esAdmin ? [apiRequest('/api/admin/carros')] : [Promise.resolve({carros:[]})])
+    , apiRequest('/api/carros')
   ]);
   currentUser.preferencias = {
     email: Boolean(preferencesData.preferences?.email),
@@ -96,7 +96,7 @@ async function cargarEstadoAPI(){
     const retiro = businessDateParts(reserva.retiro_at);
     return {
       id:reserva.id || reserva.codigo, ownerLegajo:reserva.legajo || currentUser.legajo, ownerNombre:reserva.nombre || currentUser.nombre,
-      tipo:reserva.tipo, curso:reserva.curso, cantidad:`${reserva.cantidad} ${reserva.cantidad===1?'notebook':'notebooks'}`,
+      tipo:reserva.tipo, carro:reserva.carro, curso:reserva.curso, cantidad:`${reserva.cantidad} ${reserva.cantidad===1?'notebook':'notebooks'}`,
       fecha:`${retiro.year}-${retiro.month}-${retiro.day}`, hora:`${retiro.hour}:${retiro.minute}`, motivo:reserva.motivo,
       estado:reserva.estado, notebookIds:reserva.notebook_ids || []
     };
@@ -262,7 +262,7 @@ function validarNombreCuenta(value, label){
   const name = value.trim().normalize('NFC');
   if(!name) return `${label} no puede estar vacío`;
   if(name.length<2) return `${label} debe tener al menos 2 caracteres`;
-  if(name.length>60) return `${label} no puede superar 60 caracteres`;
+  if(name.length>50) return `${label} no puede superar 50 caracteres`;
   if(!/^[\p{L}\p{M}]+(?: [\p{L}\p{M}]+)*$/u.test(name)) return `${label} solo puede contener letras y espacios simples`;
   if(Array.from(name.replace(/ /g, '')).length<2) return `${label} debe tener al menos 2 letras`;
   return '';
@@ -273,16 +273,15 @@ async function crearUsuarioAdmin(e){
   const error = document.getElementById('adminUserError');
   const nombre = document.getElementById('userNombre').value.trim();
   const apellido = document.getElementById('userApellido').value.trim();
-  const email = document.getElementById('userEmail').value.toLowerCase();
-  const legajo = document.getElementById('userLegajo').value;
+  const email = document.getElementById('userEmail').value.trim().toLowerCase();
+  const legajo = document.getElementById('userLegajo').value.trim();
   const rol = document.getElementById('userRol').value;
   const password = document.getElementById('userPassword').value;
   error.textContent = validarNombreCuenta(nombre, 'El nombre') || validarNombreCuenta(apellido, 'El apellido');
-  if(!error.textContent && nombre.length + apellido.length + 1 > 120) error.textContent = 'El nombre y apellido no pueden superar 120 caracteres en conjunto';
   if(!error.textContent && (!/^\d{1,10}$/.test(legajo))) error.textContent = 'Legajo debe contener de 1 a 10 dígitos';
   if(!error.textContent && /\s/.test(email)) error.textContent = 'El email no puede contener espacios';
-  if(!error.textContent && (email.length > 254 || !/^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$/.test(email))) error.textContent = 'Ingresá un email válido de hasta 254 caracteres';
-  if(!error.textContent && (password.length < 8 || /\s/.test(password))) error.textContent = 'La contraseña debe tener al menos 8 caracteres y no contener espacios';
+  if(!error.textContent && (email.length > 50 || !/^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$/.test(email))) error.textContent = 'Ingresá un email válido de hasta 50 caracteres';
+  if(!error.textContent && (password.length < 8 || password.length > 50 || /\s/.test(password))) error.textContent = 'La contraseña debe tener entre 8 y 50 caracteres y no contener espacios';
   if(error.textContent){ showToast(error.textContent, 'warn'); return; }
   try{
     await apiRequest('/api/admin/users', {method:'POST', body:JSON.stringify({nombre, apellido, email, legajo, rol, password})});
@@ -382,7 +381,8 @@ function applyRoleVisibility(){
 function toggleProfesorUI(){
   const isProf = rolActivo === 'profesor';
   document.getElementById('loteToggleWrap').style.display = isProf ? 'flex' : 'none';
-  document.getElementById('resCursoProfesor').required = isProf;
+  document.getElementById('resCursoAnio').required = isProf;
+  document.getElementById('resCursoDivision').required = isProf;
   if(!isProf){
     document.getElementById('loteToggle').checked = false;
     toggleLoteBlock();
@@ -394,7 +394,8 @@ function toggleLoteBlock(){
   const checked = document.getElementById('loteToggle').checked;
   document.getElementById('loteBlock').classList.toggle('show', checked);
   document.getElementById('resCantidadWrap').style.display = checked ? 'none' : 'flex';
-  document.getElementById('resCursoProfesor').required = rolActivo==='profesor';
+  document.getElementById('resCursoAnio').required = rolActivo==='profesor';
+  document.getElementById('resCursoDivision').required = rolActivo==='profesor';
   document.getElementById('resSubmitBtn').textContent = checked ? 'Enviar solicitud de lote' : 'Confirmar reserva';
   actualizarControlesReserva();
 }
@@ -425,7 +426,8 @@ function actualizarControlesReserva(){
   cantidadInput.disabled = !esProfesor;
   document.getElementById('loteToggle').disabled = bloqueado || equiposDisponibles < 3;
   loteCantidadInput.disabled = equiposDisponibles < 3;
-  document.getElementById('resCursoProfesor').disabled = false;
+  document.getElementById('resCursoAnio').disabled = false;
+  document.getElementById('resCursoDivision').disabled = false;
   submitButton.disabled = bloqueado || (document.getElementById('loteToggle').checked ? equiposDisponibles < 3 : equiposDisponibles < 1);
 }
 
@@ -448,7 +450,10 @@ function switchView(name){
   if(name==='inicio' && rolActivo!=='admin') renderMiActividad();
   if(name==='prestamos'){ renderPrestamoActivo(); renderHistorialPrestamos(); }
   if(name==='reservas'){ renderReservas(); toggleProfesorUI(); }
-  if(name==='tickets') renderTicketsPropios();
+  if(name==='tickets'){
+    renderTicketsPropios();
+    if(authToken) void refreshOwnTickets();
+  }
   if(name==='perfil') renderPerfil();
   if(name==='admin-profesores') renderProfesoresTable();
   if(name==='admin-inventario') renderAdminInventario();
@@ -617,6 +622,17 @@ function renderInventarioForms(){
     if(selected && carros.some(carro=>String(carro.numero)===selected)) select.value = selected;
     select.disabled = carros.length===0;
   }
+  renderReservaCarros();
+}
+
+function renderReservaCarros(){
+  const select = document.getElementById('resCarro');
+  if(!select) return;
+  const selected = select.value;
+  select.innerHTML = '<option value="">Seleccioná un carro</option>'
+    + carros.map(carro=>`<option value="${escapeHtml(carro.numero)}" ${Number(carro.disponibles)===0?'disabled':''}>Carro ${escapeHtml(carro.numero)} · ${escapeHtml(carro.disponibles ?? 0)} disponibles</option>`).join('');
+  if(selected && carros.some(carro=>String(carro.numero)===selected)) select.value = selected;
+  select.disabled = carros.length===0 || carros.every(carro=>Number(carro.disponibles)===0);
 }
 
 function renderFallaNotebookOptions(){
@@ -1017,14 +1033,22 @@ async function crearReservaAPI(e){
   const hora = document.getElementById('resHora').value;
   const esLote = rolActivo==='profesor' && document.getElementById('loteToggle').checked;
   const cantidad = esLote ? Number(document.getElementById('loteCantidad').value) : (rolActivo==='profesor' ? Number(document.getElementById('resCantidad').value) : 1);
-  const curso = rolActivo==='profesor' ? document.getElementById('resCursoProfesor').value.trim() : null;
+  const anio = document.getElementById('resCursoAnio').value;
+  const division = document.getElementById('resCursoDivision').value;
+  const curso = rolActivo==='profesor' && anio && division ? `${anio}°${division}°` : null;
   const motivoInput = document.getElementById('resMotivo').value;
   const motivo = motivoInput.trim();
+  const carro = document.getElementById('resCarro').value;
   const errorBox = document.getElementById('resFechaError');
   const check = validarFechaHora(fecha, hora);
   if(!check.valid){ errorBox.textContent = check.msg; showToast(check.msg, 'warn'); return; }
-  if(rolActivo==='profesor' && !curso){
-    errorBox.textContent = 'El curso no puede estar vacío.';
+  if(!carro){
+    errorBox.textContent = 'Seleccioná un carro con notebooks disponibles.';
+    showToast(errorBox.textContent, 'warn');
+    return;
+  }
+  if(rolActivo==='profesor' && (!curso || !/^[1-7]°(?:[1-9]|[1-9]\d)°$/.test(curso))){
+    errorBox.textContent = 'Ingresá un año de 1 a 7 y una división de 1 a 99.';
     showToast(errorBox.textContent, 'warn');
     return;
   }
@@ -1033,19 +1057,14 @@ async function crearReservaAPI(e){
     showToast(errorBox.textContent, 'warn');
     return;
   }
-  if(curso && curso.length>120){
-    errorBox.textContent = 'El curso no puede superar 120 caracteres.';
-    showToast(errorBox.textContent, 'warn');
-    return;
-  }
-  if(motivo.length>240){
-    errorBox.textContent = 'El motivo no puede superar 240 caracteres.';
+  if(motivo.length>50){
+    errorBox.textContent = 'El motivo no puede superar 50 caracteres.';
     showToast(errorBox.textContent, 'warn');
     return;
   }
   try{
     await apiRequest('/api/reservations', {method:'POST', body:JSON.stringify({
-      tipo:esLote ? 'lote' : 'individual', cantidad, curso, retiroAt:`${fecha}T${hora}:00`, motivo
+      tipo:esLote ? 'lote' : 'individual', cantidad, curso, carro, retiroAt:`${fecha}T${hora}:00`, motivo
     })});
     document.getElementById('reservaForm').reset();
     document.getElementById('loteToggle').checked = false;
@@ -1197,8 +1216,8 @@ async function crearTicket(e){
     showToast('Completá la notebook, el motivo y la descripción.', 'warn');
     return;
   }
-  if(motivo.length>240 || desc.length>4000){
-    showToast('El motivo admite hasta 240 caracteres y la descripción hasta 4000.', 'warn');
+  if(motivo.length>50 || desc.length>50){
+    showToast('El motivo y la descripción admiten hasta 50 caracteres.', 'warn');
     return;
   }
   try{
@@ -1248,15 +1267,14 @@ function renderTicketsPropios(){
 function renderAdminTickets(){
   const tbody = document.getElementById('adminTicketsTable');
   if(!tbody) return;
-  const ticketsActivos = tickets.filter(t=>t.estado!=='resuelto');
-  if(ticketsActivos.length===0){
-    tbody.innerHTML = `<tr><td colspan="7"><div class="empty-state">
+  if(tickets.length===0){
+    tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state">
       <div class="glyph">🎫</div><h4>No hay fallas reportadas</h4><p>Los reportes de alumnos y profesores van a aparecer acá.</p>
     </div></td></tr>`;
     updateAdminTicketsBadge();
     return;
   }
-  tbody.innerHTML = ticketsActivos.map(t=>{
+  tbody.innerHTML = tickets.map(t=>{
     const nb = notebooks.find(n=>n.id===t.notebook);
     const equipoCol = nb
       ? `<span class="badge ${escapeHtml(badgeClass[nb.estado])}">${escapeHtml(badgeLabel[nb.estado])}</span>`
@@ -1268,8 +1286,9 @@ function renderAdminTickets(){
       <td class="mono">${escapeHtml(t.notebook)}</td>
       <td>${escapeHtml(t.motivo)}</td>
       <td>
-        ${t.estado!=='progreso'?`<button class="btn btn-sm" onclick="adminSetTicketEstado(${escapeHtml(JSON.stringify(t.id))}, 'progreso')">En progreso</button>`:''}
-        <button class="btn btn-sm btn-success-outline" onclick="adminSetTicketEstado(${escapeHtml(JSON.stringify(t.id))}, 'resuelto')">Resuelto</button>
+        <select class="btn btn-sm" aria-label="Estado del ticket ${escapeHtml(t.id)}" onchange="adminSetTicketEstado(this, ${escapeHtml(JSON.stringify(t.id))})">
+          ${Object.entries(ticketBadgeLabel).map(([estado, label])=>`<option value="${escapeHtml(estado)}" ${t.estado===estado?'selected':''}>${escapeHtml(label)}</option>`).join('')}
+        </select>
       </td>
       <td>${equipoCol}</td>
     </tr>`;
@@ -1277,15 +1296,37 @@ function renderAdminTickets(){
   updateAdminTicketsBadge();
 }
 
-async function adminSetTicketEstado(idx, nuevoEstado){
+async function adminSetTicketEstado(select, idx){
   const t = tickets.find(ticket=>ticket.id===idx);
   if(!t) return;
+  const nuevoEstado = select.value;
+  if(nuevoEstado===t.estado) return;
+  select.disabled = true;
   try{
     await apiRequest('/api/tickets/'+encodeURIComponent(idx), {method:'PATCH', body:JSON.stringify({estado:nuevoEstado})});
     await cargarEstadoAPI();
     renderAll();
     showToast(`Ticket ${t.id} actualizado.`, 'success');
-  }catch(error){ showToast(error.message, 'warn'); }
+  }catch(error){
+    select.value = t.estado;
+    select.disabled = false;
+    showToast(error.message, 'warn');
+  }
+}
+
+async function refreshOwnTickets(){
+  try{
+    const data = await apiRequest('/api/tickets');
+    tickets = data.tickets.map(ticket=>({
+      id:ticket.id, notebook:ticket.notebook || 'otro', motivo:ticket.motivo, motivoCompleto:ticket.descripcion,
+      estado:ticket.estado, fecha:formatBusinessDateTime(ticket.created_at, {dateStyle:'short'}),
+      ownerLegajo:currentUser.legajo, ownerNombre:currentUser.nombre, ownerRol:currentUser.rol
+    }));
+    renderTicketsPropios();
+    updateTicketsBadge();
+  }catch(error){
+    showToast(error.message, 'warn');
+  }
 }
 
 function updateAdminTicketsBadge(){
@@ -1451,9 +1492,43 @@ function updateReservationMinima(){
   timeInput.max = '17:40';
 }
 
+function initializeTextLimits(){
+  const selector = 'input:not([type="number"]):not([type="date"]):not([type="time"]):not([type="file"]):not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="hidden"]), textarea';
+  document.querySelectorAll(selector).forEach(input=>{
+    if(['loginEmail', 'loginPassword'].includes(input.id)) return;
+    const currentLimit = Number(input.getAttribute('maxlength'));
+    if(!currentLimit || currentLimit>50) input.setAttribute('maxlength', '50');
+    const isFreeText = input.tagName==='TEXTAREA'
+      || ['text', 'search', 'email', 'url', 'tel'].includes(input.type);
+    if(!isFreeText || input.inputMode==='numeric' || input.pattern?.startsWith('[0-9]')) return;
+    const counter = document.createElement('span');
+    counter.className = 'hint char-counter';
+    counter.setAttribute('aria-live', 'polite');
+    const maximum = Number(input.getAttribute('maxlength')) || 50;
+    const update = ()=>{ counter.textContent = `${input.value.length}/${maximum}`; };
+    input.insertAdjacentElement('afterend', counter);
+    input.addEventListener('input', update);
+    input.form?.addEventListener('reset', ()=>setTimeout(update));
+    update();
+  });
+}
+
 updateReservationMinima();
 document.getElementById('resFecha').addEventListener('change', updateReservationMinima);
 document.getElementById('resHora').addEventListener('focus', updateReservationMinima);
+document.getElementById('reservaForm').addEventListener('reset', ()=>{
+  document.getElementById('resCursoPreview').textContent = 'Se enviará como A°D° (por ejemplo, 2°14°).';
+});
+initializeTextLimits();
+['resCursoAnio', 'resCursoDivision'].forEach(id=>{
+  document.getElementById(id).addEventListener('input', ()=>{
+    const anio = document.getElementById('resCursoAnio').value;
+    const division = document.getElementById('resCursoDivision').value;
+    document.getElementById('resCursoPreview').textContent = anio && division
+      ? `Curso: ${anio}°${division}°`
+      : 'Se enviará como A°D° (por ejemplo, 2°14°).';
+  });
+});
 
 (function initTheme(){
   let saved = null;

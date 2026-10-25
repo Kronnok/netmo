@@ -9,6 +9,7 @@ const routes = [
   ['GET', /^\/api\/admin\/professors$/, 'professors'],
   ['GET', /^\/api\/admin\/users$/, 'users'],
   ['POST', /^\/api\/admin\/users$/, 'createUser'],
+  ['GET', /^\/api\/carros$/, 'availableCarros'],
   ['GET', /^\/api\/admin\/carros$/, 'carros'],
   ['POST', /^\/api\/admin\/carros$/, 'createCarro'],
   ['POST', /^\/api\/admin\/notebooks$/, 'createNotebooks'],
