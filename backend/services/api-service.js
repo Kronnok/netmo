@@ -3,6 +3,36 @@ const db = require('../data/database');
 const { AppError } = require('../errors');
 const { parseBusinessDateTime, reservationTimeError } = require('./business-time');
 const { requiredText, personName, accountEmail, accountPassword, numericIdentifier } = require('./validation');
+const { sendMail } = require('./mail-service');
+
+async function notifyByEmail(userId, subject, html) {
+  try {
+    const result = await db.query(`SELECT u.email FROM users u
+      JOIN user_preferences p ON p.user_id = u.id
+      WHERE u.id = $1 AND p.email_notifications = TRUE`, [userId]);
+    if (!result.rowCount) return;
+    await sendMail({ to: result.rows[0].email, subject, html });
+  } catch {
+    console.error('No se pudo enviar una notificación por correo.');
+  }
+}
+
+async function notifyLoanReturnByEmail(loanId) {
+  try {
+    const result = await db.query(`SELECT u.email FROM loans l
+      JOIN users u ON u.id = l.user_id
+      JOIN user_preferences p ON p.user_id = u.id
+      WHERE l.id = $1 AND p.email_notifications = TRUE`, [loanId]);
+    if (!result.rowCount) return;
+    await sendMail({
+      to: result.rows[0].email,
+      subject: 'Devolución confirmada',
+      html: '<p>La recepción de tu notebook fue confirmada.</p>'
+    });
+  } catch {
+    console.error('No se pudo enviar una notificación por correo.');
+  }
+}
 
 function requireAdmin(user, message) {
   if (user.rol !== 'admin') throw new AppError(message, 403);
@@ -217,6 +247,9 @@ const actions = {
       }
       return { reservation: inserted.rows[0] };
     });
+    if (result.reservation.estado === 'confirmada') {
+      await notifyByEmail(user.id, 'Reserva confirmada', '<p>Tu reserva de notebook fue confirmada.</p>');
+    }
     return result;
   },
   async cancelReservation(_body, user, { code }) {
@@ -239,8 +272,8 @@ const actions = {
   },
   async approveReservation(_body, user, { id }) {
     requireAdmin(user, 'Solo admin puede aprobar reservas');
-    return db.transaction(async (client) => {
-      const reservation = await client.query(`SELECT id, cantidad FROM reservations
+    const result = await db.transaction(async (client) => {
+      const reservation = await client.query(`SELECT id, owner_id, cantidad FROM reservations
         WHERE id = $1 AND tipo = 'lote' AND estado = 'pendiente_aprobacion' FOR UPDATE`, [id]);
       if (!reservation.rowCount) throw new AppError('Solicitud de lote no encontrada', 404);
       await client.query(`UPDATE reservation_notebooks rn SET active = FALSE
@@ -262,8 +295,10 @@ const actions = {
         }
       }
       await client.query("UPDATE reservations SET estado = 'aprobada' WHERE id = $1", [id]);
-      return { message: 'Lote aprobado' };
+      return { message: 'Lote aprobado', ownerId: reservation.rows[0].owner_id };
     });
+    await notifyByEmail(result.ownerId, 'Reserva confirmada', '<p>Tu solicitud de reserva fue aprobada.</p>');
+    return { message: result.message };
   },
   async rejectReservation(_body, user, { id }) {
     requireAdmin(user, 'Solo admin puede rechazar reservas');
@@ -344,7 +379,7 @@ const actions = {
   },
   async confirmReturn(_body, user, { id }) {
     requireAdmin(user, 'Solo admin puede confirmar devoluciones');
-    return db.transaction(async (client) => {
+    const result = await db.transaction(async (client) => {
       const result = await client.query(`UPDATE returns SET estado = 'confirmada', confirmado_at = now(), confirmado_por = $1
         WHERE id = $2 AND estado = 'pendiente' RETURNING loan_id`, [user.id, id]);
       if (!result.rowCount) throw new AppError('Devolución pendiente no encontrada', 404);
@@ -353,8 +388,10 @@ const actions = {
       await client.query(`UPDATE notebooks SET estado = 'disponible',
         ubicacion = COALESCE('Carro ' || carro_id::text, ubicacion), prestado_a = NULL, updated_at = now()
         WHERE id = (SELECT notebook_id FROM loans WHERE id = $1)`, [loanId]);
-      return { message: 'Devolución confirmada' };
+      return { message: 'Devolución confirmada', loanId };
     });
+    await notifyLoanReturnByEmail(result.loanId);
+    return { message: result.message };
   },
   async tickets(_body, user) {
     const result = await db.query(`SELECT t.codigo AS id, n.codigo AS notebook, t.motivo, t.descripcion, t.estado, t.created_at

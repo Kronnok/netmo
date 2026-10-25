@@ -10,12 +10,12 @@ function clientIp(request) {
   return request.socket.remoteAddress || 'unknown';
 }
 
-function keyFor(request, email) {
-  return `${clientIp(request)}:${String(email || '').trim().toLowerCase()}`;
+function keyFor(request, email, namespace = 'login') {
+  return `${namespace}:${clientIp(request)}:${String(email || '').trim().toLowerCase()}`;
 }
 
-function isRateLimited(request, email, now = Date.now()) {
-  const key = keyFor(request, email);
+function isRateLimited(request, email, now = Date.now(), namespace = 'login') {
+  const key = keyFor(request, email, namespace);
   const entry = attempts.get(key);
   if (!entry) return false;
   if (entry.expiresAt <= now) {
@@ -25,8 +25,8 @@ function isRateLimited(request, email, now = Date.now()) {
   return entry.failures >= MAX_FAILURES;
 }
 
-function recordFailure(request, email, now = Date.now()) {
-  const key = keyFor(request, email);
+function recordFailure(request, email, now = Date.now(), namespace = 'login') {
+  const key = keyFor(request, email, namespace);
   const entry = attempts.get(key);
   if (!entry || entry.expiresAt <= now) {
     attempts.set(key, { failures: 1, expiresAt: now + WINDOW_MS });
@@ -35,8 +35,8 @@ function recordFailure(request, email, now = Date.now()) {
   entry.failures += 1;
 }
 
-function clearFailures(request, email) {
-  attempts.delete(keyFor(request, email));
+function clearFailures(request, email, namespace = 'login') {
+  attempts.delete(keyFor(request, email, namespace));
 }
 
 function reset() {

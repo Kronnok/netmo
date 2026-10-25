@@ -1,6 +1,10 @@
 const routes = [
   ['GET', /^\/health$/, 'health'],
   ['POST', /^\/api\/auth\/login$/, 'login'],
+  ['POST', /^\/api\/auth\/forgot$/, 'forgotPassword'],
+  ['POST', /^\/api\/auth\/reset$/, 'resetPassword'],
+  ['POST', /^\/api\/auth\/change-password\/request$/, 'requestPasswordChange'],
+  ['POST', /^\/api\/auth\/change-password$/, 'changePassword'],
   ['GET', /^\/api\/me$/, 'me'],
   ['GET', /^\/api\/admin\/professors$/, 'professors'],
   ['GET', /^\/api\/admin\/users$/, 'users'],

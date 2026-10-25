@@ -153,6 +153,109 @@ async function login(e){
   }
 }
 
+function mostrarRecuperacion(){
+  document.getElementById('view-login').classList.remove('active');
+  document.getElementById('view-forgot-password').classList.add('active');
+  document.getElementById('forgotEmail').value = document.getElementById('loginEmail').value.trim();
+  document.getElementById('forgotPasswordMessage').textContent = '';
+}
+
+function mostrarLogin(){
+  document.getElementById('view-forgot-password').classList.remove('active');
+  document.getElementById('view-login').classList.add('active');
+}
+
+async function solicitarCodigoRecuperacion(){
+  const message = document.getElementById('forgotPasswordMessage');
+  const email = document.getElementById('forgotEmail').value.trim();
+  try{
+    const result = await apiRequest('/api/auth/forgot', {method:'POST', body:JSON.stringify({email})});
+    document.getElementById('forgotCodeFields').hidden = false;
+    document.getElementById('forgotRequestButton').hidden = true;
+    document.getElementById('forgotSubmitButton').hidden = false;
+    document.getElementById('forgotResendButton').hidden = false;
+    message.textContent = result.message;
+  }catch(error){
+    message.textContent = error.message;
+  }
+}
+
+async function restablecerPassword(){
+  const message = document.getElementById('forgotPasswordMessage');
+  const code = document.getElementById('forgotCode').value.trim();
+  const password = document.getElementById('forgotPassword').value;
+  const repeatedPassword = document.getElementById('forgotPasswordRepeat').value;
+  if(password !== repeatedPassword){
+    message.textContent = 'Las contraseñas no coinciden.';
+    return;
+  }
+  if(password.length < 8 || /\s/.test(password)){
+    message.textContent = 'La contraseña debe tener al menos 8 caracteres y no contener espacios.';
+    return;
+  }
+  try{
+    const result = await apiRequest('/api/auth/reset', {
+      method:'POST',
+      body:JSON.stringify({email:document.getElementById('forgotEmail').value.trim(), code, password})
+    });
+    message.textContent = result.message;
+    document.getElementById('forgotCodeFields').hidden = true;
+    document.getElementById('forgotSubmitButton').hidden = true;
+    document.getElementById('forgotResendButton').hidden = true;
+    document.getElementById('forgotRequestButton').hidden = false;
+    document.getElementById('forgotPasswordForm')?.reset();
+    mostrarLogin();
+    document.getElementById('loginError').textContent = '';
+    showToast(result.message, 'success');
+  }catch(error){
+    message.textContent = error.message;
+  }
+}
+
+async function solicitarCambioPassword(){
+  const message = document.getElementById('changePasswordMessage');
+  try{
+    const result = await apiRequest('/api/auth/change-password/request', {method:'POST', body:'{}'});
+    document.getElementById('changePasswordForm').hidden = false;
+    message.textContent = result.message;
+  }catch(error){
+    message.textContent = error.message;
+  }
+}
+
+async function cambiarPassword(event){
+  event.preventDefault();
+  const form = document.getElementById('changePasswordForm');
+  const message = document.getElementById('changePasswordMessage');
+  const password = document.getElementById('changePasswordNew').value;
+  if(password !== document.getElementById('changePasswordRepeat').value){
+    message.textContent = 'Las contraseñas no coinciden.';
+    return;
+  }
+  if(password.length < 8 || /\s/.test(password)){
+    message.textContent = 'La contraseña debe tener al menos 8 caracteres y no contener espacios.';
+    return;
+  }
+  try{
+    const result = await apiRequest('/api/auth/change-password', {
+      method:'POST',
+      body:JSON.stringify({code:document.getElementById('changePasswordCode').value.trim(), password})
+    });
+    form.reset();
+    form.hidden = true;
+    message.textContent = result.message;
+    showToast(result.message, 'success');
+  }catch(error){
+    message.textContent = error.message;
+  }
+}
+
+function togglePasswordVisibility(inputId, button){
+  const input = document.getElementById(inputId);
+  input.type = input.type === 'password' ? 'text' : 'password';
+  button.textContent = input.type === 'password' ? 'Mostrar' : 'Ocultar';
+}
+
 function validarNombreCuenta(value, label){
   const name = value.trim().normalize('NFC');
   if(!name) return `${label} no puede estar vacío`;

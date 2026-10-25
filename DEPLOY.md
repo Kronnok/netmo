@@ -38,6 +38,9 @@ servicio completá:
 - `JWT_SECRET`: secreto de firma HMAC de los tokens, válidos durante 12 horas.
   `render.yaml` solicita que Render lo genere automáticamente; conservá ese
   valor como secreto y no lo copies al repositorio.
+- `MAIL_PROVIDER`: elegí `brevo` o `gas`; configurá también las variables
+  requeridas del proveedor y `MAIL_FROM_EMAIL`/`MAIL_FROM_NAME`. No uses
+  `console` en producción.
 
   Las cuentas nuevas se crean desde la sección **Usuarios** del panel de
   administración; no existe registro público. Desde **Inventario** se administran
@@ -47,6 +50,26 @@ Render publica la API y comprueba `/health`. Configurá `DATABASE_URL` y
 `CORS_ORIGIN` como variables privadas del servicio; `JWT_SECRET` se genera en
 Render a partir del manifiesto. Después de cambiar el esquema, volvé a ejecutar
 `npm run db:migrate` desde un entorno seguro.
+
+### Configurar correo
+
+**Brevo:** verificá el remitente en Brevo, generá una API key y cargala como
+`MAIL_API_KEY` en Render. Usá `MAIL_PROVIDER=brevo` y configurá
+`MAIL_FROM_EMAIL` y `MAIL_FROM_NAME`.
+
+**Google Apps Script:** creá un proyecto con una función `doPost` que lea el
+JSON recibido (`secret`, `to`, `subject`, `html`), compare `secret` con un
+secreto guardado en las propiedades del script, envíe con `MailApp.sendEmail`
+y devuelva texto plano `ok`. Desplegalo como aplicación web ejecutada por tu
+cuenta y accesible para recibir solicitudes; copiá su URL de implementación a
+`MAIL_GAS_URL`, el mismo secreto a `MAIL_GAS_SECRET` y seleccioná
+`MAIL_PROVIDER=gas`. La API sigue redirecciones y espera como máximo 15
+segundos.
+
+Render gratuito bloquea el SMTP saliente; por eso NetMO usa las APIs HTTPS de
+Brevo o Apps Script en lugar de SMTP. No escribas claves ni secretos en el
+repositorio. En desarrollo podés usar `MAIL_PROVIDER=console`; el correo de
+prueba se envía con `npm run mail:test -- destino@correo.com`.
 
 ## 3. Frontend estático
 

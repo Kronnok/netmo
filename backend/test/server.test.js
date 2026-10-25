@@ -20,6 +20,10 @@ test('resuelve rutas de API y sus parámetros', () => {
   assert.equal(routes.resolve('GET', '/api/notebooks').action, 'notebooks');
   assert.deepEqual(routes.resolve('POST', '/api/admin/reservations/42/checkout').params, { id: 42 });
   assert.equal(routes.resolve('POST', '/api/auth/register'), null);
+  assert.equal(routes.resolve('POST', '/api/auth/forgot').action, 'forgotPassword');
+  assert.equal(routes.resolve('POST', '/api/auth/reset').action, 'resetPassword');
+  assert.equal(routes.resolve('POST', '/api/auth/change-password/request').action, 'requestPasswordChange');
+  assert.equal(routes.resolve('POST', '/api/auth/change-password').action, 'changePassword');
   assert.equal(routes.resolve('POST', '/api/admin/users').action, 'createUser');
   assert.equal(routes.resolve('GET', '/api/admin/carros').action, 'carros');
   assert.equal(routes.resolve('POST', '/api/admin/carros').action, 'createCarro');

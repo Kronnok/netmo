@@ -118,6 +118,8 @@ test('flujo API reserva, retiro, préstamo, devolución e historial', async () =
   db.transaction = async (callback) => callback({ query: execute });
   db.query = async (sql) => {
     const statement = sql.replace(/\s+/g, ' ').trim();
+    if (statement.startsWith('SELECT u.email FROM users u')) return { rowCount: 0, rows: [] };
+    if (statement.startsWith('SELECT u.email FROM loans l')) return { rowCount: 0, rows: [] };
     if (statement.startsWith('SELECT r.codigo AS id')) return {
       rowCount: reservation ? 1 : 0,
       rows: reservation ? [{
