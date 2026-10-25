@@ -956,7 +956,7 @@ function renderDevoluciones(){
         <h4>${escapeHtml(n.notebookId)} · ${escapeHtml(n.alumnoNombre)}</h4>
         <p>${escapeHtml(n.curso)} · Legajo ${escapeHtml(n.alumnoLegajo)} · Solicitado ${escapeHtml(n.fechaSolicitud)}</p>
       </div>
-      <button class="btn btn-primary btn-sm" onclick="confirmarRecepcion(${i})">Confirmar recepción física</button>
+      <button class="btn btn-primary btn-sm" onclick="confirmarRecepcion(${escapeHtml(i)})">Confirmar recepción física</button>
     </div>`).join('');
 }
 
