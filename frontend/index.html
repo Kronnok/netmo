@@ -309,7 +309,9 @@
             </div>
             <div class="field">
               <label for="resCarro">Carro</label>
-              <select id="resCarro" required><option value="">Seleccioná un carro</option></select>
+              <select id="resCarro"><option value="">Cargando carros...</option></select>
+              <span id="resCarroStatus" class="hint" role="status" hidden></span>
+              <button type="button" id="resCarroRetry" class="btn btn-sm" onclick="cargarCarrosReserva()" hidden>Reintentar carga</button>
             </div>
             <div class="field">
               <label for="resFecha">Fecha</label>

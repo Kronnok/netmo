@@ -389,12 +389,15 @@ test('las reservas individuales y por lote asignan solo el carro seleccionado', 
   const calls = [];
   let availableCount = 0;
   let insertedReservations = 0;
+  let selectedCarroExists = true;
   db.query = async () => ({ rowCount: 0, rows: [] });
   db.transaction = async (callback) => callback({
     query: async (sql, params) => {
       calls.push({ sql, params });
       if (sql.includes('SELECT 1 FROM loans WHERE user_id')) return { rowCount: 0, rows: [] };
-      if (sql.includes('SELECT numero FROM carros WHERE numero =')) return { rowCount: 1, rows: [{ numero: params[0] }] };
+      if (sql.includes('SELECT numero FROM carros WHERE numero =')) {
+        return { rowCount: selectedCarroExists ? 1 : 0, rows: selectedCarroExists ? [{ numero: params[0] }] : [] };
+      }
       if (sql.includes('SELECT n.id FROM notebooks n')) {
         return { rowCount: availableCount, rows: Array.from({ length: availableCount }, (_value, index) => ({ id: index + 1 })) };
       }
@@ -413,6 +416,16 @@ test('las reservas individuales y por lote asignan solo el carro seleccionado', 
     retiroAt: retiroAt.toISOString(), motivo: 'Trabajo'
   });
   try {
+    await assert.rejects(
+      apiService.createReservation({ ...request('individual', 1), carro: '' }, { id: 1, rol: 'alumno' }),
+      (error) => error.status === 400 && /carro.*vacío/i.test(error.message)
+    );
+    selectedCarroExists = false;
+    await assert.rejects(
+      apiService.createReservation(request('individual', 1), { id: 1, rol: 'alumno' }),
+      (error) => error.status === 400 && /carro seleccionado no existe/i.test(error.message)
+    );
+    selectedCarroExists = true;
     for (const [user, tipo, cantidad] of [
       [{ id: 1, rol: 'alumno' }, 'individual', 1],
       [{ id: 2, rol: 'profesor' }, 'lote', 3]
@@ -564,8 +577,13 @@ test('la interfaz muestra selector reabrible, contador de texto, carro y curso e
   assert.match(html, /type="number" id="resCursoDivision"/);
   assert.match(html, /id="fallaDesc" maxlength="50"/);
   assert.match(html, /id="userNombre" type="text" maxlength="50"/);
-  assert.match(app, /adminSetTicketEstado\(this,/);
+  assert.match(app, /renderAdminStateSelect\(`Cambiar estado de \$\{escapeHtml\(nb\.id\)\}/);
+  assert.match(app, /renderAdminStateSelect\(`Cambiar estado del ticket \$\{escapeHtml\(t\.id\)\}/);
+  assert.match(app, /function adminChangeState\(select\)/);
+  assert.match(app, /void cargarCarrosReserva\(\)/);
+  assert.match(app, /No se pudieron cargar los carros/);
+  assert.match(app, /resCarroRetry/);
   assert.match(app, /refreshOwnTickets\(\)/);
   assert.match(app, /initializeTextLimits\(\)/);
-  assert.doesNotMatch(app, /adminSetTicketEstado\([^,]+,\s*'resuelto'\)/);
+  assert.doesNotMatch(app, /adminSetTicketEstado/);
 });

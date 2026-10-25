@@ -12,8 +12,9 @@ este archivo. No incluye cambios de esquema ni migraciones.
 ### A. Fallas reportadas
 
 - En la cola administrativa, cada ticket tendrá un selector con Abierto,
-  En progreso y Resuelto, con estado actual seleccionado; retirar los botones
-  individuales y permitir reabrir tickets resueltos.
+  En progreso y Resuelto, reutilizando el selector de estados de Inventario,
+  con estado actual seleccionado; retirar los botones individuales y permitir
+  reabrir tickets resueltos.
 - Guardar cada cambio mediante `PATCH /api/tickets/:codigo`; solo admin puede
   actualizar y el backend acepta únicamente `abierto`, `progreso` y `resuelto`.
 - Resolver registra actor y fecha y devuelve a disponible únicamente una
@@ -40,7 +41,8 @@ este archivo. No incluye cambios de esquema ni migraciones.
 - `GET /api/carros` requiere autenticación y está disponible para cualquier rol
   autenticado. Devuelve carros y cantidad de notebooks disponibles.
 - Alumnos y profesores elegirán carro en el formulario; indicar disponibilidad
-  y deshabilitar carros con cero unidades.
+  y deshabilitar carros con cero unidades. Cargar al abrir Reservas; ante error,
+  mostrarlo y permitir reintentar, sin dejar el selector vacío.
 - Asignar notebooks disponibles solo del carro elegido, dentro de la
   transacción, en reservas individuales y lotes. Disponibilidad insuficiente:
   HTTP 409 claro, sin reserva ni asignación parcial.

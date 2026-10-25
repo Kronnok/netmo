@@ -11,6 +11,8 @@ const API_BASE = (window.NETMO_CONFIG.apiBaseUrl || '').replace(/\/+$/, '');
 
 let notebooks = [];
 let carros = [];
+let reservationCarrosLoading = true;
+let reservationCarrosError = '';
 let stats = {disponibles:0, prestadas:0, mantenimiento:0, total:0};
 let prestamosActivos = {};
 let historialPrestamos = [];
@@ -78,9 +80,8 @@ async function apiRequest(path, options={}){
 
 async function cargarEstadoAPI(){
   const esAdmin = currentUser.rol==='admin';
-  const [notebooksData, reservationsData, loansData, ticketsData, preferencesData, carrosData] = await Promise.all([
+  const [notebooksData, reservationsData, loansData, ticketsData, preferencesData] = await Promise.all([
     apiRequest('/api/notebooks'), apiRequest(esAdmin ? '/api/admin/reservations' : '/api/reservations'), apiRequest('/api/loans'), apiRequest(esAdmin ? '/api/admin/tickets' : '/api/tickets'), apiRequest('/api/preferences')
-    , apiRequest('/api/carros')
   ]);
   currentUser.preferencias = {
     email: Boolean(preferencesData.preferences?.email),
@@ -91,7 +92,6 @@ async function cargarEstadoAPI(){
     act:notebook.actualizada ? formatBusinessDateTime(notebook.actualizada) : 'Recién',
     prestadoA:notebook.prestado_a || null, carro_id:notebook.carro_id
   }));
-  carros = carrosData.carros;
   reservas = reservationsData.reservations.map(reserva=>{
     const retiro = businessDateParts(reserva.retiro_at);
     return {
@@ -123,6 +123,7 @@ async function cargarEstadoAPI(){
       ...item, notebookId:item.notebook_id, fecha:formatBusinessDateTime(item.fecha)
     }));
   }
+  await cargarCarrosReserva();
   prestamosActivos = {};
   historialPrestamos = loansData.loans;
   loansData.loans.filter(loan=>loan.estado !== 'devuelto').forEach(loan=>{
@@ -439,6 +440,7 @@ function switchView(name){
   if(!target) return;
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
   target.classList.add('active');
+  document.getElementById('resCarro').required = false;
   document.querySelectorAll('.nav-item[data-view]').forEach(b=>b.classList.toggle('active', b.dataset.view===name));
 
   const [titleTpl, sub] = pageMeta[name];
@@ -449,7 +451,12 @@ function switchView(name){
 
   if(name==='inicio' && rolActivo!=='admin') renderMiActividad();
   if(name==='prestamos'){ renderPrestamoActivo(); renderHistorialPrestamos(); }
-  if(name==='reservas'){ renderReservas(); toggleProfesorUI(); }
+  if(name==='reservas'){
+    renderReservas();
+    toggleProfesorUI();
+    renderReservaCarros();
+    if(authToken) void cargarCarrosReserva();
+  }
   if(name==='tickets'){
     renderTicketsPropios();
     if(authToken) void refreshOwnTickets();
@@ -476,7 +483,7 @@ function switchView(name){
       lateReturnsInterval = setInterval(()=>void refreshAdminLateReturns(), 30000);
     }
   }
-  if(authToken && ['prestamos', 'reservas', 'admin-lotes'].includes(name)){
+  if(authToken && ['prestamos', 'admin-lotes'].includes(name)){
     void cargarEstadoAPI().then(renderAll).catch(error=>showToast(error.message, 'warn'));
   }
 }
@@ -622,17 +629,50 @@ function renderInventarioForms(){
     if(selected && carros.some(carro=>String(carro.numero)===selected)) select.value = selected;
     select.disabled = carros.length===0;
   }
-  renderReservaCarros();
 }
 
 function renderReservaCarros(){
   const select = document.getElementById('resCarro');
   if(!select) return;
+  const status = document.getElementById('resCarroStatus');
+  const retry = document.getElementById('resCarroRetry');
   const selected = select.value;
-  select.innerHTML = '<option value="">Seleccioná un carro</option>'
-    + carros.map(carro=>`<option value="${escapeHtml(carro.numero)}" ${Number(carro.disponibles)===0?'disabled':''}>Carro ${escapeHtml(carro.numero)} · ${escapeHtml(carro.disponibles ?? 0)} disponibles</option>`).join('');
-  if(selected && carros.some(carro=>String(carro.numero)===selected)) select.value = selected;
-  select.disabled = carros.length===0 || carros.every(carro=>Number(carro.disponibles)===0);
+  const options = carros.map(carro=>`<option value="${escapeHtml(carro.numero)}" ${Number(carro.disponibles)===0?'disabled':''}>Carro ${escapeHtml(carro.numero)} · ${escapeHtml(carro.disponibles ?? 0)} disponibles</option>`).join('');
+  if(reservationCarrosLoading){
+    select.innerHTML = '<option value="">Cargando carros...</option>';
+  }else if(reservationCarrosError){
+    select.innerHTML = '<option value="">No se pudieron cargar los carros</option>';
+  }else if(!carros.length){
+    select.innerHTML = '<option value="">No hay carros cargados</option>';
+  }else{
+    select.innerHTML = '<option value="">Seleccioná un carro</option>'+options;
+  }
+  if(selected && carros.some(carro=>String(carro.numero)===selected && Number(carro.disponibles)>0)) select.value = selected;
+  const hasAvailableCarros = !reservationCarrosLoading && !reservationCarrosError
+    && carros.some(carro=>Number(carro.disponibles)>0);
+  select.disabled = !hasAvailableCarros;
+  select.required = Boolean(hasAvailableCarros && document.getElementById('view-reservas')?.classList.contains('active'));
+  status.hidden = reservationCarrosLoading || (!reservationCarrosError && hasAvailableCarros);
+  status.textContent = reservationCarrosError || (!carros.length && !reservationCarrosLoading
+    ? 'No hay carros disponibles para reservar.' : 'Los carros disponibles actualmente tienen 0 notebooks.');
+  retry.hidden = !reservationCarrosError;
+}
+
+async function cargarCarrosReserva(){
+  reservationCarrosLoading = true;
+  reservationCarrosError = '';
+  renderReservaCarros();
+  try{
+    const data = await apiRequest('/api/carros');
+    if(!Array.isArray(data.carros)) throw new Error('La respuesta de carros no es válida.');
+    carros = data.carros;
+  }catch(error){
+    reservationCarrosError = error.message;
+  }finally{
+    reservationCarrosLoading = false;
+    renderReservaCarros();
+    actualizarControlesReserva();
+  }
 }
 
 function renderFallaNotebookOptions(){
@@ -848,24 +888,42 @@ function renderAdminInventario(){
       <td>${escapeHtml(nb.prestadoA || '—')}</td>
       <td>${escapeHtml(nb.act)}</td>
       <td>
-        <select class="btn btn-sm" aria-label="Cambiar estado de ${escapeHtml(nb.id)}" onchange="adminCambiarEstadoNotebook(${escapeHtml(JSON.stringify(nb.id))}, this.value)">
-          ${estadosNotebookManuales.includes(nb.estado) ? '' : '<option value="" selected disabled>—</option>'}
-          <option value="disponible" ${nb.estado==='disponible'?'selected':''}>Disponible</option>
-          <option value="mantenimiento" ${nb.estado==='mantenimiento'?'selected':''}>Mantenimiento</option>
-        </select>
+        ${renderAdminStateSelect(`Cambiar estado de ${escapeHtml(nb.id)}`, nb.estado, estadosNotebookManuales, 'notebook', nb.id)}
       </td>
     </tr>`).join('');
 }
 
-async function adminCambiarEstadoNotebook(id, nuevoEstado){
-  const nb = notebooks.find(n=>n.id===id);
-  if(!nb || !estadosNotebookManuales.includes(nuevoEstado) || nb.estado===nuevoEstado) return;
+function renderAdminStateSelect(label, current, states, kind, id){
+  const choices = states.map(state=>{
+    const stateLabel = kind==='ticket' ? ticketBadgeLabel[state] : badgeLabel[state];
+    return `<option value="${escapeHtml(state)}" ${current===state?'selected':''}>${escapeHtml(stateLabel)}</option>`;
+  }).join('');
+  return `<select class="btn btn-sm" aria-label="${escapeHtml(label)}" data-state-kind="${escapeHtml(kind)}"
+    data-state-id="${escapeHtml(id)}" data-current-state="${escapeHtml(current)}" onchange="adminChangeState(this)">
+    ${states.includes(current) ? '' : '<option value="" selected disabled>—</option>'}${choices}
+  </select>`;
+}
+
+async function adminChangeState(select){
+  const {stateKind:kind, stateId:id, currentState:previous} = select.dataset;
+  const next = select.value;
+  const allowed = kind==='ticket' ? Object.keys(ticketBadgeLabel) : estadosNotebookManuales;
+  if(!allowed.includes(next) || next===previous) return;
+  select.disabled = true;
   try{
-    await apiRequest('/api/notebooks/'+encodeURIComponent(id), {method:'PATCH', body:JSON.stringify({estado:nuevoEstado})});
+    const path = kind==='ticket'
+      ? '/api/tickets/'+encodeURIComponent(id)
+      : '/api/notebooks/'+encodeURIComponent(id);
+    await apiRequest(path, {method:'PATCH', body:JSON.stringify({estado:next})});
     await cargarEstadoAPI();
     renderAll();
-    showToast(`${id} actualizada a ${badgeLabel[nuevoEstado].toLowerCase()}.`, 'success');
-  }catch(error){ showToast(error.message, 'warn'); }
+    const label = kind==='ticket' ? ticketBadgeLabel[next] : badgeLabel[next];
+    showToast(`${kind==='ticket'?'Ticket':'Notebook'} ${id} actualizado a ${label.toLowerCase()}.`, 'success');
+  }catch(error){
+    select.value = previous;
+    select.disabled = false;
+    showToast(error.message, 'warn');
+  }
 }
 
 function filterAdminNotebooks(){
@@ -1286,32 +1344,12 @@ function renderAdminTickets(){
       <td class="mono">${escapeHtml(t.notebook)}</td>
       <td>${escapeHtml(t.motivo)}</td>
       <td>
-        <select class="btn btn-sm" aria-label="Estado del ticket ${escapeHtml(t.id)}" onchange="adminSetTicketEstado(this, ${escapeHtml(JSON.stringify(t.id))})">
-          ${Object.entries(ticketBadgeLabel).map(([estado, label])=>`<option value="${escapeHtml(estado)}" ${t.estado===estado?'selected':''}>${escapeHtml(label)}</option>`).join('')}
-        </select>
+        ${renderAdminStateSelect(`Cambiar estado del ticket ${escapeHtml(t.id)}`, t.estado, Object.keys(ticketBadgeLabel), 'ticket', t.id)}
       </td>
       <td>${equipoCol}</td>
     </tr>`;
   }).join('');
   updateAdminTicketsBadge();
-}
-
-async function adminSetTicketEstado(select, idx){
-  const t = tickets.find(ticket=>ticket.id===idx);
-  if(!t) return;
-  const nuevoEstado = select.value;
-  if(nuevoEstado===t.estado) return;
-  select.disabled = true;
-  try{
-    await apiRequest('/api/tickets/'+encodeURIComponent(idx), {method:'PATCH', body:JSON.stringify({estado:nuevoEstado})});
-    await cargarEstadoAPI();
-    renderAll();
-    showToast(`Ticket ${t.id} actualizado.`, 'success');
-  }catch(error){
-    select.value = t.estado;
-    select.disabled = false;
-    showToast(error.message, 'warn');
-  }
 }
 
 async function refreshOwnTickets(){
