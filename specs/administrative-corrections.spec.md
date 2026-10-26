@@ -1,8 +1,14 @@
-# Especificación propuesta: correcciones administrativas de NetMO
+# Especificación: correcciones administrativas de NetMO
 
 ## Estado
 
-Borrador para aprobación. No autoriza todavía cambios de implementación.
+Aprobada e implementada. Las pruebas unitarias y estáticas pasan; la suite de
+integración aislada queda pendiente de `TEST_DATABASE_URL`.
+
+Esta especificación sustituye los comportamientos anteriores de aprobación y
+cantidades de reservas y de metadatos de resolución de tickets donde contradiga
+`functional-corrections.spec.md`, `users-reservations-tickets.spec.md` o la
+documentación histórica. Los demás alcances de esos documentos no cambian.
 
 ## Objetivo
 

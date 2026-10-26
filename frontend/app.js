@@ -21,6 +21,7 @@ let notificacionesDevolucion = [];
 let historialTardanzas = [];
 let reservas = [];
 let tickets = [];
+let reservationSubmitting = false;
 let lateReturnsInterval = null;
 let pendingRestoreBackup = null;
 
@@ -397,7 +398,7 @@ function toggleLoteBlock(){
   document.getElementById('resCantidadWrap').style.display = checked ? 'none' : 'flex';
   document.getElementById('resCursoAnio').required = rolActivo==='profesor';
   document.getElementById('resCursoDivision').required = rolActivo==='profesor';
-  document.getElementById('resSubmitBtn').textContent = checked ? 'Enviar solicitud de lote' : 'Confirmar reserva';
+  document.getElementById('resSubmitBtn').textContent = checked ? 'Enviar solicitud de lote' : 'Enviar solicitud';
   actualizarControlesReserva();
 }
 
@@ -418,18 +419,21 @@ function actualizarControlesReserva(){
   const esProfesor = rolActivo==='profesor';
   const equiposDisponibles = notebooks.filter(nb=>nb.estado==='disponible').length;
   const bloqueado = tieneEquiposPendientes(currentUser.legajo);
-  const maxIndividual = esProfesor ? Math.max(1, equiposDisponibles) : 1;
+  const maxIndividual = esProfesor ? Math.max(1, Math.min(2, equiposDisponibles)) : 1;
   cantidadInput.max = String(maxIndividual);
   cantidadInput.value = esProfesor ? Math.min(Math.max(Number(cantidadInput.value)||1, 1), maxIndividual) : 1;
-  loteCantidadInput.max = String(Math.min(40, equiposDisponibles));
-  loteCantidadInput.value = Math.min(Math.max(Number(loteCantidadInput.value)||3, 3), Math.max(3, Math.min(40, equiposDisponibles)));
+  const maxLote = Math.min(10, equiposDisponibles);
+  loteCantidadInput.max = String(Math.max(3, maxLote));
+  loteCantidadInput.value = Math.min(Math.max(Number(loteCantidadInput.value)||3, 3), Math.max(3, maxLote));
 
   cantidadInput.disabled = !esProfesor;
   document.getElementById('loteToggle').disabled = bloqueado || equiposDisponibles < 3;
   loteCantidadInput.disabled = equiposDisponibles < 3;
   document.getElementById('resCursoAnio').disabled = false;
   document.getElementById('resCursoDivision').disabled = false;
-  submitButton.disabled = bloqueado || (document.getElementById('loteToggle').checked ? equiposDisponibles < 3 : equiposDisponibles < 1);
+  const cantidadSolicitada = document.getElementById('loteToggle').checked
+    ? Number(loteCantidadInput.value) : Number(cantidadInput.value);
+  submitButton.disabled = reservationSubmitting || bloqueado || equiposDisponibles < cantidadSolicitada;
 }
 
 /* ======================================================================
@@ -1087,6 +1091,7 @@ function validarFechaHora(fechaStr, horaStr){
 }
 
 async function crearReservaAPI(e){
+  if(reservationSubmitting) return;
   const fecha = document.getElementById('resFecha').value;
   const hora = document.getElementById('resHora').value;
   const esLote = rolActivo==='profesor' && document.getElementById('loteToggle').checked;
@@ -1120,6 +1125,15 @@ async function crearReservaAPI(e){
     showToast(errorBox.textContent, 'warn');
     return;
   }
+  const cantidadValida = esLote ? cantidad >= 3 && cantidad <= 10
+    : cantidad >= 1 && cantidad <= (rolActivo==='profesor' ? 2 : 1);
+  if(!Number.isInteger(cantidad) || !cantidadValida){
+    errorBox.textContent = esLote ? 'Un lote debe incluir entre 3 y 10 notebooks.' : 'Una solicitud individual admite hasta 2 notebooks.';
+    showToast(errorBox.textContent, 'warn');
+    return;
+  }
+  reservationSubmitting = true;
+  actualizarControlesReserva();
   try{
     await apiRequest('/api/reservations', {method:'POST', body:JSON.stringify({
       tipo:esLote ? 'lote' : 'individual', cantidad, curso, carro, retiroAt:`${fecha}T${hora}:00`, motivo
@@ -1129,10 +1143,13 @@ async function crearReservaAPI(e){
     toggleLoteBlock();
     await cargarEstadoAPI();
     renderAll();
-    showToast(esLote ? 'Solicitud de lote enviada.' : 'Reserva confirmada.', 'success');
+    showToast(esLote ? 'Solicitud de lote enviada a aprobación.' : 'Solicitud enviada a aprobación.', 'success');
   }catch(error){
     errorBox.textContent = error.message;
     showToast(error.message, 'warn');
+  }finally{
+    reservationSubmitting = false;
+    actualizarControlesReserva();
   }
 }
 
@@ -1200,8 +1217,8 @@ function renderLotes(){
     retirada:'Retirada', rechazada:'Rechazada', cancelada:'Cancelada'
   };
   wrap.innerHTML = [...reservas].sort((a,b)=>b.fecha.localeCompare(a.fecha)).map(r=>{
-    const canApprove = r.tipo==='lote' && r.estado==='pendiente_aprobacion';
-    const canReject = r.tipo==='lote' && ['pendiente_aprobacion','aprobada'].includes(r.estado);
+    const canApprove = r.estado==='pendiente_aprobacion';
+    const canReject = ['pendiente_aprobacion','aprobada'].includes(r.estado);
     const canCheckout = ['confirmada','aprobada'].includes(r.estado);
     const heading = r.curso ? `${r.curso} · ${r.cantidad} equipos` : `${r.cantidad} · ${r.tipo==='lote'?'Lote':'Individual'}`;
     return `<div class="action-card" style="cursor:default;margin-bottom:.8rem;">
@@ -1211,21 +1228,21 @@ function renderLotes(){
         <p>${escapeHtml(r.ownerNombre)} · ${escapeHtml(formatFecha(r.fecha))} ${escapeHtml(r.hora)} · ${escapeHtml(r.motivo || 'Sin especificar')}</p>
       </div>
       <span class="badge">${escapeHtml(labels[r.estado] || r.estado)}</span>
-      ${canApprove?`<button class="btn btn-sm btn-success-outline" onclick="aprobarLote(${escapeHtml(JSON.stringify(r.id))})">Aprobar</button>`:''}
-      ${canReject?`<button class="btn btn-sm btn-danger-outline" onclick="pedirRechazoLote(${escapeHtml(JSON.stringify(r.id))})">Rechazar</button>`:''}
+      ${canApprove?`<button class="btn btn-sm btn-success-outline" onclick="aprobarSolicitud(${escapeHtml(JSON.stringify(r.id))})">Aprobar</button>`:''}
+      ${canReject?`<button class="btn btn-sm btn-danger-outline" onclick="pedirRechazoSolicitud(${escapeHtml(JSON.stringify(r.id))})">Rechazar</button>`:''}
       ${canCheckout?`<button class="btn btn-sm btn-primary" onclick="registrarRetiro(${escapeHtml(JSON.stringify(r.id))})">Registrar retiro</button>`:''}
     </div>`;
   }).join('');
 }
 
-async function aprobarLote(id){
+async function aprobarSolicitud(id){
   const r = reservas.find(x=>x.id===id);
-  if(!r || r.tipo!=='lote') return;
+  if(!r || r.estado!=='pendiente_aprobacion') return;
   try{
     await apiRequest(`/api/admin/reservations/${id}/approve`, {method:'POST'});
     await cargarEstadoAPI();
     renderAll();
-    showToast(`Lote de ${r.curso} aprobado.`, 'success');
+    showToast('Solicitud aprobada.', 'success');
   }catch(error){ showToast(error.message, 'warn'); }
 }
 
@@ -1241,16 +1258,16 @@ async function registrarRetiro(id){
 }
 
 let pendingRejectId = null;
-function pedirRechazoLote(id){
+function pedirRechazoSolicitud(id){
   const r = reservas.find(x=>x.id===id);
   if(!r) return;
   pendingRejectId = id;
-  document.getElementById('rejectLoteText').textContent = `¿Rechazar la solicitud de lote de ${r.curso} (${r.ownerNombre})?`;
-  document.getElementById('rejectLoteConfirmBtn').onclick = confirmarRechazoLote;
+  document.getElementById('rejectLoteText').textContent = `¿Rechazar la solicitud de ${r.ownerNombre}?`;
+  document.getElementById('rejectLoteConfirmBtn').onclick = confirmarRechazoSolicitud;
   openModal('rejectLoteModal');
 }
 
-async function confirmarRechazoLote(){
+async function confirmarRechazoSolicitud(){
   const r = reservas.find(x=>x.id===pendingRejectId);
   if(!r) return;
   try{
@@ -1258,7 +1275,7 @@ async function confirmarRechazoLote(){
     await cargarEstadoAPI();
     renderAll();
     closeModal('rejectLoteModal');
-    showToast('Solicitud de lote rechazada.', 'warn');
+    showToast('Solicitud rechazada.', 'warn');
   }catch(error){ showToast(error.message, 'warn'); }
 }
 

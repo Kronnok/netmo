@@ -61,7 +61,8 @@ function reservationPayload(body, user) {
   if (!Number.isInteger(quantity) || quantity < 1 || quantity > 40) throw new AppError('Cantidad inválida', 400);
   if (user.rol === 'alumno' && quantity !== 1) throw new AppError('Los alumnos solo pueden pedir una notebook', 400);
   if (type === 'lote' && user.rol !== 'profesor') throw new AppError('Solo profesores pueden solicitar lotes', 403);
-  if (type === 'lote' && quantity < 3) throw new AppError('Un lote debe tener al menos 3 notebooks', 400);
+  if (type === 'lote' && (quantity < 3 || quantity > 10)) throw new AppError('Un lote debe tener entre 3 y 10 notebooks', 400);
+  if (type === 'individual' && quantity > 2) throw new AppError('Una reserva individual admite como máximo 2 notebooks', 400);
   const curso = user.rol === 'profesor'
     ? courseDivision(body.curso)
     : null;
@@ -82,7 +83,7 @@ function reservationPayload(body, user) {
     cantidad: quantity,
     retiroAt,
     motivo,
-    estado: type === 'lote' ? 'pendiente_aprobacion' : 'confirmada'
+    estado: 'pendiente_aprobacion'
   };
 }
 
@@ -255,6 +256,7 @@ const actions = {
   async createReservation(body, user) {
     const reservation = reservationPayload(body, user);
     const result = await db.transaction(async (client) => {
+      await client.query('SELECT id FROM users WHERE id = $1 FOR UPDATE', [user.id]);
       const pending = await client.query(`SELECT 1 FROM loans WHERE user_id = $1 AND estado <> 'devuelto'
         UNION ALL SELECT 1 FROM reservations WHERE owner_id = $1 AND estado IN ('confirmada', 'pendiente_aprobacion', 'aprobada') LIMIT 1`, [user.id]);
       if (pending.rowCount) throw new AppError('No podés solicitar equipos hasta completar la entrega pendiente', 409);
@@ -275,9 +277,6 @@ const actions = {
       }
       return { reservation: inserted.rows[0] };
     });
-    if (result.reservation.estado === 'confirmada') {
-      await notifyByEmail(user.id, 'Reserva confirmada', '<p>Tu reserva de notebook fue confirmada.</p>');
-    }
     return result;
   },
   async cancelReservation(_body, user, { code }) {
@@ -302,8 +301,8 @@ const actions = {
     requireAdmin(user, 'Solo admin puede aprobar reservas');
     const result = await db.transaction(async (client) => {
       const reservation = await client.query(`SELECT id, owner_id, cantidad, carro FROM reservations
-        WHERE id = $1 AND tipo = 'lote' AND estado = 'pendiente_aprobacion' FOR UPDATE`, [id]);
-      if (!reservation.rowCount) throw new AppError('Solicitud de lote no encontrada', 404);
+        WHERE id = $1 AND estado = 'pendiente_aprobacion' FOR UPDATE`, [id]);
+      if (!reservation.rowCount) throw new AppError('Solicitud no encontrada o no pendiente de aprobación', 404);
       const carroId = reservationCarroId(reservation.rows[0].carro);
       await client.query(`UPDATE reservation_notebooks rn SET active = FALSE
         FROM notebooks n WHERE rn.reservation_id = $1 AND rn.active AND n.id = rn.notebook_id
@@ -329,7 +328,7 @@ const actions = {
         }
       }
       await client.query("UPDATE reservations SET estado = 'aprobada' WHERE id = $1", [id]);
-      return { message: 'Lote aprobado', ownerId: reservation.rows[0].owner_id };
+      return { message: 'Solicitud aprobada', ownerId: reservation.rows[0].owner_id };
     });
     await notifyByEmail(result.ownerId, 'Reserva confirmada', '<p>Tu solicitud de reserva fue aprobada.</p>');
     return { message: result.message };
@@ -338,10 +337,10 @@ const actions = {
     requireAdmin(user, 'Solo admin puede rechazar reservas');
     return db.transaction(async (client) => {
       const reservation = await client.query(`UPDATE reservations SET estado = 'rechazada'
-        WHERE id = $1 AND tipo = 'lote' AND estado IN ('pendiente_aprobacion', 'aprobada') RETURNING id`, [id]);
-      if (!reservation.rowCount) throw new AppError('Solicitud de lote no encontrada o no rechazable', 404);
+        WHERE id = $1 AND estado IN ('pendiente_aprobacion', 'aprobada') RETURNING id`, [id]);
+      if (!reservation.rowCount) throw new AppError('Solicitud no encontrada o no rechazable', 404);
       await client.query('UPDATE reservation_notebooks SET active = FALSE WHERE reservation_id = $1 AND active', [id]);
-      return { message: 'Lote rechazado' };
+      return { message: 'Solicitud rechazada' };
     });
   },
   async checkoutReservation(_body, user, { id }) {

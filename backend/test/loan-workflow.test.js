@@ -41,6 +41,7 @@ test('flujo API reserva, retiro, préstamo, devolución e historial', async () =
 
   const execute = async (sql, params = []) => {
     const statement = sql.replace(/\s+/g, ' ').trim();
+    if (statement.startsWith('SELECT id FROM users WHERE id =')) return { rowCount: 1, rows: [{ id: user.id }] };
     if (statement.startsWith('SELECT 1 FROM loans WHERE user_id')) return { rowCount: 0, rows: [] };
     if (statement.startsWith('SELECT numero FROM carros WHERE numero =')) return { rowCount: 1, rows: [{ numero: params[0] }] };
     if (statement.startsWith('SELECT n.id FROM notebooks n')) return { rowCount: notebook.estado === 'disponible' ? 1 : 0, rows: notebook.estado === 'disponible' ? [{ id: notebook.id }] : [] };
