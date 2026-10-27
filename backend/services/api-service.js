@@ -473,14 +473,14 @@ const actions = {
     return db.transaction(async (client) => {
       const result = await client.query(`UPDATE tickets SET estado = $1::ticket_status,
         resolved_at = CASE WHEN $2::text = 'resuelto' THEN now() ELSE NULL END,
-        resolved_by = CASE WHEN $2::text = 'resuelto' THEN $3 ELSE NULL END
-        WHERE codigo = $4 RETURNING codigo AS id, estado, notebook_id`,
+        resolved_by = CASE WHEN $2::text = 'resuelto' THEN $3::bigint ELSE NULL END
+        WHERE codigo = $4::text RETURNING codigo AS id, estado, notebook_id`,
       [body.estado, body.estado, user.id, code]);
       if (!result.rowCount) throw new AppError('Ticket no encontrado', 404);
       if (body.estado === 'resuelto' && result.rows[0].notebook_id) {
         await client.query(`UPDATE notebooks SET estado = 'disponible',
           ubicacion = COALESCE('Carro ' || carro_id::text, ubicacion), prestado_a = NULL, updated_at = now()
-          WHERE id = $1 AND estado = 'mantenimiento'`, [result.rows[0].notebook_id]);
+          WHERE id = $1::bigint AND estado = 'mantenimiento'`, [result.rows[0].notebook_id]);
       }
       return { ticket: { id: result.rows[0].id, estado: result.rows[0].estado } };
     });
