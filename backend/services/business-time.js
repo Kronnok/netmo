@@ -59,6 +59,25 @@ function parseBusinessDateTime(value) {
   return result;
 }
 
+function loanDueAt(retiradaAt) {
+  const retirada = new Date(retiradaAt);
+  if (Number.isNaN(retirada.getTime())) throw new TypeError('La fecha de retiro no es válida');
+  const { year, month, day } = businessTimeParts(retirada);
+  const cierre = parseBusinessDateTime(`${year}-${month}-${day}T17:30`);
+  if (!cierre) throw new Error('No se pudo calcular el cierre del día hábil');
+  return new Date(Math.min(retirada.getTime() + 8 * 60 * 60 * 1000, cierre.getTime()));
+}
+
+function returnTimeError(value, now = new Date()) {
+  const message = 'La hora prevista debe ser posterior a la hora actual y no superar las 17:30 de hoy (Buenos Aires)';
+  if (typeof value !== 'string' || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value)) return message;
+  const { year, month, day } = businessTimeParts(now);
+  const requested = parseBusinessDateTime(`${year}-${month}-${day}T${value}`);
+  const minutes = Number(value.slice(0, 2)) * 60 + Number(value.slice(3, 5));
+  if (!requested || requested.getTime() <= now.getTime() || minutes > 17 * 60 + 30) return message;
+  return null;
+}
+
 function reservationTimeError(reservationDate, now = new Date()) {
   if (reservationDate.getTime() <= now.getTime()) return 'La fecha y hora de reserva deben ser futuras';
   const requested = businessTimeParts(reservationDate);
@@ -73,4 +92,11 @@ function reservationTimeError(reservationDate, now = new Date()) {
   return null;
 }
 
-module.exports = { TIME_ZONE, businessTimeParts, parseBusinessDateTime, reservationTimeError };
+module.exports = {
+  TIME_ZONE,
+  businessTimeParts,
+  loanDueAt,
+  parseBusinessDateTime,
+  reservationTimeError,
+  returnTimeError
+};

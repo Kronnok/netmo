@@ -31,7 +31,7 @@ function createValidBackup() {
     'numero', 'codigo', 'estado', 'ubicacion', 'carro_id', 'prestado_a', 'owner_id', 'tipo',
     'carro', 'curso', 'cantidad', 'retiro_at', 'motivo', 'reservation_id', 'notebook_id',
     'active', 'vence_at', 'retirada_at', 'devuelta_at', 'loan_id', 'solicitado_at',
-    'confirmado_at', 'confirmado_por', 'descripcion', 'resolved_at', 'resolved_by',
+    'hora_prevista', 'confirmado_at', 'confirmado_por', 'descripcion', 'resolved_at', 'resolved_by',
     'returned_at', 'due_at'
   ])]));
   return { data, columns, available: new Set(tableNames) };
@@ -87,6 +87,20 @@ test('valida filas, enum y al menos un admin', () => {
   assert.throws(() => backupService.validateRows(backup, backup.available, backup.columns), /Tipo o valor inválido/);
   backup.data.users[0].rol = 'alumno';
   assert.throws(() => backupService.validateRows(backup, backup.available, backup.columns), /al menos un administrador/);
+});
+
+test('el backup admite hora prevista nula en devoluciones históricas', () => {
+  const backup = createValidBackup();
+  backup.data.notebooks = [{ id: '10', codigo: 'NB-010', estado: 'disponible', ubicacion: 'Carro 1' }];
+  backup.data.loans = [{
+    id: '9', notebook_id: '10', user_id: '1', vence_at: '2026-10-25T17:30:00.000Z', estado: 'activo'
+  }];
+  backup.data.returns = [{ id: '7', loan_id: '9', hora_prevista: null }];
+  assert.doesNotThrow(() => backupService.validateRows(
+    { data: backup.data },
+    backup.available,
+    backup.columns
+  ));
 });
 
 test('rechaza referencias inconsistentes en datos de backup', () => {

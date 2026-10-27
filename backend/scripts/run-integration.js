@@ -4,6 +4,7 @@ const http = require('node:http');
 const net = require('node:net');
 const path = require('node:path');
 const { testDatabaseError } = require('./database-safety');
+const { businessTimeParts, loanDueAt } = require('../services/business-time');
 
 const backend = path.resolve(__dirname, '..');
 const root = path.resolve(backend, '..');
@@ -213,6 +214,13 @@ function nextBusinessTime() {
   throw new Error('No se encontró un horario hábil futuro.');
 }
 
+function nextReturnHour() {
+  const { hour, minute } = businessTimeParts(new Date());
+  const total = Number(hour) * 60 + Number(minute) + 2;
+  if (total > 17 * 60 + 30) return null;
+  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+}
+
 async function adminPermissions(admin, adminUserId, professor, student) {
   const { createToken, TOKEN_LIFETIME_SECONDS } = require('../services/session-token');
   const expired = createToken(adminUserId, fakeJwtSecret, Date.now() - (TOKEN_LIFETIME_SECONDS + 1) * 1000);
@@ -343,16 +351,93 @@ async function runFlows(users) {
     assert.equal(loans.status, 200);
     assert.equal(loans.payload.loans.length, 1);
     const id = loans.payload.loans[0].id;
-    assert.equal((await request('POST', `/api/loans/${id}/return`, {}, tokens.student)).status, 202);
+    const loan = loans.payload.loans[0];
+    assert.equal(new Date(loan.vence_at).getTime(), loanDueAt(new Date(loan.retirada_at)).getTime());
+    const missingTime = await request('POST', `/api/loans/${id}/return`, {}, tokens.student);
+    assert.equal(missingTime.status, 400);
+    assert.match(missingTime.payload.error, /17:30/);
+    const afterClosing = await request('POST', `/api/loans/${id}/return`, { horaPrevista: '17:31' }, tokens.student);
+    assert.equal(afterClosing.status, 400);
+    assert.match(afterClosing.payload.error, /17:30/);
+    const horaPrevista = nextReturnHour();
+    if (!horaPrevista) {
+      const invalid = await request('POST', `/api/loans/${id}/return`, { horaPrevista: '17:30' }, tokens.student);
+      assert.equal(invalid.status, 400);
+      assert.match(invalid.payload.error, /17:30/);
+      return id;
+    }
+    const requested = await request('POST', `/api/loans/${id}/return`, { horaPrevista }, tokens.student);
+    assert.equal(requested.status, 202);
+    const pending = await pool.query(`SELECT l.estado AS loan_estado, n.estado AS notebook_estado,
+        n.prestado_a, r.hora_prevista
+      FROM loans l JOIN notebooks n ON n.id = l.notebook_id
+      JOIN returns r ON r.loan_id = l.id WHERE l.id = $1`, [id]);
+    assert.equal(pending.rows[0].loan_estado, 'devolucion_pendiente');
+    assert.equal(pending.rows[0].notebook_estado, 'pendiente_devolucion');
+    assert.equal(String(pending.rows[0].prestado_a), users.student.id);
+    assert.equal(String(pending.rows[0].hora_prevista).slice(0, 5), horaPrevista);
+    const inventory = await request('GET', '/api/notebooks', undefined, tokens.admin);
+    assert.ok(inventory.payload.notebooks.some((notebook) => notebook.id === loan.notebook
+      && notebook.estado === 'pendiente_devolucion'));
     const returns = await request('GET', '/api/admin/returns', undefined, tokens.admin);
     assert.equal(returns.status, 200);
+    assert.equal(returns.payload.returns[0].hora_prevista.slice(0, 5), horaPrevista);
     const returnRow = await pool.query("SELECT id FROM returns WHERE loan_id = $1", [id]);
     assert.equal(returnRow.rowCount, 1);
+    await pool.query("UPDATE loans SET vence_at = now() - interval '1 minute' WHERE id = $1", [id]);
     assert.equal((await request('POST', `/api/admin/returns/${returnRow.rows[0].id}/confirm`, {}, tokens.admin)).status, 200);
     loans = await request('GET', '/api/loans', undefined, tokens.student);
     assert.equal(loans.payload.loans[0].estado, 'devuelto');
     assert.ok(loans.payload.loans[0].devuelta_at);
+    assert.equal(loans.payload.loans[0].hora_prevista.slice(0, 5), horaPrevista);
+    const confirmedNotebook = await pool.query(`SELECT n.estado, n.prestado_a FROM loans l
+      JOIN notebooks n ON n.id = l.notebook_id WHERE l.id = $1`, [id]);
+    assert.equal(confirmedNotebook.rows[0].estado, 'disponible');
+    assert.equal(confirmedNotebook.rows[0].prestado_a, null);
+    const lateReturn = await pool.query('SELECT id FROM late_returns WHERE loan_id = $1', [id]);
+    assert.equal(lateReturn.rowCount, 1);
     return id;
+  });
+
+  await report('inventario expone todos los estados físicos y filtra reservas sin ocultarlos', async () => {
+    const inventoryStates = [
+      ['NB-001', 'disponible', null],
+      ['NB-002', 'prestada', users.student.id],
+      ['NB-003', 'mantenimiento', null],
+      ['NB-004', 'pendiente_devolucion', users.student.id]
+    ];
+    const codes = inventoryStates.map(([code]) => code);
+    const previous = await pool.query(`SELECT codigo, estado, prestado_a FROM notebooks WHERE codigo = ANY($1::text[])`, [codes]);
+    const loan = await pool.query('SELECT notebook_id FROM loans WHERE id = $1', [loanId]);
+    const linkedNotebook = await pool.query(`SELECT rn.reservation_id, n.id, n.codigo, n.estado, n.prestado_a
+      FROM loans l JOIN notebooks n ON n.id = l.notebook_id
+      JOIN reservation_notebooks rn ON rn.notebook_id = n.id WHERE l.id = $1`, [loanId]);
+    try {
+      for (const [code, estado, ownerId] of inventoryStates) {
+        await pool.query('UPDATE notebooks SET estado = $1::notebook_status, prestado_a = $2::bigint WHERE codigo = $3',
+          [estado, ownerId, code]);
+      }
+      await pool.query('UPDATE reservation_notebooks SET active = TRUE WHERE reservation_id = $1 AND notebook_id = $2',
+        [linkedNotebook.rows[0].reservation_id, loan.rows[0].notebook_id]);
+      await pool.query(`UPDATE notebooks SET estado = 'pendiente_devolucion', prestado_a = $2 WHERE id = $1`,
+        [linkedNotebook.rows[0].id, users.student.id]);
+      const response = await request('GET', '/api/notebooks', undefined, tokens.admin);
+      assert.equal(response.status, 200);
+      for (const [code, estado] of inventoryStates) {
+        assert.ok(response.payload.notebooks.some((notebook) => notebook.id === code && notebook.estado === estado));
+      }
+      assert.ok(response.payload.notebooks.some((notebook) => notebook.id === linkedNotebook.rows[0].codigo
+        && notebook.estado === 'pendiente_devolucion'));
+    } finally {
+      await pool.query('UPDATE reservation_notebooks SET active = FALSE WHERE reservation_id = $1 AND notebook_id = $2',
+        [linkedNotebook.rows[0].reservation_id, linkedNotebook.rows[0].id]);
+      await pool.query(`UPDATE notebooks SET estado = $1::notebook_status, prestado_a = $2
+        WHERE id = $3`, [linkedNotebook.rows[0].estado, linkedNotebook.rows[0].prestado_a, linkedNotebook.rows[0].id]);
+      for (const row of previous.rows) {
+        await pool.query('UPDATE notebooks SET estado = $1::notebook_status, prestado_a = $2 WHERE codigo = $3',
+          [row.estado, row.prestado_a, row.codigo]);
+      }
+    }
   });
 
   await report('ticket, resolución y estado del inventario', async () => {
@@ -369,6 +454,50 @@ async function runFlows(users) {
     assert.equal((await request('PATCH', `/api/tickets/${encodeURIComponent(created.payload.ticket.id)}`, { estado: 'resuelto' }, tokens.admin)).status, 200);
     const restored = await request('GET', '/api/notebooks', undefined, tokens.admin);
     assert.ok(restored.payload.notebooks.some((notebook) => notebook.id === 'NB-001' && notebook.estado === 'disponible'));
+  });
+
+  await report('progreso y resolución respetan préstamos y otros tickets activos', async () => {
+    async function createTicket(code, notebookId) {
+      await pool.query(`INSERT INTO tickets (codigo, notebook_id, owner_id, motivo, descripcion)
+        VALUES ($1, $2, $3, 'Prueba', 'Transición de estado de notebook')`, [code, notebookId, users.student.id]);
+    }
+    const available = await pool.query("SELECT id FROM notebooks WHERE codigo = 'NB-001'");
+    const shared = await pool.query("SELECT id FROM notebooks WHERE codigo = 'NB-004'");
+    await pool.query("UPDATE notebooks SET estado = 'disponible', prestado_a = NULL WHERE id = $1", [available.rows[0].id]);
+    await createTicket('TCK-TRANSITION-1', available.rows[0].id);
+    const first = await request('PATCH', '/api/tickets/TCK-TRANSITION-1', { estado: 'progreso' }, tokens.admin);
+    assert.equal(first.status, 200);
+    let status = await pool.query('SELECT estado FROM notebooks WHERE id = $1', [available.rows[0].id]);
+    assert.equal(status.rows[0].estado, 'mantenimiento');
+
+    await createTicket('TCK-TRANSITION-2', available.rows[0].id);
+    await createTicket('TCK-TRANSITION-3', available.rows[0].id);
+    await pool.query("UPDATE tickets SET estado = 'progreso' WHERE codigo = 'TCK-TRANSITION-3'");
+    assert.equal((await request('PATCH', '/api/tickets/TCK-TRANSITION-1', { estado: 'resuelto' }, tokens.admin)).status, 200);
+    status = await pool.query('SELECT estado FROM notebooks WHERE id = $1', [available.rows[0].id]);
+    assert.equal(status.rows[0].estado, 'mantenimiento');
+    assert.equal((await request('PATCH', '/api/tickets/TCK-TRANSITION-2', { estado: 'resuelto' }, tokens.admin)).status, 200);
+    status = await pool.query('SELECT estado FROM notebooks WHERE id = $1', [available.rows[0].id]);
+    assert.equal(status.rows[0].estado, 'mantenimiento');
+    assert.equal((await request('PATCH', '/api/tickets/TCK-TRANSITION-3', { estado: 'resuelto' }, tokens.admin)).status, 200);
+    status = await pool.query('SELECT estado FROM notebooks WHERE id = $1', [available.rows[0].id]);
+    assert.equal(status.rows[0].estado, 'disponible');
+
+    await pool.query("UPDATE notebooks SET estado = 'mantenimiento' WHERE id = $1", [available.rows[0].id]);
+    assert.equal((await request('PATCH', '/api/tickets/TCK-TRANSITION-1', { estado: 'abierto' }, tokens.admin)).status, 200);
+    status = await pool.query('SELECT estado FROM notebooks WHERE id = $1', [available.rows[0].id]);
+    assert.equal(status.rows[0].estado, 'mantenimiento');
+
+    for (const estado of ['prestada', 'pendiente_devolucion']) {
+      await pool.query('UPDATE notebooks SET estado = $1::notebook_status, prestado_a = $2 WHERE id = $3',
+        [estado, users.student.id, shared.rows[0].id]);
+      const code = `TCK-STATE-${estado}`;
+      await createTicket(code, shared.rows[0].id);
+      assert.equal((await request('PATCH', `/api/tickets/${code}`, { estado: 'progreso' }, tokens.admin)).status, 200);
+      status = await pool.query('SELECT estado, prestado_a FROM notebooks WHERE id = $1', [shared.rows[0].id]);
+      assert.equal(status.rows[0].estado, estado);
+      assert.equal(String(status.rows[0].prestado_a), users.student.id);
+    }
   });
 
   await report('cambio de estado de tickets con todos los estados de notebook', async () => {

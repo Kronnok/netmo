@@ -155,6 +155,7 @@ CREATE UNIQUE INDEX one_open_loan_per_notebook ON loans(notebook_id) WHERE estad
 CREATE TABLE returns (
   id BIGSERIAL PRIMARY KEY,
   loan_id BIGINT NOT NULL UNIQUE REFERENCES loans(id),
+  hora_prevista TIME,
   solicitado_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   confirmado_at TIMESTAMPTZ,
   confirmado_por BIGINT REFERENCES users(id),

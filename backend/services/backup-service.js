@@ -60,7 +60,7 @@ const NULLABLE_FIELDS = new Set([
   'notebooks.carro_id', 'notebooks.prestado_a',
   'reservations.carro', 'reservations.curso',
   'loans.reservation_id', 'loans.curso', 'loans.devuelta_at',
-  'returns.confirmado_at', 'returns.confirmado_por',
+  'returns.hora_prevista', 'returns.confirmado_at', 'returns.confirmado_por',
   'tickets.notebook_id', 'tickets.resolved_at', 'tickets.resolved_by',
   'audit_log.user_id'
 ]);

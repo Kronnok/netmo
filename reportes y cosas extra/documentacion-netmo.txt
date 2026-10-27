@@ -63,8 +63,11 @@ visual y solo lo puede realizar un administrador. "Mis tickets" vuelve a
 consultar la API al entrar y despues de crear un reporte.
 
 Al resolver se guardan el usuario administrador y la fecha. La notebook
-relacionada vuelve a disponible solo si estaba en mantenimiento. Al reabrir,
-se limpian los datos de resolucion y la notebook no cambia automaticamente.
+relacionada pasa a mantenimiento al iniciar el trabajo solo si estaba
+disponible; si estaba prestada o pendiente de devolucion no se toca. Al resolver
+vuelve a disponible solo si estaba en mantenimiento y no quedan otros tickets
+abiertos o en progreso para ella. Al reabrir, se limpian los datos de resolucion
+y la notebook no cambia automaticamente.
 La migracion `007-ticket-resolution-metadata.sql` incorpora esas columnas a
 bases ya inicializadas sin reescribir tickets existentes.
 
@@ -165,7 +168,9 @@ Al cambiar el estado tambien se actualizan los contadores generales y algunos
 datos relacionados, como ubicacion y usuario responsable.
 
 "Reservada" no es un estado manual: se muestra solo cuando existe una reserva
-activa y no se puede seleccionar desde Inventario.
+activa y no se puede seleccionar desde Inventario. Los filtros incluyen todos
+los estados visibles y una reserva activa no oculta un estado fisico distinto
+de disponible.
 
 
 3. ESTRUCTURA DE LA BASE DE DATOS
@@ -262,7 +267,8 @@ La tabla loans registra:
 - Usuario responsable.
 - Reserva relacionada, si existe.
 - Fecha de retiro.
-- Fecha limite de devolucion.
+- Fecha limite de devolucion: en prestamos nuevos, el menor entre ocho horas
+  desde el retiro y las 17:30 del mismo dia local.
 - Fecha efectiva de devolucion.
 - Estado del prestamo.
 
@@ -274,6 +280,7 @@ retirar varias notebooks mediante un lote. La unicidad se aplica por notebook.
 3.6 Devoluciones
 
 La tabla returns representa la confirmacion de entrega fisica.
+La columna nullable hora_prevista almacena la hora acordada para el mismo dia.
 
 El flujo es:
 
@@ -284,6 +291,17 @@ El flujo es:
 5. El admin confirma la recepcion.
 6. El prestamo pasa a devuelto.
 7. La notebook pasa a disponible.
+
+Al informar la devolucion se debe elegir una hora prevista del mismo dia, en
+America/Argentina/Buenos_Aires, posterior a la hora actual y hasta las 17:30.
+La hora queda guardada en returns.hora_prevista y se muestra en "Mis prestamos"
+y en el panel administrativo. Mientras la devolucion esta pendiente se conserva
+prestado_a; al confirmar se libera.
+
+Los prestamos nuevos vencen al menor entre ocho horas desde el retiro y las
+17:30 del mismo dia local. Los vencimientos existentes no se recalculan. Una
+devolucion tardia se determina al confirmar la entrega comparando devuelta_at
+con el vence_at guardado.
 
 La confirmacion se realiza dentro de una transaccion para evitar estados
 incompletos.

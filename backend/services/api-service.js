@@ -1,6 +1,7 @@
 const crypto = require('node:crypto');
 const db = require('../data/database');
 const { AppError } = require('../errors');
+const { loanDueAt, returnTimeError } = require('./business-time');
 const { parseBusinessDateTime, reservationTimeError } = require('./business-time');
 const {
   requiredText,
@@ -144,9 +145,11 @@ const actions = {
   },
   async notebooks() {
     const result = await db.query(`SELECT codigo AS id,
-      CASE WHEN EXISTS (SELECT 1 FROM reservation_notebooks rn WHERE rn.notebook_id = n.id AND rn.active)
+      CASE WHEN n.estado = 'disponible'
+        AND EXISTS (SELECT 1 FROM reservation_notebooks rn WHERE rn.notebook_id = n.id AND rn.active)
         THEN 'reservada' ELSE estado::text END AS estado,
-      CASE WHEN EXISTS (SELECT 1 FROM reservation_notebooks rn WHERE rn.notebook_id = n.id AND rn.active)
+      CASE WHEN n.estado = 'disponible'
+        AND EXISTS (SELECT 1 FROM reservation_notebooks rn WHERE rn.notebook_id = n.id AND rn.active)
         THEN 'Reservada' ELSE ubicacion END AS ubicacion,
       updated_at AS actualizada, u.nombre AS prestado_a, carro_id
       FROM notebooks n LEFT JOIN users u ON u.id = n.prestado_a ORDER BY codigo`);
@@ -379,7 +382,7 @@ const actions = {
         notebooks = { rows: [...notebooks.rows, ...available.rows], rowCount: reservation.cantidad };
       }
       const retiradaAt = new Date();
-      const venceAt = new Date(retiradaAt.getTime() + 8 * 60 * 60 * 1000);
+      const venceAt = loanDueAt(retiradaAt);
       for (const notebook of notebooks.rows) {
         await client.query(`INSERT INTO loans (notebook_id, user_id, reservation_id, curso, retirada_at, vence_at, estado)
           VALUES ($1, $2, $3, $4, $5, $6, 'activo')`, [notebook.id, reservation.owner_id, id, reservation.curso, retiradaAt, venceAt]);
@@ -392,25 +395,34 @@ const actions = {
   },
   async loans(_body, user) {
     const result = await db.query(`SELECT l.id, n.codigo AS notebook, l.curso, l.retirada_at, l.vence_at,
-      l.devuelta_at, l.estado, r.estado AS devolucion_estado FROM loans l
+      l.devuelta_at, l.estado, r.estado AS devolucion_estado, r.hora_prevista FROM loans l
       JOIN notebooks n ON n.id = l.notebook_id LEFT JOIN returns r ON r.loan_id = l.id
       WHERE l.user_id = $1 ORDER BY l.retirada_at DESC`, [user.id]);
     return { loans: result.rows };
   },
-  async requestReturn(_body, user, { id }) {
+  async requestReturn(body, user, { id }) {
+    const horaPrevista = body?.horaPrevista;
+    const horaError = returnTimeError(horaPrevista);
+    if (horaError) throw new AppError(horaError, 400);
     return db.transaction(async (client) => {
       const result = await client.query(`UPDATE loans SET estado = 'devolucion_pendiente'
         WHERE id = $1 AND user_id = $2 AND estado = 'activo' RETURNING id, notebook_id`, [id, user.id]);
       if (!result.rowCount) throw new AppError('Préstamo activo no encontrado', 404);
-      await client.query("INSERT INTO returns (loan_id) VALUES ($1) ON CONFLICT (loan_id) DO NOTHING", [id]);
-      await client.query(`UPDATE notebooks SET estado = 'pendiente_devolucion', updated_at = now()
-        WHERE id = $1 AND estado = 'prestada'`, [result.rows[0].notebook_id]);
+      await client.query(`INSERT INTO returns (loan_id, hora_prevista) VALUES ($1, $2::time)
+        ON CONFLICT (loan_id) DO NOTHING`, [id, horaPrevista]);
+      const notebook = await client.query(`UPDATE notebooks SET estado = 'pendiente_devolucion', updated_at = now()
+        WHERE id = $1 AND estado = 'prestada' AND prestado_a = $2 RETURNING id`,
+      [result.rows[0].notebook_id, user.id]);
+      if (!notebook.rowCount) {
+        throw new AppError('La notebook ya no figura prestada a este usuario', 409);
+      }
       return { message: 'Devolución pendiente de confirmación' };
     });
   },
   async adminReturns(_body, user) {
     requireAdmin(user, 'Solo admin puede consultar devoluciones');
-    const result = await db.query(`SELECT r.id, n.codigo AS notebook, u.legajo, u.nombre, l.curso, r.solicitado_at, l.vence_at
+    const result = await db.query(`SELECT r.id, n.codigo AS notebook, u.legajo, u.nombre, l.curso,
+      r.solicitado_at, r.hora_prevista, l.vence_at
       FROM returns r JOIN loans l ON l.id = r.loan_id JOIN notebooks n ON n.id = l.notebook_id
       JOIN users u ON u.id = l.user_id WHERE r.estado = 'pendiente' ORDER BY r.solicitado_at`);
     return { returns: result.rows };
@@ -477,10 +489,18 @@ const actions = {
         WHERE codigo = $4::text RETURNING codigo AS id, estado, notebook_id`,
       [body.estado, body.estado, user.id, code]);
       if (!result.rowCount) throw new AppError('Ticket no encontrado', 404);
+      if (body.estado === 'progreso' && result.rows[0].notebook_id) {
+        await client.query(`UPDATE notebooks SET estado = 'mantenimiento',
+          ubicacion = 'Taller', updated_at = now()
+          WHERE id = $1::bigint AND estado = 'disponible'`, [result.rows[0].notebook_id]);
+      }
       if (body.estado === 'resuelto' && result.rows[0].notebook_id) {
         await client.query(`UPDATE notebooks SET estado = 'disponible',
           ubicacion = COALESCE('Carro ' || carro_id::text, ubicacion), prestado_a = NULL, updated_at = now()
-          WHERE id = $1::bigint AND estado = 'mantenimiento'`, [result.rows[0].notebook_id]);
+          WHERE id = $1::bigint AND estado = 'mantenimiento'
+            AND NOT EXISTS (SELECT 1 FROM tickets
+              WHERE notebook_id = $1::bigint AND estado IN ('abierto', 'progreso'))`,
+        [result.rows[0].notebook_id]);
       }
       return { ticket: { id: result.rows[0].id, estado: result.rows[0].estado } };
     });

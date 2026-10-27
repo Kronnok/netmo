@@ -116,7 +116,9 @@ async function cargarEstadoAPI(){
     ]);
     notificacionesDevolucion = returnsData.returns.map(item=>({
       id:item.id, notebookId:item.notebook, alumnoLegajo:item.legajo, alumnoNombre:item.nombre,
-      curso:item.curso, fechaSolicitud:formatBusinessDateTime(item.solicitado_at), rol:'alumno', returnId:item.id
+      curso:item.curso, fechaSolicitud:formatBusinessDateTime(item.solicitado_at),
+      horaPrevista:item.hora_prevista ? String(item.hora_prevista).slice(0,5) : null,
+      rol:'alumno', returnId:item.id
     }));
     usuariosRegistrados = [...studentsData.users, ...teachersData.users];
     usuariosConTardanzas = lateReturnsData.users;
@@ -131,7 +133,9 @@ async function cargarEstadoAPI(){
     if(!prestamosActivos[currentUser.legajo]) prestamosActivos[currentUser.legajo] = [];
     prestamosActivos[currentUser.legajo].push({
       id:loan.notebook, curso:loan.curso, desde:formatBusinessDateTime(loan.retirada_at),
-      vence:formatBusinessDateTime(loan.vence_at), pendiente:loan.estado!=='activo', loanId:loan.id
+      vence:formatBusinessDateTime(loan.vence_at),
+      horaPrevista:loan.hora_prevista ? String(loan.hora_prevista).slice(0,5) : null,
+      pendiente:loan.estado!=='activo', loanId:loan.id
     });
   });
 }
@@ -959,7 +963,7 @@ function renderPrestamoActivo(){
   wrap.innerHTML = prestamos.map(prestamo=>prestamo.pendiente ? `
     <div class="action-card" style="cursor:default;margin-bottom:.8rem;">
       <div class="action-icon" style="background:var(--red-bg);color:var(--red-text);">⏳</div>
-      <div class="action-info"><h4>${escapeHtml(prestamo.id)}</h4><p>Retirada ${escapeHtml(prestamo.desde)} · Devolución informada</p></div>
+      <div class="action-info"><h4>${escapeHtml(prestamo.id)}</h4><p>Retirada ${escapeHtml(prestamo.desde)} · Devolución informada${prestamo.horaPrevista ? ` · Hora prevista ${escapeHtml(prestamo.horaPrevista)}` : ''}</p></div>
       <span class="badge badge-pendiente_devolucion">Esperando confirmación del Admin</span>
     </div>` : `
     <div class="action-card" style="cursor:default;margin-bottom:.8rem;">
@@ -973,7 +977,7 @@ function renderHistorialPrestamos(){
   const tbody = document.getElementById('historialPrestamosTable');
   if(!tbody) return;
   if(historialPrestamos.length===0){
-    tbody.innerHTML = `<tr><td colspan="4"><div class="empty-state">
+    tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state">
       <div class="glyph">📋</div><h4>No tenés historial de préstamos</h4><p>Los préstamos que retires aparecerán acá.</p>
     </div></td></tr>`;
     return;
@@ -984,7 +988,8 @@ function renderHistorialPrestamos(){
     const demorada = loan.devuelta_at && new Date(loan.devuelta_at) > new Date(loan.vence_at);
     const label = loan.estado==='devuelto' ? (demorada ? 'Devuelta con demora' : 'Devuelta a tiempo') : (loan.estado==='devolucion_pendiente' ? 'Devolución pendiente' : 'Préstamo activo');
     const badge = loan.estado==='devuelto' ? (demorada ? 'badge-vencido' : 'badge-resuelto') : (loan.estado==='devolucion_pendiente' ? 'badge-pendiente_devolucion' : 'badge-prestada');
-    return `<tr><td class="mono">${escapeHtml(loan.notebook)}</td><td>${escapeHtml(retirada)}</td><td>${escapeHtml(devuelta)}</td><td><span class="badge ${escapeHtml(badge)}">${escapeHtml(label)}</span></td></tr>`;
+    const horaPrevista = loan.hora_prevista ? String(loan.hora_prevista).slice(0,5) : '—';
+    return `<tr><td class="mono">${escapeHtml(loan.notebook)}</td><td>${escapeHtml(retirada)}</td><td>${escapeHtml(horaPrevista)}</td><td>${escapeHtml(devuelta)}</td><td><span class="badge ${escapeHtml(badge)}">${escapeHtml(label)}</span></td></tr>`;
   }).join('');
 }
 
@@ -994,14 +999,43 @@ function openReturnModal(loanId){
   if(!prestamo) return;
   pendingReturnLoanId = loanId;
   document.getElementById('returnModalText').textContent = `¿Confirmás que estás devolviendo físicamente la notebook ${prestamo.id}? Un administrador deberá confirmar la recepción antes de que quede liberada.`;
+  const input = document.getElementById('returnHour');
+  input.value = '';
+  const now = businessDateParts(new Date());
+  const nextMinute = Number(now.hour) * 60 + Number(now.minute) + 1;
+  input.min = `${String(Math.floor(nextMinute / 60)).padStart(2,'0')}:${String(nextMinute % 60).padStart(2,'0')}`;
+  input.disabled = nextMinute > 17 * 60 + 30;
+  document.getElementById('returnHourError').textContent = input.disabled
+    ? 'No hay horarios disponibles para devolver hoy: el límite es 17:30 de Buenos Aires.'
+    : '';
+  document.getElementById('returnConfirmButton').disabled = input.disabled;
   openModal('returnModal');
+}
+
+function validarHoraDevolucion(){
+  const input = document.getElementById('returnHour');
+  const error = document.getElementById('returnHourError');
+  const now = businessDateParts(new Date());
+  const currentMinute = `${now.hour}:${now.minute}`;
+  let message = '';
+  if(!input.value){
+    message = 'Elegí una hora de devolución de hoy.';
+  }else if(input.value <= currentMinute || input.value > '17:30'){
+    message = 'La hora prevista debe ser posterior a la hora actual y no superar las 17:30 de hoy (Buenos Aires).';
+  }
+  input.setCustomValidity(message);
+  error.textContent = message;
+  return !message;
 }
 
 async function confirmarDevolucion(){
   const prestamoAPI = (prestamosActivos[currentUser.legajo] || []).find(loan=>loan.loanId===pendingReturnLoanId);
   if(!prestamoAPI?.loanId) return;
+  if(!validarHoraDevolucion()) return;
   try{
-    await apiRequest(`/api/loans/${prestamoAPI.loanId}/return`, {method:'POST'});
+    await apiRequest(`/api/loans/${prestamoAPI.loanId}/return`, {
+      method:'POST', body:JSON.stringify({horaPrevista:document.getElementById('returnHour').value})
+    });
     await cargarEstadoAPI();
     renderAll();
     closeModal('returnModal');
@@ -1032,7 +1066,7 @@ function renderDevoluciones(){
       <div class="action-icon" style="background:var(--red-bg);color:var(--red-text);">📥</div>
       <div class="action-info">
         <h4>${escapeHtml(n.notebookId)} · ${escapeHtml(n.alumnoNombre)}</h4>
-        <p>${escapeHtml(n.curso)} · Legajo ${escapeHtml(n.alumnoLegajo)} · Solicitado ${escapeHtml(n.fechaSolicitud)}</p>
+        <p>${escapeHtml(n.curso)} · Legajo ${escapeHtml(n.alumnoLegajo)} · Solicitado ${escapeHtml(n.fechaSolicitud)} · Hora prevista ${escapeHtml(n.horaPrevista || 'No informada')}</p>
       </div>
       <button class="btn btn-primary btn-sm" onclick="confirmarRecepcion(${escapeHtml(i)})">Confirmar recepción física</button>
     </div>`).join('');

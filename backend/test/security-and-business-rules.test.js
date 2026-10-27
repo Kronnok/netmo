@@ -15,7 +15,13 @@ const controller = require('../controllers/api-controller');
 const loginRateLimiter = require('../services/login-rate-limiter');
 const routes = require('../routes');
 const { createToken, verifyToken, TOKEN_LIFETIME_SECONDS } = require('../services/session-token');
-const { parseBusinessDateTime, reservationTimeError, TIME_ZONE } = require('../services/business-time');
+const {
+  loanDueAt,
+  parseBusinessDateTime,
+  reservationTimeError,
+  returnTimeError,
+  TIME_ZONE
+} = require('../services/business-time');
 const { accountEmail, accountPassword, courseDivision, personName, requiredText } = require('../services/validation');
 
 after(() => db.pool.end());
@@ -61,6 +67,17 @@ test('las reservas interpretan fechas y horarios en Buenos Aires', () => {
   assert.match(reservationTimeError(parseBusinessDateTime('2026-01-05T08:59'), new Date('2026-01-05T12:00:00Z')), /deben ser futuras/);
   assert.match(reservationTimeError(parseBusinessDateTime('2026-01-05T09:00'), new Date('2026-01-05T12:00:00Z')), /deben ser futuras/);
   assert.equal(parseBusinessDateTime('2026-02-30T10:00'), null);
+});
+
+test('el vencimiento de préstamos y la hora prevista de devolución usan Buenos Aires', () => {
+  assert.equal(loanDueAt(parseBusinessDateTime('2026-01-05T08:00')).toISOString(), '2026-01-05T19:00:00.000Z');
+  assert.equal(loanDueAt(parseBusinessDateTime('2026-01-05T10:00')).toISOString(), '2026-01-05T20:30:00.000Z');
+  const beforeDeadline = parseBusinessDateTime('2026-01-05T17:29');
+  assert.equal(returnTimeError('17:30', beforeDeadline), null);
+  assert.match(returnTimeError('17:29', beforeDeadline), /posterior a la hora actual/);
+  assert.match(returnTimeError('17:31', parseBusinessDateTime('2026-01-05T16:00')), /17:30/);
+  assert.match(returnTimeError('18:00', parseBusinessDateTime('2026-01-05T16:00')), /17:30/);
+  assert.match(returnTimeError('inválida', beforeDeadline), /hora prevista/);
 });
 
 test('cinco fallos de login por IP y correo bloquean el siguiente intento durante 15 minutos', async () => {
@@ -580,14 +597,22 @@ test('carros, series de notebooks y cambios de estado validan entradas', async (
   }
 });
 
-test('resolver tickets libera notebooks en una transacción y rechaza estados inválidos', async () => {
+test('los tickets cambian notebooks solo en estados permitidos y preservan otros tickets activos', async () => {
   const originalTransaction = db.transaction;
   const calls = [];
+  let notebookState = 'disponible';
+  let hasOtherActiveTicket = false;
   db.transaction = async (callback) => callback({
     query: async (sql, params) => {
       calls.push({ sql, params });
       if (sql.includes('UPDATE tickets SET estado')) {
         return { rowCount: 1, rows: [{ id: 'TCK-1', estado: params[0], notebook_id: 4 }] };
+      }
+      if (sql.includes("SET estado = 'mantenimiento'")) {
+        if (notebookState === 'disponible') notebookState = 'mantenimiento';
+      }
+      if (sql.includes("SET estado = 'disponible'") && sql.includes('NOT EXISTS')) {
+        if (notebookState === 'mantenimiento' && !hasOtherActiveTicket) notebookState = 'disponible';
       }
       return { rowCount: 1, rows: [] };
     }
@@ -601,20 +626,60 @@ test('resolver tickets libera notebooks en una transacción y rechaza estados in
       apiService.updateTicket({ estado: 'resuelto' }, { id: 2, rol: 'alumno' }, { code: 'TCK-1' }),
       (error) => error.status === 403
     );
-    const result = await apiService.updateTicket({ estado: 'resuelto' }, { id: 1, rol: 'admin' }, { code: 'TCK-1' });
-    assert.equal(result.ticket.estado, 'resuelto');
+    const progressed = await apiService.updateTicket({ estado: 'progreso' }, { id: 1, rol: 'admin' }, { code: 'TCK-1' });
+    assert.equal(progressed.ticket.estado, 'progreso');
+    assert.equal(notebookState, 'mantenimiento');
     assert.equal(calls.length, 2);
     assert.match(calls[0].sql, /estado = \$1::ticket_status/);
     assert.match(calls[0].sql, /resolved_at = CASE WHEN \$2::text = 'resuelto' THEN now\(\)/);
-    assert.match(calls[0].sql, /resolved_by = CASE WHEN \$2::text = 'resuelto' THEN \$3 ELSE NULL END/);
-    assert.deepEqual(calls[0].params, ['resuelto', 'resuelto', 1, 'TCK-1']);
-    assert.match(calls[1].sql, /SET estado = 'disponible'/);
+    assert.match(calls[0].sql, /resolved_by = CASE WHEN \$2::text = 'resuelto' THEN \$3::bigint ELSE NULL END/);
+    assert.deepEqual(calls[0].params, ['progreso', 'progreso', 1, 'TCK-1']);
+    assert.match(calls[1].sql, /SET estado = 'mantenimiento'/);
+    assert.match(calls[1].sql, /WHERE id = \$1::bigint AND estado = 'disponible'/);
+
     calls.length = 0;
+    hasOtherActiveTicket = true;
+    const result = await apiService.updateTicket({ estado: 'resuelto' }, { id: 1, rol: 'admin' }, { code: 'TCK-1' });
+    assert.equal(result.ticket.estado, 'resuelto');
+    assert.equal(notebookState, 'mantenimiento');
+    assert.equal(calls.length, 2);
+    assert.match(calls[1].sql, /NOT EXISTS \(SELECT 1 FROM tickets/);
+    assert.match(calls[1].sql, /estado IN \('abierto', 'progreso'\)/);
+
+    calls.length = 0;
+    hasOtherActiveTicket = false;
+    const available = await apiService.updateTicket({ estado: 'resuelto' }, { id: 1, rol: 'admin' }, { code: 'TCK-1' });
+    assert.equal(available.ticket.estado, 'resuelto');
+    assert.equal(notebookState, 'disponible');
+    assert.equal(calls.length, 2);
+
+    calls.length = 0;
+    notebookState = 'mantenimiento';
     const reopened = await apiService.updateTicket({ estado: 'abierto' }, { id: 1, rol: 'admin' }, { code: 'TCK-1' });
     assert.equal(reopened.ticket.estado, 'abierto');
     assert.equal(calls.length, 1);
     assert.match(calls[0].sql, /resolved_at = CASE WHEN \$2::text = 'resuelto' THEN now\(\) ELSE NULL END/);
     assert.deepEqual(calls[0].params, ['abierto', 'abierto', 1, 'TCK-1']);
+    assert.equal(notebookState, 'mantenimiento');
+  } finally {
+    db.transaction = originalTransaction;
+  }
+});
+
+test('la devolución exige una hora válida antes de iniciar la transacción', async () => {
+  const originalTransaction = db.transaction;
+  db.transaction = async () => {
+    throw new Error('No debe iniciar transacción con una hora inválida');
+  };
+  try {
+    await assert.rejects(
+      apiService.requestReturn({}, { id: 7 }, { id: '80' }),
+      (error) => error.status === 400 && /17:30/.test(error.message)
+    );
+    await assert.rejects(
+      apiService.requestReturn({ horaPrevista: '17:31' }, { id: 7 }, { id: '80' }),
+      (error) => error.status === 400 && /17:30/.test(error.message)
+    );
   } finally {
     db.transaction = originalTransaction;
   }
@@ -646,6 +711,22 @@ test('el cambio de estado de notebook separa el enum del parámetro comparado co
   }
 });
 
+test('el inventario proyecta como reservada solo una notebook disponible', async () => {
+  const originalQuery = db.query;
+  let queryText = '';
+  db.query = async (sql) => {
+    queryText = sql;
+    return { rowCount: 0, rows: [] };
+  };
+  try {
+    await apiService.notebooks();
+    assert.match(queryText, /CASE WHEN n\.estado = 'disponible'\s+AND EXISTS/);
+    assert.equal((queryText.match(/n\.estado = 'disponible'/g) || []).length, 2);
+  } finally {
+    db.query = originalQuery;
+  }
+});
+
 test('la migración de resolución de tickets es incremental y conserva tickets existentes', () => {
   const root = path.resolve(__dirname, '..', '..');
   const migration = fs.readFileSync(path.join(root, 'database', 'migrations', '007-ticket-resolution-metadata.sql'), 'utf8');
@@ -657,6 +738,18 @@ test('la migración de resolución de tickets es incremental y conserva tickets 
   assert.match(runner, /'007-ticket-resolution-metadata\.sql'/);
 });
 
+test('la migración de hora prevista es incremental y nullable', () => {
+  const root = path.resolve(__dirname, '..', '..');
+  const migration = fs.readFileSync(path.join(root, 'database', 'migrations', '008-return-scheduled-time.sql'), 'utf8');
+  const schema = fs.readFileSync(path.join(root, 'database', 'schema.sql'), 'utf8');
+  const runner = fs.readFileSync(path.join(root, 'backend', 'scripts', 'db.js'), 'utf8');
+  assert.match(migration, /ADD COLUMN IF NOT EXISTS hora_prevista TIME/i);
+  assert.doesNotMatch(migration, /NOT NULL/i);
+  assert.doesNotMatch(migration, /UPDATE\s+loans/i);
+  assert.match(schema, /hora_prevista TIME,/);
+  assert.match(runner, /'008-return-scheduled-time\.sql'/);
+});
+
 test('la interfaz muestra selector reabrible, contador de texto, carro y curso estructurado', () => {
   const root = path.resolve(__dirname, '..', '..');
   const html = fs.readFileSync(path.join(root, 'frontend', 'index.html'), 'utf8');
@@ -664,6 +757,11 @@ test('la interfaz muestra selector reabrible, contador de texto, carro y curso e
   assert.match(html, /id="resCarro"/);
   assert.match(html, /id="resCantidad" min="1" max="2"/);
   assert.match(html, /id="loteCantidad" min="3" max="10"/);
+  assert.match(html, /id="returnHour" min="00:00" max="17:30"/);
+  assert.match(html, /id="returnHourError"/);
+  assert.match(html, /id="adminFilterEstado" onchange="filterAdminNotebooks\(\)"/);
+  assert.match(html, /option value="pendiente_devolucion"/);
+  assert.match(html, /option value="reservada"/);
   assert.match(html, /type="number" id="resCursoAnio"/);
   assert.match(html, /type="number" id="resCursoDivision"/);
   assert.match(html, /id="fallaDesc" maxlength="50"/);
@@ -671,6 +769,9 @@ test('la interfaz muestra selector reabrible, contador de texto, carro y curso e
   assert.match(app, /renderAdminStateSelect\(`Cambiar estado de \$\{escapeHtml\(nb\.id\)\}/);
   assert.match(app, /renderAdminStateSelect\(`Cambiar estado del ticket \$\{escapeHtml\(t\.id\)\}/);
   assert.match(app, /function adminChangeState\(select\)/);
+  assert.match(app, /function filterAdminNotebooks\(\)/);
+  assert.match(app, /nb\.estado===est/);
+  assert.match(app, /horaPrevista/);
   assert.match(app, /const canApprove = r\.estado==='pendiente_aprobacion'/);
   assert.match(app, /const canReject = \['pendiente_aprobacion','aprobada'\]\.includes\(r\.estado\)/);
   assert.match(app, /function aprobarSolicitud\(id\)/);

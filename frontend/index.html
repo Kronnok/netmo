@@ -201,6 +201,7 @@
               <option value="prestada">Prestada</option>
               <option value="mantenimiento">Mantenimiento</option>
               <option value="pendiente_devolucion">Pendiente devolución</option>
+              <option value="reservada">Reservada</option>
             </select>
           </div>
         </div>
@@ -276,7 +277,7 @@
     <div class="card" style="margin-top:1.5rem;">
       <div class="card-header"><div><h3>Historial de préstamos</h3><p>Últimos movimientos registrados a tu nombre.</p></div></div>
       <table>
-        <thead><tr><th>Notebook</th><th>Retirada</th><th>Devuelta</th><th>Estado</th></tr></thead>
+        <thead><tr><th>Notebook</th><th>Retirada</th><th>Hora prevista</th><th>Devuelta</th><th>Estado</th></tr></thead>
         <tbody id="historialPrestamosTable"></tbody>
       </table>
     </div>
@@ -540,6 +541,7 @@
             <option value="prestada">Prestada</option>
             <option value="mantenimiento">Mantenimiento</option>
             <option value="pendiente_devolucion">Pendiente devolución</option>
+            <option value="reservada">Reservada</option>
           </select>
         </div>
       </div>
@@ -674,9 +676,16 @@
   <div class="modal">
     <h3>Confirmar devolución</h3>
     <p id="returnModalText">¿Confirmás la devolución de esta notebook?</p>
+    <div class="field">
+      <label for="returnHour">Hora prevista de devolución de hoy</label>
+      <input type="time" id="returnHour" min="00:00" max="17:30" step="60" required
+        aria-describedby="returnHourError" oninput="validarHoraDevolucion()">
+      <span class="hint">Elegí una hora posterior a la actual y hasta las 17:30 de Buenos Aires.</span>
+      <span class="field-error" id="returnHourError" role="alert"></span>
+    </div>
     <div class="modal-actions">
       <button class="btn" onclick="closeModal('returnModal')">Cancelar</button>
-      <button class="btn btn-primary" onclick="confirmarDevolucion()">Confirmar</button>
+      <button class="btn btn-primary" id="returnConfirmButton" onclick="confirmarDevolucion()">Confirmar</button>
     </div>
   </div>
 </div>

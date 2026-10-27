@@ -7,7 +7,7 @@ process.env.JWT_SECRET = 'test-only-secret-that-is-long-enough-for-hmac';
 
 const db = require('../data/database');
 const authService = require('../services/auth-service');
-const { parseBusinessDateTime, businessTimeParts } = require('../services/business-time');
+const { businessTimeParts, loanDueAt, parseBusinessDateTime } = require('../services/business-time');
 const controller = require('../controllers/api-controller');
 const routes = require('../routes');
 
@@ -28,7 +28,16 @@ function nextBusinessReservationTime() {
   throw new Error('No se encontró un día hábil para la prueba');
 }
 
-test('flujo API reserva, retiro, préstamo, devolución e historial', async () => {
+function nextReturnHour() {
+  const { hour, minute } = businessTimeParts(new Date());
+  const total = Number(hour) * 60 + Number(minute) + 2;
+  if (total > 17 * 60 + 30) return null;
+  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+}
+
+const returnHour = nextReturnHour();
+
+test('flujo API reserva, retiro, préstamo, devolución e historial', { skip: returnHour ? false : 'No queda una hora de devolución válida hoy' }, async () => {
   const originalQuery = db.query;
   const originalTransaction = db.transaction;
   const originalAuthenticate = authService.authenticate;
@@ -77,6 +86,7 @@ test('flujo API reserva, retiro, préstamo, devolución e historial', async () =
     }
     if (statement.startsWith("UPDATE notebooks SET estado = 'prestada'")) {
       notebook.estado = 'prestada';
+      notebook.prestado_a = params[0];
       return { rowCount: 1, rows: [] };
     }
     if (statement.startsWith('UPDATE reservation_notebooks SET active = FALSE')) {
@@ -93,7 +103,7 @@ test('flujo API reserva, retiro, préstamo, devolución e historial', async () =
       return { rowCount: 1, rows: [{ id: loan.id, notebook_id: notebook.id }] };
     }
     if (statement.startsWith('INSERT INTO returns')) {
-      returnRequest = { id: '90', loan_id: params[0], estado: 'pendiente' };
+      returnRequest = { id: '90', loan_id: params[0], hora_prevista: params[1], estado: 'pendiente' };
       return { rowCount: 1, rows: [] };
     }
     if (statement.startsWith("UPDATE notebooks SET estado = 'pendiente_devolucion'")) {
@@ -112,6 +122,7 @@ test('flujo API reserva, retiro, préstamo, devolución e historial', async () =
     }
     if (statement.startsWith("UPDATE notebooks SET estado = 'disponible'")) {
       notebook.estado = 'disponible';
+      notebook.prestado_a = null;
       return { rowCount: 1, rows: [] };
     }
     throw new Error(`Consulta no prevista en prueba de flujo: ${statement}`);
@@ -130,8 +141,8 @@ test('flujo API reserva, retiro, préstamo, devolución e historial', async () =
         retiro_at: reservation.retiro_at, motivo: reservation.motivo, estado: reservation.estado, notebook_ids: [notebook.id]
       }] : []
     };
-    if (statement.startsWith('SELECT l.id, n.codigo AS notebook')) return { rowCount: loan ? 1 : 0, rows: loan ? [{ ...loan, devolucion_estado: returnRequest?.estado ?? null }] : [] };
-    if (statement.startsWith('SELECT r.id, n.codigo AS notebook')) return { rowCount: returnRequest?.estado === 'pendiente' ? 1 : 0, rows: returnRequest?.estado === 'pendiente' ? [{ id: returnRequest.id, notebook: notebook.codigo }] : [] };
+    if (statement.startsWith('SELECT l.id, n.codigo AS notebook')) return { rowCount: loan ? 1 : 0, rows: loan ? [{ ...loan, hora_prevista: returnRequest?.hora_prevista ?? null, devolucion_estado: returnRequest?.estado ?? null }] : [] };
+    if (statement.startsWith('SELECT r.id, n.codigo AS notebook')) return { rowCount: returnRequest?.estado === 'pendiente' ? 1 : 0, rows: returnRequest?.estado === 'pendiente' ? [{ id: returnRequest.id, notebook: notebook.codigo, hora_prevista: returnRequest.hora_prevista }] : [] };
     throw new Error(`Consulta de lectura no prevista en prueba de flujo: ${statement}`);
   };
   authService.authenticate = async (request) => request.headers.authorization === 'Bearer workflow-admin'
@@ -173,20 +184,29 @@ test('flujo API reserva, retiro, préstamo, devolución e historial', async () =
     assert.equal(checkout.payload.loansCreated, 1);
     assert.equal(reservation.estado, 'retirada');
     assert.equal(reservationLink.active, false);
+    assert.equal(loan.vence_at.getTime(), loanDueAt(loan.retirada_at).getTime());
 
     const activeLoans = await apiCall('GET', '/api/loans', undefined, 'profesor');
     assert.equal(activeLoans.payload.loans[0].estado, 'activo');
     assert.equal(activeLoans.payload.loans[0].notebook, notebook.codigo);
 
-    await apiCall('POST', '/api/loans/80/return', {}, 'profesor');
+    const request = await apiCall('POST', '/api/loans/80/return', { horaPrevista: returnHour }, 'profesor');
+    assert.equal(request.status, 202);
+    assert.equal(notebook.estado, 'pendiente_devolucion');
+    assert.equal(notebook.prestado_a, user.id);
+    assert.equal(returnRequest.hora_prevista, returnHour);
     assert.equal((await apiCall('GET', '/api/loans', undefined, 'profesor')).payload.loans[0].estado, 'devolucion_pendiente');
-    assert.equal((await apiCall('GET', '/api/admin/returns', undefined, 'admin')).payload.returns[0].id, '90');
+    const adminReturns = await apiCall('GET', '/api/admin/returns', undefined, 'admin');
+    assert.equal(adminReturns.payload.returns[0].id, '90');
+    assert.equal(adminReturns.payload.returns[0].hora_prevista, returnHour);
+    assert.equal((await apiCall('GET', '/api/loans', undefined, 'profesor')).payload.loans[0].hora_prevista, returnHour);
 
     await apiCall('POST', '/api/admin/returns/90/confirm', {}, 'admin');
     const history = await apiCall('GET', '/api/loans', undefined, 'profesor');
     assert.equal(history.payload.loans[0].estado, 'devuelto');
     assert.ok(history.payload.loans[0].devuelta_at);
     assert.equal(notebook.estado, 'disponible');
+    assert.equal(notebook.prestado_a, null);
   } finally {
     db.query = originalQuery;
     db.transaction = originalTransaction;
