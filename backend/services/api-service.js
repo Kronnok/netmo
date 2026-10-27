@@ -3,8 +3,7 @@ const db = require('../data/database');
 const { AppError } = require('../errors');
 const {
   loanDueAt,
-  reservationReturnTimeError,
-  returnTimeError
+  reservationReturnTimeError
 } = require('./business-time');
 const { parseBusinessDateTime, reservationTimeError } = require('./business-time');
 const {
@@ -422,15 +421,13 @@ const actions = {
     return { loans: result.rows };
   },
   async requestReturn(body, user, { id }) {
-    const horaPrevista = body?.horaPrevista;
-    const horaError = returnTimeError(horaPrevista);
-    if (horaError) throw new AppError(horaError, 400);
     return db.transaction(async (client) => {
       const result = await client.query(`UPDATE loans SET estado = 'devolucion_pendiente'
         WHERE id = $1 AND user_id = $2 AND estado = 'activo' RETURNING id, notebook_id`, [id, user.id]);
       if (!result.rowCount) throw new AppError('Préstamo activo no encontrado', 404);
-      await client.query(`INSERT INTO returns (loan_id, hora_prevista) VALUES ($1, $2::time)
-        ON CONFLICT (loan_id) DO NOTHING`, [id, horaPrevista]);
+      await client.query(`INSERT INTO returns (loan_id, hora_prevista)
+        VALUES ($1, (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::time)
+        ON CONFLICT (loan_id) DO NOTHING`, [id]);
       const notebook = await client.query(`UPDATE notebooks SET estado = 'pendiente_devolucion', updated_at = now()
         WHERE id = $1 AND estado = 'prestada' AND prestado_a = $2 RETURNING id`,
       [result.rows[0].notebook_id, user.id]);

@@ -28,16 +28,7 @@ function nextBusinessReservationTime() {
   throw new Error('No se encontró un día hábil para la prueba');
 }
 
-function nextReturnHour() {
-  const { hour, minute } = businessTimeParts(new Date());
-  const total = Number(hour) * 60 + Number(minute) + 2;
-  if (total > 17 * 60 + 30) return null;
-  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
-}
-
-const returnHour = nextReturnHour();
-
-test('flujo API reserva, retiro, préstamo, devolución e historial', { skip: returnHour ? false : 'No queda una hora de devolución válida hoy' }, async () => {
+test('flujo API reserva, retiro, devolución con hora automática e historial', async () => {
   const originalQuery = db.query;
   const originalTransaction = db.transaction;
   const originalAuthenticate = authService.authenticate;
@@ -103,7 +94,12 @@ test('flujo API reserva, retiro, préstamo, devolución e historial', { skip: re
       return { rowCount: 1, rows: [{ id: loan.id, notebook_id: notebook.id }] };
     }
     if (statement.startsWith('INSERT INTO returns')) {
-      returnRequest = { id: '90', loan_id: params[0], hora_prevista: params[1], estado: 'pendiente' };
+      assert.match(statement, /now\(\) AT TIME ZONE 'America\/Argentina\/Buenos_Aires'/);
+      assert.equal(params.length, 1);
+      const { hour, minute, second } = businessTimeParts(new Date());
+      returnRequest = {
+        id: '90', loan_id: params[0], hora_prevista: `${hour}:${minute}:${second}`, estado: 'pendiente'
+      };
       return { rowCount: 1, rows: [] };
     }
     if (statement.startsWith("UPDATE notebooks SET estado = 'pendiente_devolucion'")) {
@@ -213,11 +209,11 @@ test('flujo API reserva, retiro, préstamo, devolución e historial', { skip: re
     assert.equal(activeLoans.payload.loans[0].notebook, notebook.codigo);
     assert.equal(activeLoans.payload.loans[0].hora_devolucion, '17:30:00');
 
-    const request = await apiCall('POST', '/api/loans/80/return', { horaPrevista: returnHour }, 'profesor');
+    const request = await apiCall('POST', '/api/loans/80/return', { horaPrevista: '01:02' }, 'profesor');
     assert.equal(request.status, 202);
     assert.equal(notebook.estado, 'pendiente_devolucion');
     assert.equal(notebook.prestado_a, user.id);
-    assert.equal(returnRequest.hora_prevista, returnHour);
+    assert.match(returnRequest.hora_prevista, /^(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d$/);
     assert.equal((await apiCall('GET', '/api/loans', undefined, 'profesor')).payload.loans[0].estado, 'devolucion_pendiente');
     const openLoans = await apiCall('GET', '/api/admin/open-loans', undefined, 'admin');
     assert.equal(openLoans.status, 200);
@@ -225,9 +221,9 @@ test('flujo API reserva, retiro, préstamo, devolución e historial', { skip: re
     assert.equal(openLoans.payload.loans[0].return_id, '90');
     const adminReturns = await apiCall('GET', '/api/admin/returns', undefined, 'admin');
     assert.equal(adminReturns.payload.returns[0].id, '90');
-    assert.equal(adminReturns.payload.returns[0].hora_prevista, returnHour);
+    assert.equal(adminReturns.payload.returns[0].hora_prevista, returnRequest.hora_prevista);
     assert.equal(adminReturns.payload.returns[0].hora_devolucion, '17:30:00');
-    assert.equal((await apiCall('GET', '/api/loans', undefined, 'profesor')).payload.loans[0].hora_prevista, returnHour);
+    assert.equal((await apiCall('GET', '/api/loans', undefined, 'profesor')).payload.loans[0].hora_prevista, returnRequest.hora_prevista);
 
     await apiCall('POST', '/api/admin/returns/90/confirm', {}, 'admin');
     const history = await apiCall('GET', '/api/loans', undefined, 'profesor');

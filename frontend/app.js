@@ -978,7 +978,7 @@ function renderPrestamoActivo(){
   wrap.innerHTML = prestamos.map(prestamo=>prestamo.pendiente ? `
     <div class="action-card" style="cursor:default;margin-bottom:.8rem;">
       <div class="action-icon" style="background:var(--red-bg);color:var(--red-text);">⏳</div>
-      <div class="action-info"><h4>${escapeHtml(prestamo.id)}</h4><p>Retirada ${escapeHtml(prestamo.desde)} · Devolución informada${prestamo.horaPrevista ? ` · Hora prevista ${escapeHtml(prestamo.horaPrevista)}` : ''}</p></div>
+      <div class="action-info"><h4>${escapeHtml(prestamo.id)}</h4><p>Retirada ${escapeHtml(prestamo.desde)} · Devolución informada${prestamo.horaPrevista ? ` · Hora registrada ${escapeHtml(prestamo.horaPrevista)}` : ''}</p></div>
       <span class="badge badge-pendiente_devolucion">Esperando confirmación del Admin</span>
     </div>` : `
     <div class="action-card" style="cursor:default;margin-bottom:.8rem;">
@@ -1017,43 +1017,15 @@ function openReturnModal(loanId){
   if(!prestamo) return;
   pendingReturnLoanId = loanId;
   document.getElementById('returnModalText').textContent = `¿Confirmás que estás devolviendo físicamente la notebook ${prestamo.id}? Un administrador deberá confirmar la recepción antes de que quede liberada.`;
-  const input = document.getElementById('returnHour');
-  input.value = '';
-  const now = businessDateParts(new Date());
-  const nextMinute = Number(now.hour) * 60 + Number(now.minute) + 1;
-  input.min = `${String(Math.floor(nextMinute / 60)).padStart(2,'0')}:${String(nextMinute % 60).padStart(2,'0')}`;
-  input.disabled = nextMinute > 17 * 60 + 30;
-  document.getElementById('returnHourError').textContent = input.disabled
-    ? 'No hay horarios disponibles para devolver hoy: el límite es 17:30 de Buenos Aires.'
-    : '';
-  document.getElementById('returnConfirmButton').disabled = input.disabled;
+  document.getElementById('returnConfirmButton').disabled = false;
   openModal('returnModal');
-}
-
-function validarHoraDevolucion(){
-  const input = document.getElementById('returnHour');
-  const error = document.getElementById('returnHourError');
-  const now = businessDateParts(new Date());
-  const currentMinute = `${now.hour}:${now.minute}`;
-  let message = '';
-  if(!input.value){
-    message = 'Elegí una hora de devolución de hoy.';
-  }else if(input.value <= currentMinute || input.value > '17:30'){
-    message = 'La hora prevista debe ser posterior a la hora actual y no superar las 17:30 de hoy (Buenos Aires).';
-  }
-  input.setCustomValidity(message);
-  error.textContent = message;
-  return !message;
 }
 
 async function confirmarDevolucion(){
   const prestamoAPI = (prestamosActivos[currentUser.legajo] || []).find(loan=>loan.loanId===pendingReturnLoanId);
   if(!prestamoAPI?.loanId) return;
-  if(!validarHoraDevolucion()) return;
   try{
-    await apiRequest(`/api/loans/${prestamoAPI.loanId}/return`, {
-      method:'POST', body:JSON.stringify({horaPrevista:document.getElementById('returnHour').value})
-    });
+    await apiRequest(`/api/loans/${prestamoAPI.loanId}/return`, {method:'POST'});
     await cargarEstadoAPI();
     renderAll();
     closeModal('returnModal');

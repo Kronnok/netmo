@@ -214,13 +214,6 @@ function nextBusinessTime() {
   throw new Error('No se encontró un horario hábil futuro.');
 }
 
-function nextReturnHour() {
-  const { hour, minute } = businessTimeParts(new Date());
-  const total = Number(hour) * 60 + Number(minute) + 2;
-  if (total > 17 * 60 + 30) return null;
-  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
-}
-
 async function adminPermissions(admin, adminUserId, professor, student) {
   const { createToken, TOKEN_LIFETIME_SECONDS } = require('../services/session-token');
   const expired = createToken(adminUserId, fakeJwtSecret, Date.now() - (TOKEN_LIFETIME_SECONDS + 1) * 1000);
@@ -367,29 +360,18 @@ async function runFlows(users) {
       new Date(loan.retirada_at),
       reservationResponse.hora_devolucion ? String(reservationResponse.hora_devolucion).slice(0, 5) : null
     ).getTime());
-    const missingTime = await request('POST', `/api/loans/${id}/return`, {}, tokens.student);
-    assert.equal(missingTime.status, 400);
-    assert.match(missingTime.payload.error, /17:30/);
-    const afterClosing = await request('POST', `/api/loans/${id}/return`, { horaPrevista: '17:31' }, tokens.student);
-    assert.equal(afterClosing.status, 400);
-    assert.match(afterClosing.payload.error, /17:30/);
-    const horaPrevista = nextReturnHour();
-    if (!horaPrevista) {
-      const invalid = await request('POST', `/api/loans/${id}/return`, { horaPrevista: '17:30' }, tokens.student);
-      assert.equal(invalid.status, 400);
-      assert.match(invalid.payload.error, /17:30/);
-      return id;
-    }
-    const requested = await request('POST', `/api/loans/${id}/return`, { horaPrevista }, tokens.student);
+    const requested = await request('POST', `/api/loans/${id}/return`, { horaPrevista: '01:02' }, tokens.student);
     assert.equal(requested.status, 202);
     const pending = await pool.query(`SELECT l.estado AS loan_estado, n.estado AS notebook_estado,
-        n.prestado_a, r.hora_prevista
+        n.prestado_a, r.hora_prevista,
+        r.hora_prevista = ((r.solicitado_at AT TIME ZONE 'America/Argentina/Buenos_Aires')::time) AS hora_coincide
       FROM loans l JOIN notebooks n ON n.id = l.notebook_id
       JOIN returns r ON r.loan_id = l.id WHERE l.id = $1`, [id]);
     assert.equal(pending.rows[0].loan_estado, 'devolucion_pendiente');
     assert.equal(pending.rows[0].notebook_estado, 'pendiente_devolucion');
     assert.equal(String(pending.rows[0].prestado_a), users.student.id);
-    assert.equal(String(pending.rows[0].hora_prevista).slice(0, 5), horaPrevista);
+    assert.equal(pending.rows[0].hora_coincide, true);
+    const horaPrevista = String(pending.rows[0].hora_prevista).slice(0, 5);
     const inventory = await request('GET', '/api/notebooks', undefined, tokens.admin);
     assert.ok(inventory.payload.notebooks.some((notebook) => notebook.id === loan.notebook
       && notebook.estado === 'pendiente_devolucion'));

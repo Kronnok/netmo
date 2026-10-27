@@ -86,16 +86,6 @@ function reservationReturnTimeError(retiradaAt, value) {
   return null;
 }
 
-function returnTimeError(value, now = new Date()) {
-  const message = 'La hora prevista debe ser posterior a la hora actual y no superar las 17:30 de hoy (Buenos Aires)';
-  if (typeof value !== 'string' || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value)) return message;
-  const { year, month, day } = businessTimeParts(now);
-  const requested = parseBusinessDateTime(`${year}-${month}-${day}T${value}`);
-  const minutes = Number(value.slice(0, 2)) * 60 + Number(value.slice(3, 5));
-  if (!requested || requested.getTime() <= now.getTime() || minutes > 17 * 60 + 30) return message;
-  return null;
-}
-
 function reservationTimeError(reservationDate, now = new Date()) {
   if (reservationDate.getTime() <= now.getTime()) return 'La fecha y hora de reserva deben ser futuras';
   const requested = businessTimeParts(reservationDate);
@@ -116,6 +106,5 @@ module.exports = {
   loanDueAt,
   parseBusinessDateTime,
   reservationReturnTimeError,
-  reservationTimeError,
-  returnTimeError
+  reservationTimeError
 };

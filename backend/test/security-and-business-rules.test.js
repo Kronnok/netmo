@@ -19,7 +19,6 @@ const {
   loanDueAt,
   parseBusinessDateTime,
   reservationTimeError,
-  returnTimeError,
   TIME_ZONE
 } = require('../services/business-time');
 const { accountEmail, accountPassword, courseDivision, personName, requiredText } = require('../services/validation');
@@ -69,17 +68,11 @@ test('las reservas interpretan fechas y horarios en Buenos Aires', () => {
   assert.equal(parseBusinessDateTime('2026-02-30T10:00'), null);
 });
 
-test('el vencimiento de préstamos y la hora prevista de devolución usan Buenos Aires', () => {
+test('el vencimiento de préstamos usa Buenos Aires', () => {
   assert.equal(loanDueAt(parseBusinessDateTime('2026-01-05T08:00')).toISOString(), '2026-01-05T19:00:00.000Z');
   assert.equal(loanDueAt(parseBusinessDateTime('2026-01-05T10:00')).toISOString(), '2026-01-05T20:30:00.000Z');
   assert.equal(loanDueAt(parseBusinessDateTime('2026-01-05T10:00'), '16:45').toISOString(), '2026-01-05T19:45:00.000Z');
   assert.throws(() => loanDueAt(parseBusinessDateTime('2026-01-05T10:00'), '17:31'), /hora de devolución/);
-  const beforeDeadline = parseBusinessDateTime('2026-01-05T17:29');
-  assert.equal(returnTimeError('17:30', beforeDeadline), null);
-  assert.match(returnTimeError('17:29', beforeDeadline), /posterior a la hora actual/);
-  assert.match(returnTimeError('17:31', parseBusinessDateTime('2026-01-05T16:00')), /17:30/);
-  assert.match(returnTimeError('18:00', parseBusinessDateTime('2026-01-05T16:00')), /17:30/);
-  assert.match(returnTimeError('inválida', beforeDeadline), /hora prevista/);
 });
 
 test('cinco fallos de login por IP y correo bloquean el siguiente intento durante 15 minutos', async () => {
@@ -703,20 +696,33 @@ test('los tickets cambian notebooks solo en estados permitidos y preservan otros
   }
 });
 
-test('la devolución exige una hora válida antes de iniciar la transacción', async () => {
+test('la devolución registra hora del servidor e ignora la hora recibida del cliente', async () => {
   const originalTransaction = db.transaction;
-  db.transaction = async () => {
-    throw new Error('No debe iniciar transacción con una hora inválida');
-  };
+  const statements = [];
+  db.transaction = async (callback) => callback({
+    query: async (sql, params) => {
+      statements.push({ sql: sql.replace(/\s+/g, ' '), params });
+      if (sql.includes("UPDATE loans SET estado = 'devolucion_pendiente'")) {
+        return { rowCount: 1, rows: [{ id: '80', notebook_id: '11' }] };
+      }
+      if (sql.includes('INSERT INTO returns')) return { rowCount: 1, rows: [] };
+      if (sql.includes("UPDATE notebooks SET estado = 'pendiente_devolucion'")) return { rowCount: 1, rows: [] };
+      throw new Error(`Consulta no prevista: ${sql}`);
+    }
+  });
   try {
-    await assert.rejects(
-      apiService.requestReturn({}, { id: 7 }, { id: '80' }),
-      (error) => error.status === 400 && /17:30/.test(error.message)
-    );
-    await assert.rejects(
-      apiService.requestReturn({ horaPrevista: '17:31' }, { id: 7 }, { id: '80' }),
-      (error) => error.status === 400 && /17:30/.test(error.message)
-    );
+    assert.deepEqual(await apiService.requestReturn({}, { id: 7 }, { id: '80' }), {
+      message: 'Devolución pendiente de confirmación'
+    });
+    assert.deepEqual(await apiService.requestReturn({ horaPrevista: '01:02' }, { id: 7 }, { id: '80' }), {
+      message: 'Devolución pendiente de confirmación'
+    });
+    const inserts = statements.filter(({ sql }) => sql.includes('INSERT INTO returns'));
+    assert.equal(inserts.length, 2);
+    for (const insert of inserts) {
+      assert.match(insert.sql, /now\(\) AT TIME ZONE 'America\/Argentina\/Buenos_Aires'/);
+      assert.deepEqual(insert.params, ['80']);
+    }
   } finally {
     db.transaction = originalTransaction;
   }
@@ -805,8 +811,12 @@ test('la interfaz muestra selector reabrible, contador de texto, carro y curso e
   assert.match(html, /id="resCarro"/);
   assert.match(html, /id="resCantidad" min="1" max="2"/);
   assert.match(html, /id="loteCantidad" min="3" max="10"/);
-  assert.match(html, /id="returnHour" min="00:00" max="17:30"/);
-  assert.match(html, /id="returnHourError"/);
+  assert.match(html, /id="returnModalText"/);
+  assert.match(html, /La hora actual de Buenos Aires se registra automáticamente/);
+  assert.doesNotMatch(html, /id="returnHour"/);
+  const returnAction = app.slice(app.indexOf('async function confirmarDevolucion'), app.indexOf('/* ======================================================================', app.indexOf('async function confirmarDevolucion')));
+  assert.match(returnAction, /method:'POST'/);
+  assert.doesNotMatch(returnAction, /horaPrevista/);
   assert.match(html, /id="resHoraDevolucion" min="08:01" max="17:30"/);
   assert.match(html, /id="adminFilterEstado" onchange="filterAdminNotebooks\(\)"/);
   assert.match(html, /option value="pendiente_devolucion"/);
@@ -824,6 +834,8 @@ test('la interfaz muestra selector reabrible, contador de texto, carro y curso e
   assert.match(app, /validarHoraDevolucionReserva\(hora, horaDevolucion\)/);
   assert.match(app, /horaDevolucion, motivo/);
   assert.match(app, /Hora acordada \$\{escapeHtml\(n\.horaDevolucion/);
+  assert.match(html, /La hora actual de Buenos Aires se registra automáticamente/);
+  assert.doesNotMatch(html, /id="returnHour"/);
   assert.match(html, /id="prestamosNoEntregadosTable"/);
   assert.match(app, /apiRequest\('\/api\/admin\/open-loans'\)/);
   assert.match(app, /loan\.estado==='devolucion_pendiente' && loan\.returnId/);
