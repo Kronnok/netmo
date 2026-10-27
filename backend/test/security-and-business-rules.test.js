@@ -205,6 +205,7 @@ test('todos los servicios detrás de rutas admin rechazan alumnos y aceptan admi
     ['POST', '/api/admin/reservations/8/reject'],
     ['POST', '/api/admin/reservations/8/checkout'],
     ['GET', '/api/admin/returns'],
+    ['GET', '/api/admin/open-loans'],
     ['POST', '/api/admin/returns/8/confirm'],
     ['GET', '/api/admin/tickets'],
     ['GET', '/api/admin/late-returns'],
@@ -224,6 +225,31 @@ test('todos los servicios detrás de rutas admin rechazan alumnos y aceptan admi
       );
     }
     assert.deepEqual(await apiService.professors({}, { id: 1, rol: 'admin' }), { professors: [] });
+  } finally {
+    db.query = originalQuery;
+  }
+});
+
+test('el listado admin incluye préstamos sin devolver y restringe su consulta', async () => {
+  const originalQuery = db.query;
+  const rows = [
+    { id: '81', notebook: 'NB-081', estado: 'activo', return_id: null },
+    { id: '82', notebook: 'NB-082', estado: 'devolucion_pendiente', return_id: '91' }
+  ];
+  let queryText = '';
+  db.query = async (sql) => {
+    queryText = sql.replace(/\s+/g, ' ');
+    return { rows, rowCount: rows.length };
+  };
+  try {
+    const result = await apiService.adminOpenLoans({}, { id: '1', rol: 'admin' });
+    assert.deepEqual(result.loans, rows);
+    assert.match(queryText, /l\.estado IN \('activo', 'devolucion_pendiente'\)/);
+    assert.match(queryText, /LEFT JOIN returns r ON r\.loan_id = l\.id AND r\.estado = 'pendiente'/);
+    await assert.rejects(
+      apiService.adminOpenLoans({}, { id: '2', rol: 'profesor' }),
+      (error) => error.status === 403
+    );
   } finally {
     db.query = originalQuery;
   }
@@ -798,6 +824,10 @@ test('la interfaz muestra selector reabrible, contador de texto, carro y curso e
   assert.match(app, /validarHoraDevolucionReserva\(hora, horaDevolucion\)/);
   assert.match(app, /horaDevolucion, motivo/);
   assert.match(app, /Hora acordada \$\{escapeHtml\(n\.horaDevolucion/);
+  assert.match(html, /id="prestamosNoEntregadosTable"/);
+  assert.match(app, /apiRequest\('\/api\/admin\/open-loans'\)/);
+  assert.match(app, /loan\.estado==='devolucion_pendiente' && loan\.returnId/);
+  assert.match(app, /confirmarRecepcionPrestamo/);
   assert.match(app, /const canApprove = r\.estado==='pendiente_aprobacion'/);
   assert.match(app, /const canReject = \['pendiente_aprobacion','aprobada'\]\.includes\(r\.estado\)/);
   assert.match(app, /function aprobarSolicitud\(id\)/);

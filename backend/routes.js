@@ -27,6 +27,7 @@ const routes = [
   ['GET', /^\/api\/loans$/, 'loans'],
   ['POST', /^\/api\/loans\/(\d+)\/return$/, 'requestReturn', ['id']],
   ['GET', /^\/api\/admin\/returns$/, 'adminReturns'],
+  ['GET', /^\/api\/admin\/open-loans$/, 'adminOpenLoans'],
   ['POST', /^\/api\/admin\/returns\/(\d+)\/confirm$/, 'confirmReturn', ['id']],
   ['GET', /^\/api\/tickets$/, 'tickets'],
   ['GET', /^\/api\/admin\/tickets$/, 'adminTickets'],

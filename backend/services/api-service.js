@@ -449,6 +449,18 @@ const actions = {
       WHERE r.estado = 'pendiente' ORDER BY r.solicitado_at`);
     return { returns: result.rows };
   },
+  async adminOpenLoans(_body, user) {
+    requireAdmin(user, 'Solo admin puede consultar préstamos no devueltos');
+    const result = await db.query(`SELECT l.id, n.codigo AS notebook, u.legajo, u.nombre, u.rol,
+      l.curso, l.retirada_at, l.vence_at, l.estado,
+      r.id AS return_id, r.solicitado_at, r.hora_prevista
+      FROM loans l JOIN notebooks n ON n.id = l.notebook_id
+      JOIN users u ON u.id = l.user_id
+      LEFT JOIN returns r ON r.loan_id = l.id AND r.estado = 'pendiente'
+      WHERE l.estado IN ('activo', 'devolucion_pendiente')
+      ORDER BY l.vence_at, l.retirada_at`);
+    return { loans: result.rows };
+  },
   async confirmReturn(_body, user, { id }) {
     requireAdmin(user, 'Solo admin puede confirmar devoluciones');
     const result = await db.transaction(async (client) => {

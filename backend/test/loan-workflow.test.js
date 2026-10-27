@@ -142,6 +142,15 @@ test('flujo API reserva, retiro, préstamo, devolución e historial', { skip: re
         motivo: reservation.motivo, estado: reservation.estado, notebook_ids: [notebook.id]
       }] : []
     };
+    if (statement.startsWith('SELECT l.id, n.codigo AS notebook, u.legajo')) return ({
+      rowCount: loan && loan.estado !== 'devuelto' ? 1 : 0,
+      rows: loan && loan.estado !== 'devuelto' ? [{
+        id: loan.id, notebook: notebook.codigo, legajo: user.legajo, nombre: user.nombre, rol: user.rol,
+        curso: loan.curso, retirada_at: loan.retirada_at, vence_at: loan.vence_at, estado: loan.estado,
+        return_id: returnRequest?.id ?? null, solicitado_at: returnRequest?.solicitado_at ?? null,
+        hora_prevista: returnRequest?.hora_prevista ?? null
+      }] : []
+    });
     if (statement.startsWith('SELECT l.id, n.codigo AS notebook')) return { rowCount: loan ? 1 : 0, rows: loan ? [{
       ...loan, hora_devolucion: reservation.hora_devolucion,
       hora_prevista: returnRequest?.hora_prevista ?? null, devolucion_estado: returnRequest?.estado ?? null
@@ -196,6 +205,9 @@ test('flujo API reserva, retiro, préstamo, devolución e historial', { skip: re
     assert.equal(loan.vence_at.getTime(), loanDueAt(loan.retirada_at, '17:30').getTime());
     assert.equal(reservation.hora_devolucion, '17:30:00');
 
+    const activeAdminLoans = await apiCall('GET', '/api/admin/open-loans', undefined, 'admin');
+    assert.equal(activeAdminLoans.payload.loans[0].estado, 'activo');
+    assert.equal(activeAdminLoans.payload.loans[0].return_id, null);
     const activeLoans = await apiCall('GET', '/api/loans', undefined, 'profesor');
     assert.equal(activeLoans.payload.loans[0].estado, 'activo');
     assert.equal(activeLoans.payload.loans[0].notebook, notebook.codigo);
@@ -207,6 +219,10 @@ test('flujo API reserva, retiro, préstamo, devolución e historial', { skip: re
     assert.equal(notebook.prestado_a, user.id);
     assert.equal(returnRequest.hora_prevista, returnHour);
     assert.equal((await apiCall('GET', '/api/loans', undefined, 'profesor')).payload.loans[0].estado, 'devolucion_pendiente');
+    const openLoans = await apiCall('GET', '/api/admin/open-loans', undefined, 'admin');
+    assert.equal(openLoans.status, 200);
+    assert.equal(openLoans.payload.loans[0].estado, 'devolucion_pendiente');
+    assert.equal(openLoans.payload.loans[0].return_id, '90');
     const adminReturns = await apiCall('GET', '/api/admin/returns', undefined, 'admin');
     assert.equal(adminReturns.payload.returns[0].id, '90');
     assert.equal(adminReturns.payload.returns[0].hora_prevista, returnHour);
@@ -219,6 +235,7 @@ test('flujo API reserva, retiro, préstamo, devolución e historial', { skip: re
     assert.ok(history.payload.loans[0].devuelta_at);
     assert.equal(notebook.estado, 'disponible');
     assert.equal(notebook.prestado_a, null);
+    assert.deepEqual((await apiCall('GET', '/api/admin/open-loans', undefined, 'admin')).payload.loans, []);
   } finally {
     db.query = originalQuery;
     db.transaction = originalTransaction;

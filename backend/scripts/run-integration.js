@@ -237,6 +237,7 @@ async function adminPermissions(admin, adminUserId, professor, student) {
     ['POST', '/api/admin/reservations/999999/reject', {}],
     ['POST', '/api/admin/reservations/999999/checkout', {}],
     ['GET', '/api/admin/returns', undefined],
+    ['GET', '/api/admin/open-loans', undefined],
     ['POST', '/api/admin/returns/999999/confirm', {}],
     ['GET', '/api/admin/tickets', undefined],
     ['GET', '/api/admin/late-returns', undefined],
@@ -353,6 +354,10 @@ async function runFlows(users) {
     const checkout = await request('POST', `/api/admin/reservations/${reservationResponse.id}/checkout`, {}, tokens.admin);
     assert.equal(checkout.status, 200);
     assert.equal(checkout.payload.loansCreated, 1);
+    const adminOpenLoans = await request('GET', '/api/admin/open-loans', undefined, tokens.admin);
+    assert.equal(adminOpenLoans.status, 200);
+    assert.equal(adminOpenLoans.payload.loans.length, 1);
+    assert.equal(adminOpenLoans.payload.loans[0].estado, 'activo');
     let loans = await request('GET', '/api/loans', undefined, tokens.student);
     assert.equal(loans.status, 200);
     assert.equal(loans.payload.loans.length, 1);
@@ -391,6 +396,9 @@ async function runFlows(users) {
     const returns = await request('GET', '/api/admin/returns', undefined, tokens.admin);
     assert.equal(returns.status, 200);
     assert.equal(returns.payload.returns[0].hora_prevista.slice(0, 5), horaPrevista);
+    const pendingOpenLoans = await request('GET', '/api/admin/open-loans', undefined, tokens.admin);
+    assert.equal(pendingOpenLoans.payload.loans[0].estado, 'devolucion_pendiente');
+    assert.equal(pendingOpenLoans.payload.loans[0].return_id, returns.payload.returns[0].id);
     const returnRow = await pool.query("SELECT id FROM returns WHERE loan_id = $1", [id]);
     assert.equal(returnRow.rowCount, 1);
     await pool.query("UPDATE loans SET vence_at = now() - interval '1 minute' WHERE id = $1", [id]);
@@ -403,6 +411,7 @@ async function runFlows(users) {
       JOIN notebooks n ON n.id = l.notebook_id WHERE l.id = $1`, [id]);
     assert.equal(confirmedNotebook.rows[0].estado, 'disponible');
     assert.equal(confirmedNotebook.rows[0].prestado_a, null);
+    assert.deepEqual((await request('GET', '/api/admin/open-loans', undefined, tokens.admin)).payload.loans, []);
     const lateReturn = await pool.query('SELECT id FROM late_returns WHERE loan_id = $1', [id]);
     assert.equal(lateReturn.rowCount, 1);
     return id;

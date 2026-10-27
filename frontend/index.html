@@ -561,9 +561,18 @@
   <section class="view" id="view-admin-devoluciones">
     <div class="card">
       <div class="card-header">
-        <div><h3>Notificaciones de devolución</h3><p>Confirmá la recepción física del equipo para liberar al alumno de la deuda.</p></div>
+        <div><h3>Notificaciones de devolución</h3><p>Confirmá la recepción física del equipo para cerrar el préstamo.</p></div>
       </div>
       <div id="devolucionesWrap"></div>
+    </div>
+    <div class="card" style="margin-top:1.5rem;">
+      <div class="card-header">
+        <div><h3>Equipos aún no entregados</h3><p>Préstamos activos y devoluciones que esperan confirmación física.</p></div>
+      </div>
+      <table>
+        <thead><tr><th>Notebook</th><th>Responsable</th><th>Curso</th><th>Retirada</th><th>Vencimiento</th><th>Estado</th><th>Acción</th></tr></thead>
+        <tbody id="prestamosNoEntregadosTable"></tbody>
+      </table>
     </div>
   </section>
 

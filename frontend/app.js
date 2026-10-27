@@ -18,6 +18,7 @@ let prestamosActivos = {};
 let historialPrestamos = [];
 
 let notificacionesDevolucion = [];
+let prestamosNoDevueltos = [];
 let historialTardanzas = [];
 let reservas = [];
 let tickets = [];
@@ -110,8 +111,9 @@ async function cargarEstadoAPI(){
     ownerNombre:ticket.owner_nombre || currentUser.nombre, ownerRol:ticket.owner_rol || currentUser.rol
   }));
   if(esAdmin){
-    const [returnsData, lateReturnsData, studentsData, teachersData] = await Promise.all([
+    const [returnsData, openLoansData, lateReturnsData, studentsData, teachersData] = await Promise.all([
       apiRequest('/api/admin/returns'),
+      apiRequest('/api/admin/open-loans'),
       apiRequest('/api/admin/late-returns'),
       apiRequest('/api/admin/users?rol=alumno'),
       apiRequest('/api/admin/users?rol=profesor')
@@ -122,6 +124,13 @@ async function cargarEstadoAPI(){
       horaPrevista:item.hora_prevista ? String(item.hora_prevista).slice(0,5) : null,
       horaDevolucion:item.hora_devolucion ? String(item.hora_devolucion).slice(0,5) : null,
       rol:'alumno', returnId:item.id
+    }));
+    prestamosNoDevueltos = openLoansData.loans.map(item=>({
+      loanId:item.id, notebook:item.notebook, legajo:item.legajo, nombre:item.nombre,
+      rol:item.rol, curso:item.curso, retirada:formatBusinessDateTime(item.retirada_at),
+      vence:formatBusinessDateTime(item.vence_at), estado:item.estado,
+      returnId:item.return_id,
+      horaPrevista:item.hora_prevista ? String(item.hora_prevista).slice(0,5) : null
     }));
     usuariosRegistrados = [...studentsData.users, ...teachersData.users];
     usuariosConTardanzas = lateReturnsData.users;
@@ -621,6 +630,7 @@ function renderAll(){
   renderProfesoresTable();
   renderAdminInventario();
   renderDevoluciones();
+  renderPrestamosNoDevueltos();
   renderLotes();
   renderAdminTickets();
   renderTardanzas();
@@ -1078,6 +1088,42 @@ function renderDevoluciones(){
       </div>
       <button class="btn btn-primary btn-sm" onclick="confirmarRecepcion(${escapeHtml(i)})">Confirmar recepción física</button>
     </div>`).join('');
+}
+
+function renderPrestamosNoDevueltos(){
+  const tbody = document.getElementById('prestamosNoEntregadosTable');
+  if(!tbody) return;
+  if(!prestamosNoDevueltos.length){
+    tbody.innerHTML = '<tr><td colspan="7"><div class="empty-state"><p>No hay notebooks sin devolución confirmada.</p></div></td></tr>';
+    return;
+  }
+  tbody.innerHTML = prestamosNoDevueltos.map((loan, index)=>{
+    const pending = loan.estado==='devolucion_pendiente' && loan.returnId;
+    const label = pending ? 'Devolución pendiente' : 'Préstamo activo';
+    const action = pending
+      ? `<button class="btn btn-primary btn-sm" onclick="confirmarRecepcionPrestamo(${escapeHtml(index)})">Confirmar recepción</button>`
+      : '—';
+    return `<tr>
+      <td class="mono">${escapeHtml(loan.notebook)}</td>
+      <td>${escapeHtml(loan.nombre)} · ${escapeHtml(rolLabel[loan.rol] || loan.rol)} · ${escapeHtml(loan.legajo)}</td>
+      <td>${escapeHtml(loan.curso || '—')}</td>
+      <td>${escapeHtml(loan.retirada)}</td>
+      <td>${escapeHtml(loan.vence)}</td>
+      <td>${escapeHtml(label)}${pending && loan.horaPrevista ? ` · Hora informada ${escapeHtml(loan.horaPrevista)}` : ''}</td>
+      <td>${action}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function confirmarRecepcionPrestamo(index){
+  const loan = prestamosNoDevueltos[index];
+  if(!loan || loan.estado!=='devolucion_pendiente' || !loan.returnId) return;
+  try{
+    await apiRequest(`/api/admin/returns/${loan.returnId}/confirm`, {method:'POST'});
+    await cargarEstadoAPI();
+    renderAll();
+    showToast(`Recepción de ${loan.notebook} confirmada.`, 'success');
+  }catch(error){ showToast(error.message, 'warn'); }
 }
 
 async function confirmarRecepcion(idx){
