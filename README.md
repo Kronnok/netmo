@@ -49,3 +49,13 @@ migraciones de cuentas administradas, vencimiento de baneos y carros.
 `npm run db:seed` registra la aplicación del seed para evitar ejecutarlo una
 segunda vez. Las credenciales se suministran mediante variables de entorno y no
 deben guardarse en el repositorio.
+
+
+usuario administrador
+
+usuario: admin@gmail.com
+contra: admin123456
+
+pagina hosteada
+
+https://netmo.martin-cosmelli-galvan.workers.dev/ 
