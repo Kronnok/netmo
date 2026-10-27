@@ -65,12 +65,16 @@ consultar la API al entrar y despues de crear un reporte.
 Al resolver se guardan el usuario administrador y la fecha. La notebook
 relacionada vuelve a disponible solo si estaba en mantenimiento. Al reabrir,
 se limpian los datos de resolucion y la notebook no cambia automaticamente.
+La migracion `007-ticket-resolution-metadata.sql` incorpora esas columnas a
+bases ya inicializadas sin reescribir tickets existentes.
 
 2.3 Baneo de usuarios
 
-La funcion de permabaneo recibe el legajo del usuario seleccionado y busca ese
-usuario en la lista general de usuarios. En modo API, el cambio se persiste en
-PostgreSQL.
+El baneo recibe el legajo del usuario seleccionado y busca ese usuario en la
+lista general. El administrador puede elegir 1, 3, 7, 15 o 30 dias, o un baneo
+indefinido; tambien puede desbanear manualmente. Los baneos temporales vencidos
+se levantan automaticamente cuando el usuario vuelve a autenticarse. En modo
+API, el cambio se persiste en PostgreSQL.
 
 El baneo no esta limitado al usuario Teo. Teo es el unico que aparece inicialmente
 con demoras registradas, por eso es el unico candidato visible en los datos demo.
@@ -78,7 +82,7 @@ con demoras registradas, por eso es el unico candidato visible en los datos demo
 Cuando un usuario es baneado:
 
 - Su propiedad "baneado" pasa a true.
-- La vista administrativa muestra el estado de baneado permanente.
+- La vista administrativa muestra la duracion o fecha de vencimiento.
 - El usuario no puede iniciar sesion nuevamente.
 
 2.4 Reservas y año actual
@@ -134,11 +138,15 @@ lugar principal para esa accion.
 ----------------------------------------------
 
 - Los alumnos solo pueden solicitar una notebook.
+- Los profesores pueden solicitar de una a dos notebooks como reserva
+  individual.
+- Los profesores pueden solicitar lotes de tres a diez notebooks.
+- Las reservas individuales y los lotes quedan pendientes de aprobacion
+  administrativa; al aprobarse se puede registrar el retiro.
 - Un alumno o profesor no puede crear otra solicitud mientras tenga un prestamo,
   una devolucion pendiente de confirmacion o una reserva vigente con equipos.
-- Los profesores pueden solicitar varias notebooks escribiendo la cantidad.
-- La cantidad maxima se valida contra el stock disponible en la API y en la
-  interfaz.
+- La cantidad maxima tambien se valida contra el stock disponible en la API y
+  en la interfaz.
 - Las notebooks asignadas a reservas se registran en reservation_notebooks.
 
 2.9 Cambio manual de estado desde Inventario
@@ -224,9 +232,10 @@ La tabla reservations almacena:
 - Motivo.
 - Estado.
 
-Los lotes requieren al menos tres notebooks y solo pueden ser solicitados por
-profesores. Las reservas individuales pueden tener hasta 40 notebooks para
-soportar solicitudes de profesores.
+Las reservas individuales requieren aprobacion administrativa y admiten de una
+a dos notebooks para profesores; los alumnos solo pueden solicitar una. Los
+lotes requieren aprobacion, incluyen de tres a diez notebooks y solo pueden ser
+solicitados por profesores.
 
 La tabla reservation_notebooks relaciona cada reserva con sus equipos. Un indice
 unico parcial impide que una notebook tenga dos reservas activas. La asignacion
@@ -395,13 +404,15 @@ DELETE /api/reservations/:codigo
 
 Consulta y crea reservas. La API valida el año actual, el tipo de reserva, el rol
 del usuario, la cantidad, disponibilidad, dias y horarios. Tambien impide una
-nueva solicitud mientras el usuario tenga equipos pendientes.
+nueva solicitud mientras el usuario tenga equipos pendientes. Tanto las
+solicitudes individuales como los lotes comienzan pendientes de aprobacion.
 
 GET /api/admin/reservations
 POST /api/admin/reservations/:id/approve
 
-Permite al administrador consultar y aprobar solicitudes de lote. La aprobacion
-actualiza la reserva y convierte sus equipos asignados en prestamos.
+Permite al administrador consultar y aprobar solicitudes individuales o de
+lote. La aprobacion actualiza la reserva; el retiro posterior convierte sus
+equipos asignados en prestamos.
 
 GET /api/loans
 

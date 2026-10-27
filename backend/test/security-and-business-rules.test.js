@@ -210,7 +210,7 @@ test('todos los servicios detrás de rutas admin rechazan alumnos y aceptan admi
   }
 });
 
-test('el rechazo de lote modifica el estado y libera equipos dentro de una transacción', async () => {
+test('el rechazo de reservas modifica el estado y libera equipos dentro de una transacción', async () => {
   const originalTransaction = db.transaction;
   const calls = [];
   let transactionCalls = 0;
@@ -227,13 +227,43 @@ test('el rechazo de lote modifica el estado y libera equipos dentro de una trans
     });
   };
   try {
-    assert.deepEqual(await apiService.rejectReservation({}, { id: 1, rol: 'admin' }, { id: 8 }), { message: 'Lote rechazado' });
+    assert.deepEqual(await apiService.rejectReservation({}, { id: 1, rol: 'admin' }, { id: 8 }), { message: 'Solicitud rechazada' });
     assert.equal(transactionCalls, 1);
     assert.equal(calls.length, 2);
-    assert.match(calls[0].sql, /tipo = 'lote' AND estado IN \('pendiente_aprobacion', 'aprobada'\)/);
+    assert.match(calls[0].sql, /estado IN \('pendiente_aprobacion', 'aprobada'\)/);
+    assert.doesNotMatch(calls[0].sql, /tipo =/);
     assert.match(calls[1].sql, /UPDATE reservation_notebooks SET active = FALSE/);
     assert.deepEqual(calls[1].params, [8]);
   } finally {
+    db.transaction = originalTransaction;
+  }
+});
+
+test('admin puede aprobar una reserva individual pendiente y completar sus asignaciones', async () => {
+  const originalQuery = db.query;
+  const originalTransaction = db.transaction;
+  const calls = [];
+  db.query = async () => ({ rowCount: 0, rows: [] });
+  db.transaction = async (callback) => callback({
+    query: async (sql, params) => {
+      calls.push({ sql, params });
+      if (sql.includes('SELECT id, owner_id, cantidad, carro FROM reservations')) {
+        return { rowCount: 1, rows: [{ id: 9, owner_id: 4, cantidad: 2, carro: '1', tipo: 'individual' }] };
+      }
+      if (sql.includes('SELECT rn.notebook_id FROM reservation_notebooks')) return { rowCount: 0, rows: [] };
+      if (sql.includes('SELECT n.id FROM notebooks n')) return { rowCount: 2, rows: [{ id: 21 }, { id: 22 }] };
+      return { rowCount: 1, rows: [] };
+    }
+  });
+  try {
+    const result = await apiService.approveReservation({}, { id: 1, rol: 'admin' }, { id: 9 });
+    assert.deepEqual(result, { message: 'Solicitud aprobada' });
+    assert.match(calls[0].sql, /WHERE id = \$1 AND estado = 'pendiente_aprobacion'/);
+    assert.doesNotMatch(calls[0].sql, /tipo =/);
+    assert.ok(calls.some(({ sql }) => sql.includes("UPDATE reservations SET estado = 'aprobada'")));
+    assert.equal(calls.filter(({ sql }) => sql.includes('INSERT INTO reservation_notebooks')).length, 2);
+  } finally {
+    db.query = originalQuery;
     db.transaction = originalTransaction;
   }
 });
@@ -403,7 +433,7 @@ test('las reservas individuales y por lote asignan solo el carro seleccionado', 
       }
       if (sql.includes('INSERT INTO reservations')) {
         insertedReservations += 1;
-        return { rowCount: 1, rows: [{ id: insertedReservations, estado: params[8] }] };
+        return { rowCount: 1, rows: [{ id: insertedReservations, tipo: params[2], cantidad: params[5], estado: params[8] }] };
       }
       return { rowCount: 1, rows: [] };
     }
@@ -412,7 +442,7 @@ test('las reservas individuales y por lote asignan solo el carro seleccionado', 
   const retiroAt = new Date(now.getTime() + 24 * 60 * 60 * 1000);
   retiroAt.setUTCHours(14, 0, 0, 0);
   const request = (tipo, cantidad) => ({
-    tipo, cantidad, carro: '2', curso: tipo === 'lote' ? '6°14°' : undefined,
+    tipo, cantidad, carro: '2', curso: '6°14°',
     retiroAt: retiroAt.toISOString(), motivo: 'Trabajo'
   });
   try {
@@ -427,10 +457,23 @@ test('las reservas individuales y por lote asignan solo el carro seleccionado', 
     );
     selectedCarroExists = true;
     for (const [user, tipo, cantidad] of [
-      [{ id: 1, rol: 'alumno' }, 'individual', 1],
-      [{ id: 2, rol: 'profesor' }, 'lote', 3]
+      [{ id: 2, rol: 'profesor' }, 'individual', 3],
+      [{ id: 2, rol: 'profesor' }, 'lote', 2],
+      [{ id: 2, rol: 'profesor' }, 'lote', 11],
+      [{ id: 1, rol: 'alumno' }, 'individual', 2]
     ]) {
-      availableCount = cantidad - 1;
+      await assert.rejects(
+        apiService.createReservation(request(tipo, cantidad), user),
+        (error) => error.status === (tipo === 'lote' && user.rol !== 'profesor' ? 403 : 400)
+      );
+    }
+    for (const [user, tipo, cantidad] of [
+      [{ id: 1, rol: 'alumno' }, 'individual', 1],
+      [{ id: 2, rol: 'profesor' }, 'individual', 2],
+      [{ id: 2, rol: 'profesor' }, 'lote', 3],
+      [{ id: 2, rol: 'profesor' }, 'lote', 10]
+    ]) {
+      availableCount = 0;
       await assert.rejects(
         apiService.createReservation(request(tipo, cantidad), user),
         (error) => error.status === 409 && /carro seleccionado/.test(error.message)
@@ -439,9 +482,16 @@ test('las reservas individuales y por lote asignan solo el carro seleccionado', 
     assert.equal(insertedReservations, 0);
     availableCount = 1;
     await apiService.createReservation(request('individual', 1), { id: 1, rol: 'alumno' });
+    availableCount = 2;
+    const individual = await apiService.createReservation(request('individual', 2), { id: 2, rol: 'profesor' });
+    assert.equal(individual.reservation.estado, 'pendiente_aprobacion');
     availableCount = 3;
-    await apiService.createReservation(request('lote', 3), { id: 2, rol: 'profesor' });
-    assert.equal(insertedReservations, 2);
+    const batch = await apiService.createReservation(request('lote', 3), { id: 2, rol: 'profesor' });
+    assert.equal(batch.reservation.estado, 'pendiente_aprobacion');
+    availableCount = 10;
+    const largestBatch = await apiService.createReservation(request('lote', 10), { id: 2, rol: 'profesor' });
+    assert.equal(largestBatch.reservation.cantidad, 10);
+    assert.equal(insertedReservations, 4);
     const allocationCalls = calls.filter(call => call.sql.includes('SELECT n.id FROM notebooks n'));
     assert.ok(allocationCalls.every(call => call.params[0] === 2 && /n\.carro_id = \$1/.test(call.sql)));
     assert.ok(allocationCalls.every(call => /FOR UPDATE SKIP LOCKED/.test(call.sql)));
@@ -568,11 +618,24 @@ test('resolver tickets libera notebooks en una transacción y rechaza estados in
   }
 });
 
+test('la migración de resolución de tickets es incremental y conserva tickets existentes', () => {
+  const root = path.resolve(__dirname, '..', '..');
+  const migration = fs.readFileSync(path.join(root, 'database', 'migrations', '007-ticket-resolution-metadata.sql'), 'utf8');
+  const runner = fs.readFileSync(path.join(root, 'backend', 'scripts', 'db.js'), 'utf8');
+
+  assert.match(migration, /ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ/i);
+  assert.match(migration, /ADD COLUMN IF NOT EXISTS resolved_by BIGINT REFERENCES users\(id\)/i);
+  assert.doesNotMatch(migration, /\bUPDATE\s+tickets\b/i);
+  assert.match(runner, /'007-ticket-resolution-metadata\.sql'/);
+});
+
 test('la interfaz muestra selector reabrible, contador de texto, carro y curso estructurado', () => {
   const root = path.resolve(__dirname, '..', '..');
   const html = fs.readFileSync(path.join(root, 'frontend', 'index.html'), 'utf8');
   const app = fs.readFileSync(path.join(root, 'frontend', 'app.js'), 'utf8');
   assert.match(html, /id="resCarro"/);
+  assert.match(html, /id="resCantidad" min="1" max="2"/);
+  assert.match(html, /id="loteCantidad" min="3" max="10"/);
   assert.match(html, /type="number" id="resCursoAnio"/);
   assert.match(html, /type="number" id="resCursoDivision"/);
   assert.match(html, /id="fallaDesc" maxlength="50"/);
@@ -580,6 +643,13 @@ test('la interfaz muestra selector reabrible, contador de texto, carro y curso e
   assert.match(app, /renderAdminStateSelect\(`Cambiar estado de \$\{escapeHtml\(nb\.id\)\}/);
   assert.match(app, /renderAdminStateSelect\(`Cambiar estado del ticket \$\{escapeHtml\(t\.id\)\}/);
   assert.match(app, /function adminChangeState\(select\)/);
+  assert.match(app, /const canApprove = r\.estado==='pendiente_aprobacion'/);
+  assert.match(app, /const canReject = \['pendiente_aprobacion','aprobada'\]\.includes\(r\.estado\)/);
+  assert.match(app, /function aprobarSolicitud\(id\)/);
+  assert.match(app, /function pedirRechazoSolicitud\(id\)/);
+  assert.doesNotMatch(app, /function aprobarLote\(id\)/);
+  assert.doesNotMatch(app, /function pedirRechazoLote\(id\)/);
+  assert.match(app, /let reservationSubmitting = false/);
   assert.match(app, /void cargarCarrosReserva\(\)/);
   assert.match(app, /No se pudieron cargar los carros/);
   assert.match(app, /resCarroRetry/);

@@ -313,7 +313,8 @@ async function runFlows(users) {
       { retiroAt: '2000-01-01T10:00', cantidad: 1 },
       { retiroAt: reservationTime.slice(0, 10) + 'T12:00', cantidad: 1 },
       { retiroAt: reservationTime, cantidad: 0 },
-      { retiroAt: reservationTime, cantidad: 2 }
+      { retiroAt: reservationTime, cantidad: 2 },
+      { tipo: 'individual', retiroAt: reservationTime, cantidad: 3, curso: '6°14°' }
     ]) {
       const response = await request('POST', '/api/reservations', invalid, tokens.student);
       assert.equal(response.status, 400);
@@ -324,16 +325,17 @@ async function runFlows(users) {
     assert.equal(studentLot.status, 403);
   });
 
-  const reservationResponse = await report('reserva individual y confirmación de correo', async () => {
+  const reservationResponse = await report('reserva individual pendiente de aprobación', async () => {
     const result = await request('POST', '/api/reservations', {
       retiroAt: reservationTime, cantidad: 1, motivo: 'Prueba de integración'
     }, tokens.student);
     assert.equal(result.status, 201);
-    assert.equal(result.payload.reservation.estado, 'confirmada');
+    assert.equal(result.payload.reservation.estado, 'pendiente_aprobacion');
     return result.payload.reservation;
   });
 
   const loanId = await report('retiro, préstamo, solicitud de devolución y confirmación', async () => {
+    assert.equal((await request('POST', `/api/admin/reservations/${reservationResponse.id}/approve`, {}, tokens.admin)).status, 200);
     const checkout = await request('POST', `/api/admin/reservations/${reservationResponse.id}/checkout`, {}, tokens.admin);
     assert.equal(checkout.status, 200);
     assert.equal(checkout.payload.loansCreated, 1);
@@ -369,7 +371,21 @@ async function runFlows(users) {
     assert.ok(restored.payload.notebooks.some((notebook) => notebook.id === 'NB-001' && notebook.estado === 'disponible'));
   });
 
-  await report('lote profesor, aprobación y rechazo de lote', async () => {
+  await report('reserva individual de profesor: cantidad, aprobación y rechazo', async () => {
+    const individual = await request('POST', '/api/reservations', {
+      tipo: 'individual', retiroAt: reservationTime, cantidad: 2, curso: '6°14°', carro: '1'
+    }, tokens.professor);
+    assert.equal(individual.status, 201);
+    assert.equal(individual.payload.reservation.estado, 'pendiente_aprobacion');
+    assert.equal((await request('POST', `/api/admin/reservations/${individual.payload.reservation.id}/approve`, {}, tokens.admin)).status, 200);
+    assert.equal((await request('POST', `/api/admin/reservations/${individual.payload.reservation.id}/reject`, {}, tokens.admin)).status, 200);
+    const rejected = await pool.query(`SELECT estado FROM reservations WHERE id = $1`, [individual.payload.reservation.id]);
+    const activeLinks = await pool.query('SELECT COUNT(*)::integer AS count FROM reservation_notebooks WHERE reservation_id = $1 AND active', [individual.payload.reservation.id]);
+    assert.equal(rejected.rows[0].estado, 'rechazada');
+    assert.equal(activeLinks.rows[0].count, 0);
+  });
+
+  await report('lote profesor, aprobación y rechazo', async () => {
     const lot = await request('POST', '/api/reservations', {
       tipo: 'lote', retiroAt: reservationTime, cantidad: 3, curso: 'Curso test'
     }, tokens.professor);

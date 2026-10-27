@@ -244,7 +244,7 @@
         </button>
         <button class="action-card" data-roles="admin" onclick="switchView('admin-lotes')">
           <div class="action-icon" style="background:var(--purple-bg);color:var(--purple-text);">👥</div>
-          <div class="action-info"><h4>Aprobar lotes</h4><p>Solicitudes de profesores</p></div>
+          <div class="action-info"><h4>Revisar solicitudes</h4><p>Préstamos individuales y por lote</p></div>
           <span class="action-arrow">›</span>
         </button>
         <button class="action-card" data-roles="alumno,profesor,admin" onclick="openModal('normasModal')">
@@ -297,7 +297,7 @@
           <div class="form-grid">
             <div class="field" id="resCantidadWrap">
               <label for="resCantidad">Cantidad de equipos</label>
-              <input type="number" id="resCantidad" min="1" max="40" step="1" value="1" required>
+              <input type="number" id="resCantidad" min="1" max="2" step="1" value="1" required>
             </div>
             <div class="field" data-roles-el="profesor">
               <label>Curso / división</label>
@@ -333,10 +333,10 @@
             <div class="form-grid">
               <div class="field">
                 <label for="loteCantidad">Cantidad de equipos</label>
-                <input type="number" id="loteCantidad" min="3" max="40" value="10">
+                <input type="number" id="loteCantidad" min="3" max="10" value="10">
               </div>
             </div>
-            <p class="hint" style="margin-top:.6rem;">La solicitud de lote queda <b>pendiente de aprobación</b> del Administrador antes de confirmarse.</p>
+            <p class="hint" style="margin-top:.6rem;">La solicitud queda pendiente de aprobación del Administrador antes de confirmarse.</p>
           </div>
 
           <div id="resFechaError" class="field-error"></div>
@@ -683,7 +683,7 @@
 
 <div class="modal-overlay" id="rejectLoteModal">
   <div class="modal">
-    <h3>Rechazar solicitud de lote</h3>
+    <h3>Rechazar solicitud</h3>
     <p id="rejectLoteText">¿Seguro que querés rechazar esta solicitud?</p>
     <div class="modal-actions">
       <button class="btn" onclick="closeModal('rejectLoteModal')">Cancelar</button>
