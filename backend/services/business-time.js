@@ -59,13 +59,31 @@ function parseBusinessDateTime(value) {
   return result;
 }
 
-function loanDueAt(retiradaAt) {
+function loanDueAt(retiradaAt, horaDevolucion = null) {
   const retirada = new Date(retiradaAt);
   if (Number.isNaN(retirada.getTime())) throw new TypeError('La fecha de retiro no es válida');
   const { year, month, day } = businessTimeParts(retirada);
   const cierre = parseBusinessDateTime(`${year}-${month}-${day}T17:30`);
   if (!cierre) throw new Error('No se pudo calcular el cierre del día hábil');
+  if (horaDevolucion !== null && horaDevolucion !== undefined) {
+    if (typeof horaDevolucion !== 'string' || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(horaDevolucion)
+      || Number(horaDevolucion.slice(0, 2)) * 60 + Number(horaDevolucion.slice(3, 5)) > 17 * 60 + 30) {
+      throw new TypeError('La hora de devolución no es válida');
+    }
+    return parseBusinessDateTime(`${year}-${month}-${day}T${horaDevolucion}`);
+  }
   return new Date(Math.min(retirada.getTime() + 8 * 60 * 60 * 1000, cierre.getTime()));
+}
+
+function reservationReturnTimeError(retiradaAt, value) {
+  const message = 'La hora de devolución debe ser posterior al retiro y no superar las 17:30 del mismo día (Buenos Aires)';
+  if (!(retiradaAt instanceof Date) || Number.isNaN(retiradaAt.getTime())
+    || typeof value !== 'string' || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value)) return message;
+  const { year, month, day } = businessTimeParts(retiradaAt);
+  const requested = parseBusinessDateTime(`${year}-${month}-${day}T${value}`);
+  const minutes = Number(value.slice(0, 2)) * 60 + Number(value.slice(3, 5));
+  if (!requested || requested.getTime() <= retiradaAt.getTime() || minutes > 17 * 60 + 30) return message;
+  return null;
 }
 
 function returnTimeError(value, now = new Date()) {
@@ -97,6 +115,7 @@ module.exports = {
   businessTimeParts,
   loanDueAt,
   parseBusinessDateTime,
+  reservationReturnTimeError,
   reservationTimeError,
   returnTimeError
 };

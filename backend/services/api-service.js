@@ -1,7 +1,11 @@
 const crypto = require('node:crypto');
 const db = require('../data/database');
 const { AppError } = require('../errors');
-const { loanDueAt, returnTimeError } = require('./business-time');
+const {
+  loanDueAt,
+  reservationReturnTimeError,
+  returnTimeError
+} = require('./business-time');
 const { parseBusinessDateTime, reservationTimeError } = require('./business-time');
 const {
   requiredText,
@@ -58,6 +62,9 @@ function reservationPayload(body, user) {
   if (!retiroAt) throw new AppError('retiroAt inválido', 400);
   const timeError = reservationTimeError(retiroAt);
   if (timeError) throw new AppError(timeError, 400);
+  const horaDevolucion = body.horaDevolucion;
+  const horaDevolucionError = reservationReturnTimeError(retiroAt, horaDevolucion);
+  if (horaDevolucionError) throw new AppError(horaDevolucionError, 400);
   const quantity = Number(body.cantidad);
   if (!Number.isInteger(quantity) || quantity < 1 || quantity > 40) throw new AppError('Cantidad inválida', 400);
   if (user.rol === 'alumno' && quantity !== 1) throw new AppError('Los alumnos solo pueden pedir una notebook', 400);
@@ -83,6 +90,7 @@ function reservationPayload(body, user) {
     curso,
     cantidad: quantity,
     retiroAt,
+    horaDevolucion,
     motivo,
     estado: 'pendiente_aprobacion'
   };
@@ -251,7 +259,8 @@ const actions = {
     });
   },
   async reservations(_body, user) {
-    const result = await db.query(`SELECT r.codigo AS id, r.tipo, r.carro, r.curso, r.cantidad, r.retiro_at, r.motivo, r.estado,
+    const result = await db.query(`SELECT r.codigo AS id, r.tipo, r.carro, r.curso, r.cantidad,
+      r.retiro_at, r.hora_devolucion, r.motivo, r.estado,
       COALESCE(ARRAY_AGG(rn.notebook_id) FILTER (WHERE rn.active), '{}') AS notebook_ids
       FROM reservations r LEFT JOIN reservation_notebooks rn ON rn.reservation_id = r.id
       WHERE r.owner_id = $1 GROUP BY r.id ORDER BY retiro_at`, [user.id]);
@@ -273,9 +282,13 @@ const actions = {
       if (available.rowCount < reservation.cantidad) {
         throw new AppError('No hay suficientes notebooks disponibles en el carro seleccionado', 409);
       }
-      const inserted = await client.query(`INSERT INTO reservations (codigo, owner_id, tipo, carro, curso, cantidad, retiro_at, motivo, estado)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-        RETURNING id, codigo AS id_codigo, tipo, carro, curso, cantidad, retiro_at, motivo, estado`, Object.values(reservation));
+      const inserted = await client.query(`INSERT INTO reservations
+        (codigo, owner_id, tipo, carro, curso, cantidad, retiro_at, hora_devolucion, motivo, estado)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8::time, $9, $10)
+        RETURNING id, codigo AS id_codigo, tipo, carro, curso, cantidad, retiro_at,
+          hora_devolucion, motivo, estado`,
+      [reservation.code, reservation.ownerId, reservation.type, reservation.carro, reservation.curso,
+        reservation.cantidad, reservation.retiroAt, reservation.horaDevolucion, reservation.motivo, reservation.estado]);
       for (const notebook of available.rows) {
         await client.query('INSERT INTO reservation_notebooks (reservation_id, notebook_id, active) VALUES ($1, $2, TRUE)', [inserted.rows[0].id, notebook.id]);
       }
@@ -295,7 +308,8 @@ const actions = {
   },
   async adminReservations(_body, user) {
     requireAdmin(user, 'Solo admin puede consultar reservas');
-    const result = await db.query(`SELECT r.id, r.codigo, r.tipo, r.carro, r.curso, r.cantidad, r.retiro_at, r.motivo, r.estado,
+    const result = await db.query(`SELECT r.id, r.codigo, r.tipo, r.carro, r.curso, r.cantidad,
+      r.retiro_at, r.hora_devolucion, r.motivo, r.estado,
       u.legajo, u.nombre, COUNT(rn.notebook_id)::integer AS equipos_asignados
       FROM reservations r JOIN users u ON u.id = r.owner_id LEFT JOIN reservation_notebooks rn ON rn.reservation_id = r.id AND rn.active
       GROUP BY r.id, u.legajo, u.nombre ORDER BY r.retiro_at`);
@@ -350,7 +364,8 @@ const actions = {
   async checkoutReservation(_body, user, { id }) {
     requireAdmin(user, 'Solo admin puede registrar retiros');
     return db.transaction(async (client) => {
-      const reservationResult = await client.query(`SELECT id, owner_id, tipo, curso, cantidad, retiro_at, estado, carro
+      const reservationResult = await client.query(`SELECT id, owner_id, tipo, curso, cantidad,
+        retiro_at, hora_devolucion, estado, carro
         FROM reservations WHERE id = $1 AND estado IN ('confirmada', 'aprobada', 'retirada') FOR UPDATE`, [id]);
       if (!reservationResult.rowCount) throw new AppError('Reserva no encontrada o no lista para retiro', 404);
       const reservation = reservationResult.rows[0];
@@ -382,7 +397,7 @@ const actions = {
         notebooks = { rows: [...notebooks.rows, ...available.rows], rowCount: reservation.cantidad };
       }
       const retiradaAt = new Date();
-      const venceAt = loanDueAt(retiradaAt);
+      const venceAt = loanDueAt(retiradaAt, reservation.hora_devolucion);
       for (const notebook of notebooks.rows) {
         await client.query(`INSERT INTO loans (notebook_id, user_id, reservation_id, curso, retirada_at, vence_at, estado)
           VALUES ($1, $2, $3, $4, $5, $6, 'activo')`, [notebook.id, reservation.owner_id, id, reservation.curso, retiradaAt, venceAt]);
@@ -395,8 +410,11 @@ const actions = {
   },
   async loans(_body, user) {
     const result = await db.query(`SELECT l.id, n.codigo AS notebook, l.curso, l.retirada_at, l.vence_at,
-      l.devuelta_at, l.estado, r.estado AS devolucion_estado, r.hora_prevista FROM loans l
+      l.devuelta_at, l.estado, r.estado AS devolucion_estado, r.hora_prevista,
+      res.hora_devolucion,
+      (l.estado = 'activo' AND l.vence_at <= now()) AS vencido FROM loans l
       JOIN notebooks n ON n.id = l.notebook_id LEFT JOIN returns r ON r.loan_id = l.id
+      LEFT JOIN reservations res ON res.id = l.reservation_id
       WHERE l.user_id = $1 ORDER BY l.retirada_at DESC`, [user.id]);
     return { loans: result.rows };
   },
@@ -422,9 +440,10 @@ const actions = {
   async adminReturns(_body, user) {
     requireAdmin(user, 'Solo admin puede consultar devoluciones');
     const result = await db.query(`SELECT r.id, n.codigo AS notebook, u.legajo, u.nombre, l.curso,
-      r.solicitado_at, r.hora_prevista, l.vence_at
+      r.solicitado_at, r.hora_prevista, res.hora_devolucion, l.vence_at
       FROM returns r JOIN loans l ON l.id = r.loan_id JOIN notebooks n ON n.id = l.notebook_id
-      JOIN users u ON u.id = l.user_id WHERE r.estado = 'pendiente' ORDER BY r.solicitado_at`);
+      JOIN users u ON u.id = l.user_id LEFT JOIN reservations res ON res.id = l.reservation_id
+      WHERE r.estado = 'pendiente' ORDER BY r.solicitado_at`);
     return { returns: result.rows };
   },
   async confirmReturn(_body, user, { id }) {

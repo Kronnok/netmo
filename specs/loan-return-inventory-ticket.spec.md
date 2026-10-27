@@ -32,6 +32,16 @@ reservas o tickets.
 
 ### Devoluciones y vencimientos
 
+- El formulario de reservas de alumno y profesor incluye, junto a la hora de
+  retiro, una hora obligatoria de devolución del mismo día, posterior al retiro
+  y no mayor a 17:30 en Buenos Aires.
+- Para préstamos nuevos creados desde reservas con hora de devolución, esa hora
+  elegida es el vencimiento `vence_at`. Reservas históricas sin esta hora
+  conservan el cálculo anterior al retirarlas.
+- Si pasa el vencimiento elegido sin que se haya informado la entrega, mostrar
+  el préstamo como vencido/demorado, manteniéndolo activo y bajo responsabilidad
+  del usuario. No cambiarlo automáticamente a `devolucion_pendiente`, que sigue
+  significando que el usuario informó que ya entregó el equipo.
 - Alumno o profesor solicita la devolución indicando una hora de hoy, en
   `America/Argentina/Buenos_Aires`, posterior al instante actual y hasta las
   17:30 inclusive.
@@ -43,9 +53,15 @@ reservas o tickets.
 - Guardar la hora en `returns.hora_prevista`, nullable, mediante migración
   incremental nueva y reflejarla en `schema.sql`, "Mis préstamos" y el panel
   administrativo de devoluciones.
-- Solo los préstamos creados después del cambio vencen al menor entre retiro +
-  ocho horas y las 17:30 del mismo día local. La detección de tardanza usa el
-  `vence_at` guardado y la devolución efectiva confirmada.
+- Persistir `hora_devolucion` nullable en reservas con una migración incremental
+  nueva y reflejarla en `schema.sql`, la lista de reservas, administración y el
+  préstamo creado.
+- Para reservas históricas que no tengan hora programada, conservar el
+  vencimiento menor entre retiro + ocho horas y las 17:30 del mismo día local.
+- La detección de tardanza confirmada sigue comparando la entrega efectiva con
+  el `vence_at` guardado. Un préstamo aún no entregado se muestra vencido cuando
+  `vence_at` pasó, pero no se registra en `late_returns` hasta confirmar la
+  devolución.
 
 ### Inventario
 
@@ -74,6 +90,7 @@ reservas o tickets.
   `backend/scripts/run-integration.js`.
 - `frontend/app.js` y `frontend/index.html`.
 - `database/schema.sql` y una nueva migración SQL incremental.
+- Una migración incremental adicional para la hora de devolución de reservas.
 - Esta especificación como documentación del cambio.
 
 ## Criterios de aceptación
@@ -83,8 +100,9 @@ reservas o tickets.
 2. Tests cubren hora posterior a ahora, límite 17:30, rechazo 400 y lectura de la
    hora en ambas vistas.
 3. Tests verifican los dos límites de vencimiento en zona Buenos Aires y que
-   solo el vencimiento de préstamos nuevos cambia; una confirmación posterior
-   al `vence_at` guardado sigue registrando tardanza.
+   las reservas nuevas usan la hora elegida, las históricas mantienen el cálculo
+   anterior y una confirmación posterior al `vence_at` guardado sigue
+   registrando tardanza.
 4. Tests verifican el filtro para todos los estados y que una reserva activa no
    oculte un estado físico.
 5. Tests cubren las transiciones de tickets y la protección ante otros tickets

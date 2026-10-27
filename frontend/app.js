@@ -98,7 +98,9 @@ async function cargarEstadoAPI(){
     return {
       id:reserva.id || reserva.codigo, ownerLegajo:reserva.legajo || currentUser.legajo, ownerNombre:reserva.nombre || currentUser.nombre,
       tipo:reserva.tipo, carro:reserva.carro, curso:reserva.curso, cantidad:`${reserva.cantidad} ${reserva.cantidad===1?'notebook':'notebooks'}`,
-      fecha:`${retiro.year}-${retiro.month}-${retiro.day}`, hora:`${retiro.hour}:${retiro.minute}`, motivo:reserva.motivo,
+      fecha:`${retiro.year}-${retiro.month}-${retiro.day}`, hora:`${retiro.hour}:${retiro.minute}`,
+      horaDevolucion:reserva.hora_devolucion ? String(reserva.hora_devolucion).slice(0,5) : null,
+      motivo:reserva.motivo,
       estado:reserva.estado, notebookIds:reserva.notebook_ids || []
     };
   });
@@ -118,6 +120,7 @@ async function cargarEstadoAPI(){
       id:item.id, notebookId:item.notebook, alumnoLegajo:item.legajo, alumnoNombre:item.nombre,
       curso:item.curso, fechaSolicitud:formatBusinessDateTime(item.solicitado_at),
       horaPrevista:item.hora_prevista ? String(item.hora_prevista).slice(0,5) : null,
+      horaDevolucion:item.hora_devolucion ? String(item.hora_devolucion).slice(0,5) : null,
       rol:'alumno', returnId:item.id
     }));
     usuariosRegistrados = [...studentsData.users, ...teachersData.users];
@@ -134,6 +137,8 @@ async function cargarEstadoAPI(){
     prestamosActivos[currentUser.legajo].push({
       id:loan.notebook, curso:loan.curso, desde:formatBusinessDateTime(loan.retirada_at),
       vence:formatBusinessDateTime(loan.vence_at),
+      horaDevolucion:loan.hora_devolucion ? String(loan.hora_devolucion).slice(0,5) : null,
+      vencido:Boolean(loan.vencido),
       horaPrevista:loan.hora_prevista ? String(loan.hora_prevista).slice(0,5) : null,
       pendiente:loan.estado!=='activo', loanId:loan.id
     });
@@ -968,7 +973,8 @@ function renderPrestamoActivo(){
     </div>` : `
     <div class="action-card" style="cursor:default;margin-bottom:.8rem;">
       <div class="action-icon" style="background:var(--blue-bg);color:var(--blue-text);">💻</div>
-      <div class="action-info"><h4>${escapeHtml(prestamo.id)}</h4><p>Retirada ${escapeHtml(prestamo.desde)} · Vence ${escapeHtml(prestamo.vence)}</p></div>
+      <div class="action-info"><h4>${escapeHtml(prestamo.id)}</h4><p>Retirada ${escapeHtml(prestamo.desde)} · Hora de devolución ${escapeHtml(prestamo.horaDevolucion || '—')} · Vence ${escapeHtml(prestamo.vence)}</p></div>
+      ${prestamo.vencido ? '<span class="badge badge-vencido">Plazo vencido</span>' : ''}
       <button class="btn btn-primary btn-sm" onclick="openReturnModal(${escapeHtml(JSON.stringify(prestamo.loanId))})">Devolver</button>
     </div>`).join('');
 }
@@ -977,7 +983,7 @@ function renderHistorialPrestamos(){
   const tbody = document.getElementById('historialPrestamosTable');
   if(!tbody) return;
   if(historialPrestamos.length===0){
-    tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state">
+    tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state">
       <div class="glyph">📋</div><h4>No tenés historial de préstamos</h4><p>Los préstamos que retires aparecerán acá.</p>
     </div></td></tr>`;
     return;
@@ -988,8 +994,10 @@ function renderHistorialPrestamos(){
     const demorada = loan.devuelta_at && new Date(loan.devuelta_at) > new Date(loan.vence_at);
     const label = loan.estado==='devuelto' ? (demorada ? 'Devuelta con demora' : 'Devuelta a tiempo') : (loan.estado==='devolucion_pendiente' ? 'Devolución pendiente' : 'Préstamo activo');
     const badge = loan.estado==='devuelto' ? (demorada ? 'badge-vencido' : 'badge-resuelto') : (loan.estado==='devolucion_pendiente' ? 'badge-pendiente_devolucion' : 'badge-prestada');
+    const horaDevolucion = loan.hora_devolucion ? String(loan.hora_devolucion).slice(0,5) : '—';
     const horaPrevista = loan.hora_prevista ? String(loan.hora_prevista).slice(0,5) : '—';
-    return `<tr><td class="mono">${escapeHtml(loan.notebook)}</td><td>${escapeHtml(retirada)}</td><td>${escapeHtml(horaPrevista)}</td><td>${escapeHtml(devuelta)}</td><td><span class="badge ${escapeHtml(badge)}">${escapeHtml(label)}</span></td></tr>`;
+    const overdueLabel = loan.estado==='activo' && loan.vencido ? ' · Plazo vencido' : '';
+    return `<tr><td class="mono">${escapeHtml(loan.notebook)}</td><td>${escapeHtml(retirada)}</td><td>${escapeHtml(horaDevolucion)}</td><td>${escapeHtml(horaPrevista)}</td><td>${escapeHtml(devuelta)}</td><td><span class="badge ${escapeHtml(badge)}">${escapeHtml(label+overdueLabel)}</span></td></tr>`;
   }).join('');
 }
 
@@ -1066,7 +1074,7 @@ function renderDevoluciones(){
       <div class="action-icon" style="background:var(--red-bg);color:var(--red-text);">📥</div>
       <div class="action-info">
         <h4>${escapeHtml(n.notebookId)} · ${escapeHtml(n.alumnoNombre)}</h4>
-        <p>${escapeHtml(n.curso)} · Legajo ${escapeHtml(n.alumnoLegajo)} · Solicitado ${escapeHtml(n.fechaSolicitud)} · Hora prevista ${escapeHtml(n.horaPrevista || 'No informada')}</p>
+        <p>${escapeHtml(n.curso)} · Legajo ${escapeHtml(n.alumnoLegajo)} · Solicitado ${escapeHtml(n.fechaSolicitud)} · Hora acordada ${escapeHtml(n.horaDevolucion || 'No informada')} · Hora informada ${escapeHtml(n.horaPrevista || 'No informada')}</p>
       </div>
       <button class="btn btn-primary btn-sm" onclick="confirmarRecepcion(${escapeHtml(i)})">Confirmar recepción física</button>
     </div>`).join('');
@@ -1124,10 +1132,20 @@ function validarFechaHora(fechaStr, horaStr){
   return {valid:true, msg:''};
 }
 
+function validarHoraDevolucionReserva(horaRetiro, horaDevolucion){
+  if(!horaDevolucion) return 'Completá la hora de devolución.';
+  if(!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(horaDevolucion)
+    || horaDevolucion <= horaRetiro || horaDevolucion > '17:30'){
+    return 'La hora de devolución debe ser posterior al retiro y no superar las 17:30 (Buenos Aires).';
+  }
+  return '';
+}
+
 async function crearReservaAPI(e){
   if(reservationSubmitting) return;
   const fecha = document.getElementById('resFecha').value;
   const hora = document.getElementById('resHora').value;
+  const horaDevolucion = document.getElementById('resHoraDevolucion').value;
   const esLote = rolActivo==='profesor' && document.getElementById('loteToggle').checked;
   const cantidad = esLote ? Number(document.getElementById('loteCantidad').value) : (rolActivo==='profesor' ? Number(document.getElementById('resCantidad').value) : 1);
   const anio = document.getElementById('resCursoAnio').value;
@@ -1139,6 +1157,8 @@ async function crearReservaAPI(e){
   const errorBox = document.getElementById('resFechaError');
   const check = validarFechaHora(fecha, hora);
   if(!check.valid){ errorBox.textContent = check.msg; showToast(check.msg, 'warn'); return; }
+  const returnTimeError = validarHoraDevolucionReserva(hora, horaDevolucion);
+  if(returnTimeError){ errorBox.textContent = returnTimeError; showToast(returnTimeError, 'warn'); return; }
   if(!carro){
     errorBox.textContent = 'Seleccioná un carro con notebooks disponibles.';
     showToast(errorBox.textContent, 'warn');
@@ -1170,7 +1190,8 @@ async function crearReservaAPI(e){
   actualizarControlesReserva();
   try{
     await apiRequest('/api/reservations', {method:'POST', body:JSON.stringify({
-      tipo:esLote ? 'lote' : 'individual', cantidad, curso, carro, retiroAt:`${fecha}T${hora}:00`, motivo
+      tipo:esLote ? 'lote' : 'individual', cantidad, curso, carro,
+      retiroAt:`${fecha}T${hora}:00`, horaDevolucion, motivo
     })});
     document.getElementById('reservaForm').reset();
     document.getElementById('loteToggle').checked = false;
@@ -1220,7 +1241,7 @@ function renderReservas(){
       <div class="action-icon">${r.tipo==='lote' ? '👥' : '📅'}</div>
       <div class="action-info">
         <h4>${escapeHtml(r.tipo==='lote' || r.curso ? (r.curso+' · '+r.cantidad+' equipos') : r.cantidad)}</h4>
-        <p>${escapeHtml(formatFecha(r.fecha))} · ${escapeHtml(r.hora)} — ${escapeHtml(r.motivo)}</p>
+        <p>Retiro ${escapeHtml(formatFecha(r.fecha))} · ${escapeHtml(r.hora)} · Devolución ${escapeHtml(r.horaDevolucion || '—')} — ${escapeHtml(r.motivo)}</p>
       </div>
       <span class="badge badge-${escapeHtml(r.estado)}" style="margin-right:.5rem;">${escapeHtml(estadoLabelMap[r.estado] || r.estado)}</span>
       ${r.estado==='pendiente_aprobacion' || r.estado==='confirmada' ? `<button class="btn btn-sm btn-danger-outline" onclick="cancelarReserva(${escapeHtml(JSON.stringify(r.id))})">Cancelar</button>` : ''}
@@ -1259,7 +1280,7 @@ function renderLotes(){
       <div class="action-icon" style="background:${r.tipo==='lote'?'var(--purple-bg)':'var(--blue-bg)'};color:${r.tipo==='lote'?'var(--purple-text)':'var(--blue-text)'};">${r.tipo==='lote'?'👥':'📅'}</div>
       <div class="action-info">
         <h4>${escapeHtml(heading)}</h4>
-        <p>${escapeHtml(r.ownerNombre)} · ${escapeHtml(formatFecha(r.fecha))} ${escapeHtml(r.hora)} · ${escapeHtml(r.motivo || 'Sin especificar')}</p>
+        <p>${escapeHtml(r.ownerNombre)} · Retiro ${escapeHtml(formatFecha(r.fecha))} ${escapeHtml(r.hora)} · Devolución ${escapeHtml(r.horaDevolucion || '—')} · ${escapeHtml(r.motivo || 'Sin especificar')}</p>
       </div>
       <span class="badge">${escapeHtml(labels[r.estado] || r.estado)}</span>
       ${canApprove?`<button class="btn btn-sm btn-success-outline" onclick="aprobarSolicitud(${escapeHtml(JSON.stringify(r.id))})">Aprobar</button>`:''}
@@ -1573,12 +1594,21 @@ function toggleTheme(){
 function updateReservationMinima(){
   const dateInput = document.getElementById('resFecha');
   const timeInput = document.getElementById('resHora');
+  const returnTimeInput = document.getElementById('resHoraDevolucion');
   const now = businessDateParts(new Date());
   const today = `${now.year}-${now.month}-${now.day}`;
   dateInput.min = today;
   dateInput.max = `${now.year}-12-31`;
   timeInput.min = dateInput.value===today ? `${now.hour}:${now.minute}` : '08:00';
   timeInput.max = '17:40';
+  returnTimeInput.max = '17:30';
+  if(timeInput.value){
+    const [hour, minute] = timeInput.value.split(':').map(Number);
+    const nextMinute = Math.min(hour * 60 + minute + 1, 17 * 60 + 31);
+    returnTimeInput.min = `${String(Math.floor(nextMinute / 60)).padStart(2, '0')}:${String(nextMinute % 60).padStart(2, '0')}`;
+  }else{
+    returnTimeInput.min = '08:01';
+  }
 }
 
 function initializeTextLimits(){
@@ -1605,8 +1635,10 @@ function initializeTextLimits(){
 updateReservationMinima();
 document.getElementById('resFecha').addEventListener('change', updateReservationMinima);
 document.getElementById('resHora').addEventListener('focus', updateReservationMinima);
+document.getElementById('resHora').addEventListener('input', updateReservationMinima);
 document.getElementById('reservaForm').addEventListener('reset', ()=>{
   document.getElementById('resCursoPreview').textContent = 'Se enviará como A°D° (por ejemplo, 2°14°).';
+  setTimeout(updateReservationMinima);
 });
 initializeTextLimits();
 ['resCursoAnio', 'resCursoDivision'].forEach(id=>{

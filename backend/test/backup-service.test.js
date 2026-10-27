@@ -30,7 +30,7 @@ function createValidBackup() {
     'created_at', 'user_id', 'email_notifications', 'return_reminder_minutes', 'updated_at',
     'numero', 'codigo', 'estado', 'ubicacion', 'carro_id', 'prestado_a', 'owner_id', 'tipo',
     'carro', 'curso', 'cantidad', 'retiro_at', 'motivo', 'reservation_id', 'notebook_id',
-    'active', 'vence_at', 'retirada_at', 'devuelta_at', 'loan_id', 'solicitado_at',
+    'active', 'vence_at', 'retirada_at', 'devuelta_at', 'loan_id', 'solicitado_at', 'hora_devolucion',
     'hora_prevista', 'confirmado_at', 'confirmado_por', 'descripcion', 'resolved_at', 'resolved_by',
     'returned_at', 'due_at'
   ])]));

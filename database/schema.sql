@@ -74,6 +74,7 @@ CREATE TABLE reservations (
   curso VARCHAR(120),
   cantidad INTEGER NOT NULL CHECK (cantidad > 0 AND cantidad <= 40),
   retiro_at TIMESTAMPTZ NOT NULL,
+  hora_devolucion TIME,
   motivo TEXT NOT NULL DEFAULT 'Sin especificar',
   estado reservation_status NOT NULL DEFAULT 'confirmada',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),

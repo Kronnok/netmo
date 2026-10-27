@@ -277,7 +277,7 @@
     <div class="card" style="margin-top:1.5rem;">
       <div class="card-header"><div><h3>Historial de préstamos</h3><p>Últimos movimientos registrados a tu nombre.</p></div></div>
       <table>
-        <thead><tr><th>Notebook</th><th>Retirada</th><th>Hora prevista</th><th>Devuelta</th><th>Estado</th></tr></thead>
+        <thead><tr><th>Notebook</th><th>Retirada</th><th>Hora de devolución</th><th>Hora informada</th><th>Devuelta</th><th>Estado</th></tr></thead>
         <tbody id="historialPrestamosTable"></tbody>
       </table>
     </div>
@@ -287,7 +287,7 @@
   <section class="view" id="view-reservas">
     <div class="view-grid">
       <div class="card">
-        <div class="card-header"><div><h3>Nueva reserva</h3><p>Elegí carro, fecha y horario de retiro.</p></div></div>
+        <div class="card-header"><div><h3>Nueva reserva</h3><p>Elegí carro, fecha, retiro y hora de devolución.</p></div></div>
 
         <div class="toggle-row" id="loteToggleWrap" style="display:none;margin-bottom:1.1rem;">
           <input type="checkbox" id="loteToggle" onchange="toggleLoteBlock()">
@@ -322,6 +322,11 @@
               <label for="resHora">Hora de retiro</label>
               <input type="time" id="resHora" required>
               <span class="hint">Lunes a viernes: 08:00–11:50 y 13:30–17:40 (Buenos Aires).</span>
+            </div>
+            <div class="field">
+              <label for="resHoraDevolucion">Hora de devolución</label>
+              <input type="time" id="resHoraDevolucion" min="08:01" max="17:30" step="60" required>
+              <span class="hint">El mismo día, después del retiro y hasta las 17:30 (Buenos Aires).</span>
             </div>
             <div class="field full">
               <label for="resMotivo">Motivo / materia</label>

@@ -25,7 +25,8 @@ async function migrate() {
       '005-password-resets.sql',
       '006-admin-backup-audit.sql',
       '007-ticket-resolution-metadata.sql',
-      '008-return-scheduled-time.sql'
+      '008-return-scheduled-time.sql',
+      '009-reservation-return-time.sql'
     ];
     for (const version of migrations) {
       const applied = await client.query('SELECT 1 FROM schema_migrations WHERE version = $1', [version]);

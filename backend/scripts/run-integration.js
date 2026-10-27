@@ -318,24 +318,30 @@ async function runFlows(users) {
   const reservationTime = nextBusinessTime();
   await report('validaciones de reserva: fechas pasadas, franja horaria y cantidad', async () => {
     for (const invalid of [
-      { retiroAt: '2000-01-01T10:00', cantidad: 1 },
-      { retiroAt: reservationTime.slice(0, 10) + 'T12:00', cantidad: 1 },
-      { retiroAt: reservationTime, cantidad: 0 },
-      { retiroAt: reservationTime, cantidad: 2 },
-      { tipo: 'individual', retiroAt: reservationTime, cantidad: 3, curso: '6°14°' }
+      { retiroAt: '2000-01-01T10:00', horaDevolucion: '17:30', cantidad: 1 },
+      { retiroAt: reservationTime.slice(0, 10) + 'T12:00', horaDevolucion: '17:30', cantidad: 1 },
+      { retiroAt: reservationTime, horaDevolucion: '17:31', cantidad: 1 },
+      { retiroAt: reservationTime, horaDevolucion: '17:30', cantidad: 0 },
+      { retiroAt: reservationTime, horaDevolucion: '17:30', cantidad: 2 },
+      { tipo: 'individual', retiroAt: reservationTime, horaDevolucion: '17:30', cantidad: 3, curso: '6°14°' }
     ]) {
       const response = await request('POST', '/api/reservations', invalid, tokens.student);
       assert.equal(response.status, 400);
     }
+    const missingReturnHour = await request('POST', '/api/reservations', {
+      retiroAt: reservationTime, cantidad: 1
+    }, tokens.student);
+    assert.equal(missingReturnHour.status, 400);
+    assert.match(missingReturnHour.payload.error, /hora de devolución/);
     const studentLot = await request('POST', '/api/reservations', {
-      tipo: 'lote', retiroAt: reservationTime, cantidad: 3, curso: 'Curso test'
+      tipo: 'lote', retiroAt: reservationTime, horaDevolucion: '17:30', cantidad: 3, curso: 'Curso test'
     }, tokens.student);
     assert.equal(studentLot.status, 403);
   });
 
   const reservationResponse = await report('reserva individual pendiente de aprobación', async () => {
     const result = await request('POST', '/api/reservations', {
-      retiroAt: reservationTime, cantidad: 1, motivo: 'Prueba de integración'
+      retiroAt: reservationTime, horaDevolucion: '17:30', cantidad: 1, motivo: 'Prueba de integración'
     }, tokens.student);
     assert.equal(result.status, 201);
     assert.equal(result.payload.reservation.estado, 'pendiente_aprobacion');
@@ -352,7 +358,7 @@ async function runFlows(users) {
     assert.equal(loans.payload.loans.length, 1);
     const id = loans.payload.loans[0].id;
     const loan = loans.payload.loans[0];
-    assert.equal(new Date(loan.vence_at).getTime(), loanDueAt(new Date(loan.retirada_at)).getTime());
+    assert.equal(new Date(loan.vence_at).getTime(), loanDueAt(new Date(loan.retirada_at), reservationResponse.hora_devolucion).getTime());
     const missingTime = await request('POST', `/api/loans/${id}/return`, {}, tokens.student);
     assert.equal(missingTime.status, 400);
     assert.match(missingTime.payload.error, /17:30/);
@@ -533,7 +539,7 @@ async function runFlows(users) {
 
   await report('reserva individual de profesor: cantidad, aprobación y rechazo', async () => {
     const individual = await request('POST', '/api/reservations', {
-      tipo: 'individual', retiroAt: reservationTime, cantidad: 2, curso: '6°14°', carro: '1'
+      tipo: 'individual', retiroAt: reservationTime, horaDevolucion: '17:30', cantidad: 2, curso: '6°14°', carro: '1'
     }, tokens.professor);
     assert.equal(individual.status, 201);
     assert.equal(individual.payload.reservation.estado, 'pendiente_aprobacion');
@@ -547,7 +553,7 @@ async function runFlows(users) {
 
   await report('lote profesor, aprobación y rechazo', async () => {
     const lot = await request('POST', '/api/reservations', {
-      tipo: 'lote', retiroAt: reservationTime, cantidad: 3, curso: 'Curso test'
+      tipo: 'lote', retiroAt: reservationTime, horaDevolucion: '17:30', cantidad: 3, curso: 'Curso test'
     }, tokens.professor);
     assert.equal(lot.status, 201);
     assert.equal(lot.payload.reservation.estado, 'pendiente_aprobacion');
@@ -557,7 +563,7 @@ async function runFlows(users) {
 
   await report('cancelación de reserva', async () => {
     const created = await request('POST', '/api/reservations', {
-      retiroAt: reservationTime, cantidad: 1
+      retiroAt: reservationTime, horaDevolucion: '17:30', cantidad: 1
     }, tokens.cancel);
     assert.equal(created.status, 201);
     const code = created.payload.reservation.id_codigo;

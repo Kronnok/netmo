@@ -57,7 +57,7 @@ test('flujo API reserva, retiro, préstamo, devolución e historial', { skip: re
     if (statement.startsWith('INSERT INTO reservations')) {
       reservation = {
         id: '77', codigo: params[0], owner_id: params[1], tipo: params[2], carro: params[3], curso: params[4],
-        cantidad: params[5], retiro_at: params[6], motivo: params[7], estado: params[8]
+        cantidad: params[5], retiro_at: params[6], hora_devolucion: params[7], motivo: params[8], estado: params[9]
       };
       return { rowCount: 1, rows: [reservation] };
     }
@@ -65,7 +65,7 @@ test('flujo API reserva, retiro, préstamo, devolución e historial', { skip: re
       reservationLink = { reservation_id: params[0], notebook_id: params[1], active: true };
       return { rowCount: 1, rows: [] };
     }
-    if (statement.startsWith('SELECT id, owner_id, tipo, curso, cantidad, retiro_at, estado, carro FROM reservations')) {
+    if (statement.startsWith('SELECT id, owner_id, tipo, curso, cantidad, retiro_at, hora_devolucion, estado, carro FROM reservations')) {
       return { rowCount: reservation ? 1 : 0, rows: reservation ? [reservation] : [] };
     }
     if (statement.startsWith('SELECT id FROM loans WHERE reservation_id')) return { rowCount: loan ? 1 : 0, rows: loan ? [{ id: loan.id }] : [] };
@@ -138,11 +138,18 @@ test('flujo API reserva, retiro, préstamo, devolución e historial', { skip: re
       rowCount: reservation ? 1 : 0,
       rows: reservation ? [{
         id: reservation.codigo, tipo: reservation.tipo, carro: reservation.carro, curso: reservation.curso, cantidad: reservation.cantidad,
-        retiro_at: reservation.retiro_at, motivo: reservation.motivo, estado: reservation.estado, notebook_ids: [notebook.id]
+        retiro_at: reservation.retiro_at, hora_devolucion: reservation.hora_devolucion,
+        motivo: reservation.motivo, estado: reservation.estado, notebook_ids: [notebook.id]
       }] : []
     };
-    if (statement.startsWith('SELECT l.id, n.codigo AS notebook')) return { rowCount: loan ? 1 : 0, rows: loan ? [{ ...loan, hora_prevista: returnRequest?.hora_prevista ?? null, devolucion_estado: returnRequest?.estado ?? null }] : [] };
-    if (statement.startsWith('SELECT r.id, n.codigo AS notebook')) return { rowCount: returnRequest?.estado === 'pendiente' ? 1 : 0, rows: returnRequest?.estado === 'pendiente' ? [{ id: returnRequest.id, notebook: notebook.codigo, hora_prevista: returnRequest.hora_prevista }] : [] };
+    if (statement.startsWith('SELECT l.id, n.codigo AS notebook')) return { rowCount: loan ? 1 : 0, rows: loan ? [{
+      ...loan, hora_devolucion: reservation.hora_devolucion,
+      hora_prevista: returnRequest?.hora_prevista ?? null, devolucion_estado: returnRequest?.estado ?? null
+    }] : [] };
+    if (statement.startsWith('SELECT r.id, n.codigo AS notebook')) return { rowCount: returnRequest?.estado === 'pendiente' ? 1 : 0, rows: returnRequest?.estado === 'pendiente' ? [{
+      id: returnRequest.id, notebook: notebook.codigo, hora_prevista: returnRequest.hora_prevista,
+      hora_devolucion: reservation.hora_devolucion
+    }] : [] };
     throw new Error(`Consulta de lectura no prevista en prueba de flujo: ${statement}`);
   };
   authService.authenticate = async (request) => request.headers.authorization === 'Bearer workflow-admin'
@@ -170,7 +177,8 @@ test('flujo API reserva, retiro, préstamo, devolución e historial', { skip: re
     assert.equal(availableCars.payload.carros[0].disponibles, 1);
 
     const created = await apiCall('POST', '/api/reservations', {
-      tipo: 'individual', cantidad: 1, curso: '6°14°', carro: '2', retiroAt: nextBusinessReservationTime().toISOString(), motivo: 'Práctica'
+      tipo: 'individual', cantidad: 1, curso: '6°14°', carro: '2', retiroAt: nextBusinessReservationTime().toISOString(),
+      horaDevolucion: '17:30', motivo: 'Práctica'
     }, 'profesor');
     assert.equal(created.status, 201);
     assert.equal(created.payload.reservation.id, reservation.id);
@@ -178,17 +186,20 @@ test('flujo API reserva, retiro, préstamo, devolución e historial', { skip: re
 
     const listedReservations = await apiCall('GET', '/api/reservations', undefined, 'profesor');
     assert.equal(listedReservations.payload.reservations[0].id, reservation.codigo);
+    assert.equal(listedReservations.payload.reservations[0].hora_devolucion, '17:30');
 
     const checkout = await apiCall('POST', '/api/admin/reservations/77/checkout', {}, 'admin');
     assert.equal(checkout.status, 200);
     assert.equal(checkout.payload.loansCreated, 1);
     assert.equal(reservation.estado, 'retirada');
     assert.equal(reservationLink.active, false);
-    assert.equal(loan.vence_at.getTime(), loanDueAt(loan.retirada_at).getTime());
+    assert.equal(loan.vence_at.getTime(), loanDueAt(loan.retirada_at, '17:30').getTime());
+    assert.equal(reservation.hora_devolucion, '17:30');
 
     const activeLoans = await apiCall('GET', '/api/loans', undefined, 'profesor');
     assert.equal(activeLoans.payload.loans[0].estado, 'activo');
     assert.equal(activeLoans.payload.loans[0].notebook, notebook.codigo);
+    assert.equal(activeLoans.payload.loans[0].hora_devolucion, '17:30');
 
     const request = await apiCall('POST', '/api/loans/80/return', { horaPrevista: returnHour }, 'profesor');
     assert.equal(request.status, 202);
@@ -199,6 +210,7 @@ test('flujo API reserva, retiro, préstamo, devolución e historial', { skip: re
     const adminReturns = await apiCall('GET', '/api/admin/returns', undefined, 'admin');
     assert.equal(adminReturns.payload.returns[0].id, '90');
     assert.equal(adminReturns.payload.returns[0].hora_prevista, returnHour);
+    assert.equal(adminReturns.payload.returns[0].hora_devolucion, '17:30');
     assert.equal((await apiCall('GET', '/api/loans', undefined, 'profesor')).payload.loans[0].hora_prevista, returnHour);
 
     await apiCall('POST', '/api/admin/returns/90/confirm', {}, 'admin');

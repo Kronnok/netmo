@@ -72,6 +72,8 @@ test('las reservas interpretan fechas y horarios en Buenos Aires', () => {
 test('el vencimiento de préstamos y la hora prevista de devolución usan Buenos Aires', () => {
   assert.equal(loanDueAt(parseBusinessDateTime('2026-01-05T08:00')).toISOString(), '2026-01-05T19:00:00.000Z');
   assert.equal(loanDueAt(parseBusinessDateTime('2026-01-05T10:00')).toISOString(), '2026-01-05T20:30:00.000Z');
+  assert.equal(loanDueAt(parseBusinessDateTime('2026-01-05T10:00'), '16:45').toISOString(), '2026-01-05T19:45:00.000Z');
+  assert.throws(() => loanDueAt(parseBusinessDateTime('2026-01-05T10:00'), '17:31'), /hora de devolución/);
   const beforeDeadline = parseBusinessDateTime('2026-01-05T17:29');
   assert.equal(returnTimeError('17:30', beforeDeadline), null);
   assert.match(returnTimeError('17:29', beforeDeadline), /posterior a la hora actual/);
@@ -450,7 +452,7 @@ test('las reservas individuales y por lote asignan solo el carro seleccionado', 
       }
       if (sql.includes('INSERT INTO reservations')) {
         insertedReservations += 1;
-        return { rowCount: 1, rows: [{ id: insertedReservations, tipo: params[2], cantidad: params[5], estado: params[8] }] };
+        return { rowCount: 1, rows: [{ id: insertedReservations, tipo: params[2], cantidad: params[5], estado: params[9] }] };
       }
       return { rowCount: 1, rows: [] };
     }
@@ -460,9 +462,18 @@ test('las reservas individuales y por lote asignan solo el carro seleccionado', 
   retiroAt.setUTCHours(14, 0, 0, 0);
   const request = (tipo, cantidad) => ({
     tipo, cantidad, carro: '2', curso: '6°14°',
-    retiroAt: retiroAt.toISOString(), motivo: 'Trabajo'
+    retiroAt: retiroAt.toISOString(), horaDevolucion: '17:00', motivo: 'Trabajo'
   });
   try {
+    for (const horaDevolucion of [undefined, '11:00', '17:31']) {
+      const invalid = request('individual', 1);
+      if (horaDevolucion === undefined) delete invalid.horaDevolucion;
+      else invalid.horaDevolucion = horaDevolucion;
+      await assert.rejects(
+        apiService.createReservation(invalid, { id: 1, rol: 'alumno' }),
+        (error) => error.status === 400 && /hora de devolución/i.test(error.message)
+      );
+    }
     await assert.rejects(
       apiService.createReservation({ ...request('individual', 1), carro: '' }, { id: 1, rol: 'alumno' }),
       (error) => error.status === 400 && /carro.*vacío/i.test(error.message)
@@ -750,6 +761,17 @@ test('la migración de hora prevista es incremental y nullable', () => {
   assert.match(runner, /'008-return-scheduled-time\.sql'/);
 });
 
+test('la migración de hora de devolución de reservas es incremental y nullable', () => {
+  const root = path.resolve(__dirname, '..', '..');
+  const migration = fs.readFileSync(path.join(root, 'database', 'migrations', '009-reservation-return-time.sql'), 'utf8');
+  const schema = fs.readFileSync(path.join(root, 'database', 'schema.sql'), 'utf8');
+  const runner = fs.readFileSync(path.join(root, 'backend', 'scripts', 'db.js'), 'utf8');
+  assert.match(migration, /ADD COLUMN IF NOT EXISTS hora_devolucion TIME/i);
+  assert.doesNotMatch(migration, /NOT NULL/i);
+  assert.match(schema, /hora_devolucion TIME,/);
+  assert.match(runner, /'009-reservation-return-time\.sql'/);
+});
+
 test('la interfaz muestra selector reabrible, contador de texto, carro y curso estructurado', () => {
   const root = path.resolve(__dirname, '..', '..');
   const html = fs.readFileSync(path.join(root, 'frontend', 'index.html'), 'utf8');
@@ -759,6 +781,7 @@ test('la interfaz muestra selector reabrible, contador de texto, carro y curso e
   assert.match(html, /id="loteCantidad" min="3" max="10"/);
   assert.match(html, /id="returnHour" min="00:00" max="17:30"/);
   assert.match(html, /id="returnHourError"/);
+  assert.match(html, /id="resHoraDevolucion" min="08:01" max="17:30"/);
   assert.match(html, /id="adminFilterEstado" onchange="filterAdminNotebooks\(\)"/);
   assert.match(html, /option value="pendiente_devolucion"/);
   assert.match(html, /option value="reservada"/);
@@ -772,6 +795,9 @@ test('la interfaz muestra selector reabrible, contador de texto, carro y curso e
   assert.match(app, /function filterAdminNotebooks\(\)/);
   assert.match(app, /nb\.estado===est/);
   assert.match(app, /horaPrevista/);
+  assert.match(app, /validarHoraDevolucionReserva\(hora, horaDevolucion\)/);
+  assert.match(app, /horaDevolucion, motivo/);
+  assert.match(app, /Hora acordada \$\{escapeHtml\(n\.horaDevolucion/);
   assert.match(app, /const canApprove = r\.estado==='pendiente_aprobacion'/);
   assert.match(app, /const canReject = \['pendiente_aprobacion','aprobada'\]\.includes\(r\.estado\)/);
   assert.match(app, /function aprobarSolicitud\(id\)/);
