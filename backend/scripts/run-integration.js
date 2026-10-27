@@ -371,6 +371,37 @@ async function runFlows(users) {
     assert.ok(restored.payload.notebooks.some((notebook) => notebook.id === 'NB-001' && notebook.estado === 'disponible'));
   });
 
+  await report('cambio de estado de tickets con todos los estados de notebook', async () => {
+    const notebookCases = [
+      { code: 'NB-STATE-AVAILABLE', estado: 'disponible' },
+      { code: 'NB-STATE-LOANED', estado: 'prestada' },
+      { code: 'NB-STATE-MAINTENANCE', estado: 'mantenimiento' },
+      { code: null, estado: null }
+    ];
+    for (const notebook of notebookCases.filter(({ code }) => code)) {
+      await pool.query(`INSERT INTO notebooks (codigo, estado, ubicacion, prestado_a)
+        VALUES ($1, $2, 'Pruebas', $3)`,
+      [notebook.code, notebook.estado, notebook.estado === 'prestada' ? users.admin.id : null]);
+    }
+    for (const notebook of notebookCases) {
+      for (const estado of ['abierto', 'progreso', 'resuelto']) {
+        const created = await request('POST', '/api/tickets', {
+          ...(notebook.code ? { notebook: notebook.code } : {}),
+          motivo: 'Prueba de estado', descripcion: 'Prueba de regresión enum'
+        }, tokens.student);
+        assert.equal(created.status, 201);
+        if (notebook.code) {
+          await pool.query('UPDATE notebooks SET estado = $1, prestado_a = $2 WHERE codigo = $3',
+            [notebook.estado, notebook.estado === 'prestada' ? users.admin.id : null, notebook.code]);
+        }
+        const changed = await request('PATCH', `/api/tickets/${encodeURIComponent(created.payload.ticket.id)}`,
+          { estado }, tokens.admin);
+        assert.equal(changed.status, 200, `${estado}, notebook ${notebook.estado || 'sin notebook'}`);
+        assert.equal(changed.payload.ticket.estado, estado);
+      }
+    }
+  });
+
   await report('reserva individual de profesor: cantidad, aprobación y rechazo', async () => {
     const individual = await request('POST', '/api/reservations', {
       tipo: 'individual', retiroAt: reservationTime, cantidad: 2, curso: '6°14°', carro: '1'

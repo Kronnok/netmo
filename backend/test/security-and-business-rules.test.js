@@ -604,15 +604,43 @@ test('resolver tickets libera notebooks en una transacción y rechaza estados in
     const result = await apiService.updateTicket({ estado: 'resuelto' }, { id: 1, rol: 'admin' }, { code: 'TCK-1' });
     assert.equal(result.ticket.estado, 'resuelto');
     assert.equal(calls.length, 2);
-    assert.match(calls[0].sql, /resolved_at = CASE WHEN \$1 = 'resuelto' THEN now\(\)/);
-    assert.match(calls[0].sql, /resolved_by = CASE WHEN \$1 = 'resuelto' THEN \$2 ELSE NULL END/);
+    assert.match(calls[0].sql, /estado = \$1::ticket_status/);
+    assert.match(calls[0].sql, /resolved_at = CASE WHEN \$2::text = 'resuelto' THEN now\(\)/);
+    assert.match(calls[0].sql, /resolved_by = CASE WHEN \$2::text = 'resuelto' THEN \$3 ELSE NULL END/);
+    assert.deepEqual(calls[0].params, ['resuelto', 'resuelto', 1, 'TCK-1']);
     assert.match(calls[1].sql, /SET estado = 'disponible'/);
     calls.length = 0;
     const reopened = await apiService.updateTicket({ estado: 'abierto' }, { id: 1, rol: 'admin' }, { code: 'TCK-1' });
     assert.equal(reopened.ticket.estado, 'abierto');
     assert.equal(calls.length, 1);
-    assert.match(calls[0].sql, /resolved_at = CASE WHEN \$1 = 'resuelto' THEN now\(\) ELSE NULL END/);
-    assert.deepEqual(calls[0].params, ['abierto', 1, 'TCK-1']);
+    assert.match(calls[0].sql, /resolved_at = CASE WHEN \$2::text = 'resuelto' THEN now\(\) ELSE NULL END/);
+    assert.deepEqual(calls[0].params, ['abierto', 'abierto', 1, 'TCK-1']);
+  } finally {
+    db.transaction = originalTransaction;
+  }
+});
+
+test('el cambio de estado de notebook separa el enum del parámetro comparado como texto', async () => {
+  const originalTransaction = db.transaction;
+  const calls = [];
+  db.transaction = async (callback) => callback({
+    query: async (sql, params) => {
+      calls.push({ sql, params });
+      if (sql.includes('SELECT id, estado FROM notebooks')) {
+        return { rowCount: 1, rows: [{ id: 7, estado: 'disponible' }] };
+      }
+      if (sql.includes('UPDATE notebooks SET estado =')) {
+        return { rowCount: 1, rows: [{ id: 'NB-1', estado: params[0], ubicacion: 'Taller' }] };
+      }
+      return { rowCount: 0, rows: [] };
+    }
+  });
+  try {
+    await apiService.updateNotebook({ estado: 'mantenimiento' }, { id: 1, rol: 'admin' }, { code: 'NB-1' });
+    const update = calls.find(({ sql }) => sql.includes('UPDATE notebooks SET estado ='));
+    assert.match(update.sql, /estado = \$1::notebook_status/);
+    assert.match(update.sql, /CASE WHEN \$2::text = 'mantenimiento'/);
+    assert.deepEqual(update.params, ['mantenimiento', 'mantenimiento', 7]);
   } finally {
     db.transaction = originalTransaction;
   }

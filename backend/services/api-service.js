@@ -232,11 +232,12 @@ const actions = {
       if (!['disponible', 'mantenimiento'].includes(current.rows[0].estado)) {
         throw new AppError('No se puede cambiar manualmente el estado de una notebook prestada', 409);
       }
-      const result = await client.query(`UPDATE notebooks SET estado = $1,
-        ubicacion = CASE WHEN $1 = 'mantenimiento' THEN 'Taller'
+      const result = await client.query(`UPDATE notebooks SET estado = $1::notebook_status,
+        ubicacion = CASE WHEN $2::text = 'mantenimiento' THEN 'Taller'
           ELSE COALESCE('Carro ' || carro_id::text, ubicacion) END,
         prestado_a = NULL, updated_at = now()
-        WHERE id = $2 RETURNING codigo AS id, estado, ubicacion`, [body.estado, current.rows[0].id]);
+        WHERE id = $3 RETURNING codigo AS id, estado, ubicacion`,
+      [body.estado, body.estado, current.rows[0].id]);
       if (body.estado === 'disponible' || body.estado === 'mantenimiento') {
         await client.query('UPDATE reservation_notebooks SET active = FALSE WHERE notebook_id = $1 AND active', [current.rows[0].id]);
       }
@@ -470,11 +471,11 @@ const actions = {
     requireAdmin(user, 'Solo admin puede actualizar tickets');
     if (!['abierto', 'progreso', 'resuelto'].includes(body.estado)) throw new AppError('Estado de ticket inválido', 400);
     return db.transaction(async (client) => {
-      const result = await client.query(`UPDATE tickets SET estado = $1,
-        resolved_at = CASE WHEN $1 = 'resuelto' THEN now() ELSE NULL END,
-        resolved_by = CASE WHEN $1 = 'resuelto' THEN $2 ELSE NULL END
-        WHERE codigo = $3 RETURNING codigo AS id, estado, notebook_id`,
-      [body.estado, user.id, code]);
+      const result = await client.query(`UPDATE tickets SET estado = $1::ticket_status,
+        resolved_at = CASE WHEN $2::text = 'resuelto' THEN now() ELSE NULL END,
+        resolved_by = CASE WHEN $2::text = 'resuelto' THEN $3 ELSE NULL END
+        WHERE codigo = $4 RETURNING codigo AS id, estado, notebook_id`,
+      [body.estado, body.estado, user.id, code]);
       if (!result.rowCount) throw new AppError('Ticket no encontrado', 404);
       if (body.estado === 'resuelto' && result.rows[0].notebook_id) {
         await client.query(`UPDATE notebooks SET estado = 'disponible',
