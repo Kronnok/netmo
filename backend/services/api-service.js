@@ -397,7 +397,10 @@ const actions = {
         notebooks = { rows: [...notebooks.rows, ...available.rows], rowCount: reservation.cantidad };
       }
       const retiradaAt = new Date();
-      const venceAt = loanDueAt(retiradaAt, reservation.hora_devolucion);
+      const horaDevolucion = reservation.hora_devolucion
+        ? String(reservation.hora_devolucion).slice(0, 5)
+        : null;
+      const venceAt = loanDueAt(retiradaAt, horaDevolucion);
       for (const notebook of notebooks.rows) {
         await client.query(`INSERT INTO loans (notebook_id, user_id, reservation_id, curso, retirada_at, vence_at, estado)
           VALUES ($1, $2, $3, $4, $5, $6, 'activo')`, [notebook.id, reservation.owner_id, id, reservation.curso, retiradaAt, venceAt]);

@@ -36,7 +36,8 @@ reservas o tickets.
   retiro, una hora obligatoria de devolución del mismo día, posterior al retiro
   y no mayor a 17:30 en Buenos Aires.
 - Para préstamos nuevos creados desde reservas con hora de devolución, esa hora
-  elegida es el vencimiento `vence_at`. Reservas históricas sin esta hora
+  elegida es el vencimiento `vence_at`; el checkout normaliza el formato `TIME`
+  que devuelve PostgreSQL antes de validarlo. Reservas históricas sin esta hora
   conservan el cálculo anterior al retirarlas.
 - Si pasa el vencimiento elegido sin que se haya informado la entrega, mostrar
   el préstamo como vencido/demorado, manteniéndolo activo y bajo responsabilidad

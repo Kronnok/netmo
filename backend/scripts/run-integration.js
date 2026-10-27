@@ -358,7 +358,10 @@ async function runFlows(users) {
     assert.equal(loans.payload.loans.length, 1);
     const id = loans.payload.loans[0].id;
     const loan = loans.payload.loans[0];
-    assert.equal(new Date(loan.vence_at).getTime(), loanDueAt(new Date(loan.retirada_at), reservationResponse.hora_devolucion).getTime());
+    assert.equal(new Date(loan.vence_at).getTime(), loanDueAt(
+      new Date(loan.retirada_at),
+      reservationResponse.hora_devolucion ? String(reservationResponse.hora_devolucion).slice(0, 5) : null
+    ).getTime());
     const missingTime = await request('POST', `/api/loans/${id}/return`, {}, tokens.student);
     assert.equal(missingTime.status, 400);
     assert.match(missingTime.payload.error, /17:30/);
