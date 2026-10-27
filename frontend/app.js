@@ -1301,7 +1301,8 @@ function renderLotes(){
   const wrap = document.getElementById('lotesWrap');
   if(!wrap) return;
   const badge = document.getElementById('lotesBadge');
-  if(reservas.length===0){
+  const adminReservations = reservas.filter(r=>!['cancelada','retirada'].includes(r.estado));
+  if(adminReservations.length===0){
     wrap.innerHTML = `<div class="empty-state">
       <div class="glyph">📦</div>
       <h4>No hay solicitudes de préstamo</h4>
@@ -1310,14 +1311,17 @@ function renderLotes(){
     badge.style.display = 'none';
     return;
   }
-  const actionable = reservas.filter(r=>['pendiente_aprobacion','confirmada','aprobada'].includes(r.estado)).length;
+  const actionable = adminReservations.filter(r=>['pendiente_aprobacion','confirmada','aprobada'].includes(r.estado)).length;
   badge.style.display = actionable ? 'inline-flex' : 'none';
   badge.textContent = actionable;
   const labels = {
     pendiente_aprobacion:'Pendiente de aprobación', confirmada:'Confirmada', aprobada:'Aprobada',
-    retirada:'Retirada', rechazada:'Rechazada', cancelada:'Cancelada'
+    rechazada:'Rechazada'
   };
-  wrap.innerHTML = [...reservas].sort((a,b)=>b.fecha.localeCompare(a.fecha)).map(r=>{
+  const priority = {confirmada:0, aprobada:0, pendiente_aprobacion:1, rechazada:2};
+  wrap.innerHTML = [...adminReservations].sort((a,b)=>
+    (priority[a.estado] ?? 2) - (priority[b.estado] ?? 2) || b.fecha.localeCompare(a.fecha)
+  ).map(r=>{
     const canApprove = r.estado==='pendiente_aprobacion';
     const canReject = ['pendiente_aprobacion','aprobada'].includes(r.estado);
     const canCheckout = ['confirmada','aprobada'].includes(r.estado);

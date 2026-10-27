@@ -834,6 +834,9 @@ test('la interfaz muestra selector reabrible, contador de texto, carro y curso e
   assert.match(app, /function pedirRechazoSolicitud\(id\)/);
   assert.doesNotMatch(app, /function aprobarLote\(id\)/);
   assert.doesNotMatch(app, /function pedirRechazoLote\(id\)/);
+  assert.match(app, /const adminReservations = reservas\.filter\(r=>!\['cancelada','retirada'\]\.includes\(r\.estado\)\)/);
+  assert.match(app, /const priority = \{confirmada:0, aprobada:0, pendiente_aprobacion:1, rechazada:2\}/);
+  assert.match(app, /\(priority\[a\.estado\] \?\? 2\) - \(priority\[b\.estado\] \?\? 2\) \|\| b\.fecha\.localeCompare\(a\.fecha\)/);
   assert.match(app, /let reservationSubmitting = false/);
   assert.match(app, /void cargarCarrosReserva\(\)/);
   assert.match(app, /No se pudieron cargar los carros/);
