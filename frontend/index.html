@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>NetMO · Gestión de notebooks</title>
+<link rel="preload" as="image" href="assets/login-bg.jpg" fetchpriority="high">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
@@ -14,6 +15,13 @@
 <!-- AUTH SHELL: Login                                              -->
 <!-- ============================================================ -->
 <div id="auth-shell">
+  <div class="auth-visual" aria-hidden="true">
+    <img src="assets/login-bg.jpg" alt="" fetchpriority="high">
+    <div class="auth-visual-brand">
+      <strong>NetMO</strong>
+      <span>Gestión de notebooks</span>
+    </div>
+  </div>
   <button class="icon-btn theme-toggle-btn" style="position:absolute;top:1.5rem;right:1.5rem;" onclick="toggleTheme()" title="Cambiar tema" aria-label="Cambiar tema"></button>
   <div class="auth-card">
     <div class="auth-brand">
