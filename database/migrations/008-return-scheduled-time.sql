@@ -1,0 +1,6 @@
+BEGIN;
+
+ALTER TABLE returns
+  ADD COLUMN IF NOT EXISTS hora_prevista TIME;
+
+COMMIT;
