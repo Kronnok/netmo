@@ -21,9 +21,9 @@ añaden dependencias ni se modifican archivos del backend.
 
 ## Comportamiento esperado
 
-- Desde 900 px, usar una composición dividida: imagen decorativa cubriendo
-  aproximadamente el 55% izquierdo, marca superpuesta abajo a la izquierda y
-  tarjeta centrada sobre el color de fondo del tema en el lado derecho.
+- Desde 900 px, mostrar la imagen decorativa a pantalla completa como fondo y
+  la tarjeta centrada verticalmente hacia la derecha, sobre el color de fondo
+  del tema.
 - Por debajo de 900 px, cubrir la pantalla con la imagen y una capa oscura de
   aproximadamente 55%; mostrar la tarjeta sobre una superficie translúcida con
   desenfoque cuando esté disponible y un fallback legible sin desenfoque.
@@ -50,8 +50,8 @@ añaden dependencias ni se modifican archivos del backend.
 
 1. La imagen optimizada mide como máximo 1600 px de ancho y pesa menos de
    250 KB.
-2. A 900 px o más, el formulario está en una tarjeta centrada a la derecha y
-   la foto con la marca ocupa aproximadamente el 55% izquierdo.
+2. Desde 900 px, la foto cubre toda la pantalla detrás de la tarjeta de login,
+   que queda centrada verticalmente hacia la derecha.
 3. Por debajo de 900 px, la foto cubre el fondo, el overlay oscurece la imagen
    y la tarjeta es legible; el blur tiene fallback sin soporte.
 4. El fondo desaparece al iniciar sesión sin alterar los flujos existentes de
