@@ -296,19 +296,19 @@
   .modal-actions{display:flex;gap:.7rem;justify-content:flex-end;margin-top:1.2rem;}
 
   /* ---------- Auth (Login) ---------- */
-  #auth-shell{position:fixed;inset:0;display:grid;grid-template-columns:minmax(0,55fr) minmax(0,45fr);align-items:stretch;z-index:500;overflow-y:auto;background:var(--bg);}
+  #auth-shell{position:fixed;inset:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:stretch;z-index:500;overflow-y:auto;background:var(--bg);}
   #auth-shell.hidden{display:none;}
   .auth-visual{position:relative;min-width:0;min-height:100vh;overflow:hidden;background:var(--bg);isolation:isolate;}
-  .auth-visual img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:35% center;animation:auth-photo-fade .7s ease-out both;}
-  .auth-visual::before{content:"";position:absolute;inset:0;z-index:1;pointer-events:none;background:linear-gradient(180deg,transparent 28%,rgba(0,0,0,.52)),linear-gradient(90deg,rgba(0,0,0,.08),rgba(0,0,0,.22));}
-  .auth-visual-brand{position:absolute;z-index:2;left:clamp(2rem,5vw,5rem);bottom:2.5rem;color:#fff;text-shadow:0 2px 14px rgba(0,0,0,.8);}
-  .auth-visual-brand strong{display:block;font-family:var(--font-display);font-size:clamp(2rem,3vw,2.7rem);line-height:1.15;}
-  .auth-visual-brand span{display:block;margin-top:.35rem;font-size:1rem;font-weight:500;letter-spacing:.04em;}
+  .auth-visual img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:55% center;animation:auth-photo-fade .7s ease-out both;}
+  .auth-visual::before{content:"";position:absolute;inset:0;z-index:1;pointer-events:none;background:linear-gradient(90deg,transparent 48%,var(--bg) 100%),linear-gradient(180deg,rgba(0,0,0,.08),rgba(0,0,0,.35));}
   @keyframes auth-photo-fade{from{opacity:0;}to{opacity:1;}}
-  .auth-card{align-self:center;justify-self:center;margin:2rem auto;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow-md);padding:2.3rem 2.2rem;max-width:430px;width:calc(100% - 3rem);}
+  .auth-card{align-self:safe center;justify-self:center;margin:24px auto;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow-md);padding:2.3rem 2.2rem;max-width:430px;width:calc(100% - 3rem);max-height:calc(100vh - 3rem);overflow-y:auto;}
   .theme-toggle-btn{z-index:2;}
   .auth-card input::placeholder{color:var(--text-muted);opacity:1;}
   html[data-theme="dark"] #auth-shell .auth-card .btn-primary{color:var(--surface);}
+  #loginForm .toggle-row{gap:.65rem;padding:0;border:0;background:none;}
+  #rememberSession{width:17px;height:17px;flex:0 0 17px;margin:0;cursor:pointer;}
+  #loginForm label[for="rememberSession"]{font-size:.82rem;color:var(--text);cursor:pointer;}
   .auth-brand{display:flex;align-items:center;gap:12px;margin-bottom:1.8rem;}
   .auth-brand h1{font-size:1.05rem;}
   .auth-brand h1 span{display:block;font-family:var(--font-body);font-weight:500;font-size:.75rem;color:var(--text-muted);letter-spacing:.04em;text-transform:uppercase;}
@@ -330,8 +330,7 @@
     #auth-shell{display:flex;align-items:center;justify-content:center;min-height:100vh;min-height:100svh;padding:5rem 1rem 2rem;}
     .auth-visual{position:absolute;inset:0;min-height:100%;z-index:0;}
     .auth-visual::before{background:rgba(0,0,0,.55);}
-    .auth-visual-brand{display:none;}
-    .auth-card{position:relative;z-index:1;width:min(430px,100%);margin:auto;background:rgba(255,255,255,.97);border-color:rgba(255,255,255,.55);}
+    .auth-card{position:relative;z-index:1;align-self:auto;width:min(430px,100%);max-height:calc(100vh - 7rem);max-height:calc(100svh - 7rem);margin:auto;background:rgba(255,255,255,.97);border-color:rgba(255,255,255,.55);}
     html[data-theme="dark"] .auth-card{background:rgba(22,28,44,.97);border-color:rgba(255,255,255,.18);}
     @supports ((backdrop-filter:blur(10px)) or (-webkit-backdrop-filter:blur(10px))){
       .auth-card{-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);background:rgba(255,255,255,.94);}
