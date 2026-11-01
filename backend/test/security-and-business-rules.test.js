@@ -1079,7 +1079,7 @@ test('la interfaz muestra selector reabrible, contador de texto, carro y curso e
   assert.match(app, /apiRequest\('\/api\/me'\)/);
   assert.match(app, /expiresAt - Date\.now\(\)\/1000 >= 2\*60\*60/);
   assert.match(app, /api\/auth\/refresh/);
-  assert.match(app, /fetch\(API_BASE\+'\/health'\)/);
+  assert.match(app, /fetch\(API_BASE\+'\/health', \{signal:controller\.signal\}\)/);
   assert.match(app, /Ingresando\.\.\./);
   assert.match(app, /\/api\/admin\/carros\/\$\{numero\}/);
   assert.match(app, /\/api\/notebooks\/\$\{encodeURIComponent\(codigo\)\}/);

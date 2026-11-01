@@ -20,7 +20,7 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
 const nodeEnv = process.env.NODE_ENV || 'development';
 const jwtSecret = process.env.JWT_SECRET || (nodeEnv === 'production' ? null : crypto.randomBytes(32).toString('hex'));
 const corsOrigins = process.env.CORS_ORIGIN
-  ? process.env.CORS_ORIGIN.split(',').map((origin) => origin.trim()).filter(Boolean)
+  ? process.env.CORS_ORIGIN.split(',').map((origin) => origin.trim().replace(/\/+$/, '')).filter(Boolean)
   : nodeEnv === 'production' ? [] : ['*'];
 if (nodeEnv === 'production' && corsOrigins.length === 0) {
   throw new Error('CORS_ORIGIN es obligatorio en producción');

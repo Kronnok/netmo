@@ -22,6 +22,8 @@ test('resuelve rutas de API y sus parámetros', () => {
   assert.equal(routes.resolve('POST', '/api/auth/register'), null);
   assert.equal(routes.resolve('POST', '/api/auth/forgot').action, 'forgotPassword');
   assert.equal(routes.resolve('POST', '/api/auth/refresh').action, 'refresh');
+  assert.equal(routes.resolve('GET', '/api/me').action, 'me');
+  assert.equal(routes.resolve('GET', '/api/carros').action, 'availableCarros');
   assert.equal(routes.resolve('POST', '/api/auth/reset').action, 'resetPassword');
   assert.equal(routes.resolve('POST', '/api/auth/change-password/request').action, 'requestPasswordChange');
   assert.equal(routes.resolve('POST', '/api/auth/change-password').action, 'changePassword');
@@ -40,6 +42,7 @@ test('resuelve rutas de API y sus parámetros', () => {
 
 test('sirve frontend en desarrollo, valida JSON y responde CORS', async (context) => {
   const port = await unusedPort();
+  const allowedOrigin = 'https://netmo.martin-cosmelli-galvan.workers.dev';
   const child = spawn(process.execPath, [path.resolve(__dirname, '..', 'server.js')], {
     cwd: path.resolve(__dirname, '..'),
     env: {
@@ -48,7 +51,7 @@ test('sirve frontend en desarrollo, valida JSON y responde CORS', async (context
       NODE_ENV: 'development',
       JWT_SECRET: 'test-only-secret-that-is-long-enough-for-hmac',
       DATABASE_URL: 'postgresql://test:test@127.0.0.1:1/netmo',
-      CORS_ORIGIN: 'https://frontend.test'
+      CORS_ORIGIN: ` ${allowedOrigin}/, https://other.test/// `
     },
     stdio: 'ignore'
   });
@@ -81,17 +84,37 @@ test('sirve frontend en desarrollo, valida JSON y responde CORS', async (context
 
   const preflight = await fetch(`${baseUrl}/api/auth/login`, {
     method: 'OPTIONS',
-    headers: { Origin: 'https://frontend.test', 'Access-Control-Request-Method': 'POST' }
+    headers: {
+      Origin: allowedOrigin,
+      'Access-Control-Request-Method': 'POST',
+      'Access-Control-Request-Headers': 'authorization,content-type'
+    }
   });
   assert.equal(preflight.status, 204);
-  assert.equal(preflight.headers.get('access-control-allow-origin'), 'https://frontend.test');
+  assert.equal(preflight.headers.get('access-control-allow-origin'), allowedOrigin);
+  assert.equal(preflight.headers.get('access-control-allow-methods'), 'GET, POST, PATCH, DELETE, OPTIONS');
+  assert.equal(preflight.headers.get('access-control-allow-headers'), 'Content-Type, Authorization');
+
+  const listedOriginPreflight = await fetch(`${baseUrl}/api/auth/login`, {
+    method: 'OPTIONS',
+    headers: { Origin: 'https://other.test', 'Access-Control-Request-Method': 'POST' }
+  });
+  assert.equal(listedOriginPreflight.headers.get('access-control-allow-origin'), 'https://other.test');
+
+  const deniedPreflight = await fetch(`${baseUrl}/api/auth/login`, {
+    method: 'OPTIONS',
+    headers: { Origin: 'https://untrusted.test', 'Access-Control-Request-Method': 'POST' }
+  });
+  assert.equal(deniedPreflight.status, 204);
+  assert.equal(deniedPreflight.headers.get('access-control-allow-origin'), null);
 
   const invalidJson = await fetch(`${baseUrl}/api/auth/login`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { Origin: allowedOrigin, 'Content-Type': 'application/json' },
     body: '{'
   });
   assert.equal(invalidJson.status, 400);
+  assert.equal(invalidJson.headers.get('access-control-allow-origin'), allowedOrigin);
   assert.match((await invalidJson.json()).error, /JSON/);
 
   const publicRegistration = await fetch(`${baseUrl}/api/auth/register`, {
@@ -101,7 +124,8 @@ test('sirve frontend en desarrollo, valida JSON y responde CORS', async (context
   });
   assert.equal(publicRegistration.status, 404);
 
-  const health = await fetch(`${baseUrl}/health`);
+  const health = await fetch(`${baseUrl}/health`, { headers: { Origin: allowedOrigin } });
   assert.equal(health.status, 500);
+  assert.equal(health.headers.get('access-control-allow-origin'), allowedOrigin);
   assert.equal((await health.json()).error, 'Error interno del servidor');
 });

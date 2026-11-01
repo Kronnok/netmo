@@ -10,6 +10,8 @@ let authToken = null;
 let persistSession = false;
 let sessionRefreshPromise = null;
 const API_BASE = (window.NETMO_CONFIG.apiBaseUrl || '').replace(/\/+$/, '');
+const API_CONNECTION_ERROR = 'No se pudo conectar con el servidor. Puede estar iniciando, esperá unos segundos y reintentá';
+let loginRequestAttempted = false;
 
 let notebooks = [];
 let carros = [];
@@ -124,6 +126,32 @@ async function apiRequest(path, options={}){
   }
   if(!response.ok) throw new Error(payload.error || 'No se pudo completar la operación');
   return payload;
+}
+
+function isNetworkError(error){
+  return error?.name==='AbortError' || error instanceof TypeError;
+}
+
+async function requestLogin(email, password){
+  for(let attempt=0;attempt<2;attempt++){
+    const controller = new AbortController();
+    const timeout = setTimeout(()=>controller.abort(), 30_000);
+    try{
+      return await apiRequest('/api/auth/login', {
+        method:'POST',
+        body:JSON.stringify({email, password}),
+        signal:controller.signal
+      });
+    }catch(error){
+      if(!isNetworkError(error)) throw error;
+      if(attempt===1) throw new Error(API_CONNECTION_ERROR);
+      document.getElementById('loginError').textContent = 'Conectando con el servidor...';
+    }finally{
+      clearTimeout(timeout);
+    }
+    await new Promise(resolve=>setTimeout(resolve, 3_000));
+  }
+  throw new Error(API_CONNECTION_ERROR);
 }
 
 function expirationFromToken(token){
@@ -296,15 +324,17 @@ async function cargarEstadoAPI(){
 
 async function login(e){
   e.preventDefault();
+  loginRequestAttempted = true;
   const submitButton = document.getElementById('loginSubmit');
   const originalLabel = submitButton.textContent;
   submitButton.disabled = true;
   submitButton.textContent = 'Ingresando...';
+  document.getElementById('loginError').textContent = '';
   const email = document.getElementById('loginEmail').value.trim();
   const pass = document.getElementById('loginPassword').value;
 
   try{
-    const result = await apiRequest('/api/auth/login', {method:'POST', body:JSON.stringify({email, password:pass})});
+    const result = await requestLogin(email, pass);
     authToken = result.token;
     persistSession = document.getElementById('rememberSession').checked;
     saveSessionToken(authToken);
@@ -316,7 +346,9 @@ async function login(e){
     iniciarSesion();
     return;
   }catch(error){
-    document.getElementById('loginError').textContent = error.message;
+    document.getElementById('loginError').textContent = isNetworkError(error)
+      ? API_CONNECTION_ERROR
+      : error.message;
     return;
   }finally{
     submitButton.disabled = false;
@@ -1941,14 +1973,23 @@ initializeTextLimits();
   applyTheme(saved);
 })();
 
-async function warmApiAndRestoreSession(){
+async function warmApi(){
+  if(!API_BASE) return;
+  const controller = new AbortController();
+  const timeout = setTimeout(()=>controller.abort(), 30_000);
   try{
-    if(!API_BASE) throw new Error('La API no está configurada');
-    const health = await fetch(API_BASE+'/health');
+    const health = await fetch(API_BASE+'/health', {signal:controller.signal});
     if(!health.ok) throw new Error('La API todavía no está disponible. Podés volver a intentar iniciar sesión.');
   }catch(error){
-    document.getElementById('loginError').textContent = error.message || 'No se pudo conectar con la API.';
+    if(!loginRequestAttempted) document.getElementById('loginError').textContent = isNetworkError(error)
+      ? API_CONNECTION_ERROR
+      : error.message;
+  }finally{
+    clearTimeout(timeout);
   }
+}
+
+async function restoreSavedSession(){
   let localToken;
   let tabToken;
   try{
@@ -1972,8 +2013,11 @@ async function warmApiAndRestoreSession(){
     document.getElementById('loginError').textContent = '';
     iniciarSesion();
   }catch(error){
-    if(authToken) document.getElementById('loginError').textContent = error.message;
+    if(authToken) document.getElementById('loginError').textContent = isNetworkError(error)
+      ? API_CONNECTION_ERROR
+      : error.message;
   }
 }
 
-void warmApiAndRestoreSession();
+void warmApi();
+void restoreSavedSession();
