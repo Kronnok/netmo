@@ -49,10 +49,20 @@ CREATE TABLE user_preferences (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE ubicaciones (
+  slug VARCHAR(20) PRIMARY KEY,
+  nombre VARCHAR(50) NOT NULL
+);
+
+INSERT INTO ubicaciones (slug, nombre) VALUES
+  ('taller', 'Taller'),
+  ('teoria_pb', 'Teoría – Planta baja'),
+  ('teoria_p1', 'Teoría – 1.er piso'),
+  ('teoria_p2', 'Teoría – 2.º piso');
+
 CREATE TABLE carros (
   numero INTEGER PRIMARY KEY CHECK (numero BETWEEN 1 AND 999),
-  ubicacion VARCHAR(20) CONSTRAINT carros_ubicacion_check
-    CHECK (ubicacion IS NULL OR ubicacion IN ('taller', 'teoria_pb', 'teoria_p1', 'teoria_p2')),
+  ubicacion VARCHAR(20) REFERENCES ubicaciones(slug) ON UPDATE CASCADE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -149,6 +159,7 @@ CREATE TABLE loans (
   retirada_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   vence_at TIMESTAMPTZ NOT NULL,
   devuelta_at TIMESTAMPTZ,
+  reminder_sent_at TIMESTAMPTZ,
   estado loan_status NOT NULL DEFAULT 'activo',
   CHECK ((estado = 'devuelto') = (devuelta_at IS NOT NULL))
 );
@@ -179,6 +190,14 @@ CREATE TABLE tickets (
   CHECK ((estado = 'resuelto') = (resolved_at IS NOT NULL AND resolved_by IS NOT NULL))
 );
 
+CREATE TABLE ticket_replies (
+  id BIGSERIAL PRIMARY KEY,
+  ticket_id BIGINT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+  author_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  mensaje VARCHAR(500) NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE late_returns (
   id BIGSERIAL PRIMARY KEY,
   loan_id BIGINT NOT NULL UNIQUE REFERENCES loans(id),
@@ -194,6 +213,7 @@ CREATE INDEX reservations_owner_idx ON reservations(owner_id, retiro_at);
 CREATE INDEX reservation_notebooks_active_idx ON reservation_notebooks(notebook_id) WHERE active;
 CREATE INDEX tickets_owner_idx ON tickets(owner_id, created_at DESC);
 CREATE INDEX tickets_active_idx ON tickets(estado) WHERE estado <> 'resuelto';
+CREATE INDEX ticket_replies_ticket_idx ON ticket_replies(ticket_id, created_at);
 CREATE INDEX late_returns_user_idx ON late_returns(user_id, returned_at DESC);
 CREATE INDEX users_rol_nombre_idx ON users(rol, nombre);
 CREATE INDEX notebooks_carro_estado_idx ON notebooks(carro_id, estado);

@@ -23,8 +23,9 @@ cuando la ubicación contiene un número de carro válido.
 
 La migración 010 renombra `users.legajo` a `users.dni` conservando los valores y
 la restricción de unicidad; agrega ubicaciones opcionales a los carros y
-actualiza la FK de notebooks para permitir renumerarlos. Los carros existentes
-quedan con ubicación sin asignar. Las cuentas nuevas requieren un DNI de 7 u 8
+actualiza la FK de notebooks para permitir renumerarlos. La 011 crea el
+catálogo editable de ubicaciones, agrega `loans.reminder_sent_at` y la tabla
+`ticket_replies`. Las cuentas nuevas requieren un DNI numérico de 7 a 10
 dígitos; no se modifican los DNI de cuentas ya existentes.
 
 Antes de aplicar cambios en producción, guardá un backup. El script opcional

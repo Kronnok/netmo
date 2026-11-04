@@ -15,6 +15,8 @@ let loginRequestAttempted = false;
 
 let notebooks = [];
 let carros = [];
+let ubicaciones = [];
+let ticketNotebookHistory = [];
 let reservationCarrosLoading = true;
 let reservationCarrosError = '';
 let stats = {disponibles:0, prestadas:0, mantenimiento:0, total:0};
@@ -28,6 +30,13 @@ let reservas = [];
 let tickets = [];
 let reservationSubmitting = false;
 let lateReturnsInterval = null;
+let loanReminderInterval = null;
+let circulationInterval = null;
+let circulationSearchTimer = null;
+let reservationsSearchTimer = null;
+let circulationLoans = [];
+let activeTicketRepliesCode = null;
+let pendingDeleteCarro = null;
 let pendingRestoreBackup = null;
 let rolePasswordResolver = null;
 
@@ -37,12 +46,6 @@ const estadosNotebookManuales = ['disponible','mantenimiento'];
 const ticketBadgeClass = {abierto:'badge-abierto', progreso:'badge-progreso', resuelto:'badge-resuelto'};
 const ticketBadgeLabel = {abierto:'Abierto', progreso:'En progreso', resuelto:'Resuelto'};
 const rolLabel = {alumno:'Alumno', profesor:'Profesor', admin:'Administrador'};
-const ubicacionCarroLabel = {
-  taller:'Taller',
-  teoria_pb:'Teoría – Planta baja',
-  teoria_p1:'Teoría – 1.er piso',
-  teoria_p2:'Teoría – 2.º piso'
-};
 const BUSINESS_TIME_ZONE = 'America/Argentina/Buenos_Aires';
 
 function escapeHtml(value){
@@ -70,13 +73,52 @@ async function guardarCarro(numero){
   }
 }
 
+function mostrarDialogoMoverCarro(numero, count){
+  pendingDeleteCarro = numero;
+  document.getElementById('moveCarroText').textContent =
+    `El carro ${numero} tiene ${count} notebooks. Seleccioná un carro de destino para moverlas y eliminarlo en una sola operación.`;
+  const destination = document.getElementById('moveCarroDestino');
+  destination.innerHTML = carros.filter(carro=>Number(carro.numero)!==Number(numero))
+    .map(carro=>`<option value="${escapeHtml(carro.numero)}">Carro ${escapeHtml(carro.numero)}</option>`).join('');
+  destination.disabled = destination.options.length===0;
+  document.querySelector('#moveCarroModal .btn-primary').disabled = destination.disabled;
+  openModal('moveCarroModal');
+}
+
 async function eliminarCarro(numero){
+  const carro = carros.find(item=>Number(item.numero)===Number(numero));
+  if(carro && Number(carro.total)>0){
+    mostrarDialogoMoverCarro(numero, Number(carro.total));
+    return;
+  }
   if(!window.confirm(`¿Eliminar el carro ${numero}?`)) return;
   try{
     await apiRequest(`/api/admin/carros/${numero}`, {method:'DELETE'});
     await cargarEstadoAPI();
     renderAll();
     showToast('Carro eliminado correctamente.', 'success');
+  }catch(error){
+    if(error.status===409 && error.notebookCount){
+      mostrarDialogoMoverCarro(numero, error.notebookCount);
+      return;
+    }
+    showToast(error.message, 'warn');
+  }
+}
+
+async function confirmarMoverYEliminarCarro(){
+  const numero = pendingDeleteCarro;
+  const destino = Number(document.getElementById('moveCarroDestino').value);
+  if(!numero || !destino) return;
+  try{
+    await apiRequest(`/api/admin/carros/${numero}`, {
+      method:'DELETE', body:JSON.stringify({destino})
+    });
+    closeModal('moveCarroModal');
+    pendingDeleteCarro = null;
+    await cargarEstadoAPI();
+    renderAll();
+    showToast('Notebooks movidas y carro eliminado.', 'success');
   }catch(error){
     showToast(error.message, 'warn');
   }
@@ -103,6 +145,7 @@ const pageMeta = {
   'admin-profesores':   ['Usuarios', 'Creá cuentas y consultá alumnos y profesores.'],
   'admin-inventario':   ['Inventario completo', 'Estado de todas las notebooks del sistema.'],
   'admin-devoluciones': ['Devoluciones pendientes', 'Confirmá la recepción física de los equipos.'],
+  'admin-circulation':  ['Entregas y devoluciones', 'Registrá las entregas y devoluciones de notebooks.'],
   'admin-lotes':        ['Préstamos', 'Aprobá y registrá el retiro de las solicitudes de préstamo (individuales o por lote).'],
   'admin-tickets':      ['Fallas reportadas', 'Tickets enviados por alumnos y profesores. Actualizá el estado del equipo según corresponda.'],
   'admin-tardanzas':    ['Devoluciones tardías', 'Historial de demoras y sanciones a alumnos y profesores.'],
@@ -124,7 +167,12 @@ async function apiRequest(path, options={}){
   if(response.status===401 && authToken && path!=='/api/auth/login'){
     expireSession('Tu sesión venció. Iniciá sesión nuevamente.');
   }
-  if(!response.ok) throw new Error(payload.error || 'No se pudo completar la operación');
+  if(!response.ok){
+    const error = new Error(payload.error || 'No se pudo completar la operación');
+    error.status = response.status;
+    Object.assign(error, payload);
+    throw error;
+  }
   return payload;
 }
 
@@ -190,7 +238,15 @@ function clearStoredSession(){
 
 function expireSession(message){
   if(lateReturnsInterval) clearInterval(lateReturnsInterval);
+  if(loanReminderInterval) clearInterval(loanReminderInterval);
+  if(circulationInterval) clearInterval(circulationInterval);
+  if(circulationSearchTimer) clearTimeout(circulationSearchTimer);
+  if(reservationsSearchTimer) clearTimeout(reservationsSearchTimer);
   lateReturnsInterval = null;
+  loanReminderInterval = null;
+  circulationInterval = null;
+  circulationSearchTimer = null;
+  reservationsSearchTimer = null;
   authToken = null;
   currentUser = null;
   rolActivo = null;
@@ -239,7 +295,11 @@ async function cargarEstadoAPI(){
     ['carros', apiRequest(esAdmin ? '/api/admin/carros' : '/api/carros')]
   ];
   if(!esAdmin){
-    requests.push(['loans', apiRequest('/api/loans')], ['preferences', apiRequest('/api/preferences')]);
+    requests.push(
+      ['loans', apiRequest('/api/loans')],
+      ['preferences', apiRequest('/api/preferences')],
+      ['ticketNotebooks', apiRequest('/api/tickets/notebooks')]
+    );
   }else{
     requests.push(
       ['returns', apiRequest('/api/admin/returns')],
@@ -256,6 +316,8 @@ async function cargarEstadoAPI(){
   };
   const loansData = loaded.loans || {loans:[]};
   carros = loaded.carros.carros;
+  ubicaciones = loaded.carros.ubicaciones || [];
+  ticketNotebookHistory = loaded.ticketNotebooks?.notebooks || [];
   reservationCarrosLoading = false;
   reservationCarrosError = '';
   if(loaded.preferences){
@@ -314,12 +376,14 @@ async function cargarEstadoAPI(){
     prestamosActivos[currentUser.dni].push({
       id:loan.notebook, curso:loan.curso, desde:formatBusinessDateTime(loan.retirada_at),
       vence:formatBusinessDateTime(loan.vence_at),
+      venceAt:loan.vence_at,
       horaDevolucion:loan.hora_devolucion ? String(loan.hora_devolucion).slice(0,5) : null,
       vencido:Boolean(loan.vencido),
       horaPrevista:loan.hora_prevista ? String(loan.hora_prevista).slice(0,5) : null,
       pendiente:loan.estado!=='activo', loanId:loan.id
     });
   });
+  renderLoanReminders();
 }
 
 async function login(e){
@@ -479,7 +543,7 @@ async function crearUsuarioAdmin(e){
   const rol = document.getElementById('userRol').value;
   const password = document.getElementById('userPassword').value;
   error.textContent = validarNombreCuenta(nombre, 'El nombre') || validarNombreCuenta(apellido, 'El apellido');
-  if(!error.textContent && (!/^\d{7,8}$/.test(dni))) error.textContent = 'El DNI debe contener 7 u 8 dígitos numéricos';
+  if(!error.textContent && (!/^\d{7,10}$/.test(dni))) error.textContent = 'El DNI debe contener de 7 a 10 dígitos numéricos';
   if(!error.textContent && /\s/.test(email)) error.textContent = 'El email no puede contener espacios';
   if(!error.textContent && (email.length > 50 || !/^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$/.test(email))) error.textContent = 'Ingresá un email válido de hasta 50 caracteres';
   if(!error.textContent && (password.length < 8 || password.length > 50 || /\s/.test(password))) error.textContent = 'La contraseña debe tener entre 8 y 50 caracteres y no contener espacios';
@@ -566,6 +630,11 @@ function iniciarSesion(){
   renderAll();
   applyRoleVisibility();
   switchView('inicio');
+  if(loanReminderInterval) clearInterval(loanReminderInterval);
+  loanReminderInterval = setInterval(()=>{
+    renderPrestamoActivo();
+    renderLoanReminders();
+  },60_000);
 }
 
 function logout(){
@@ -716,12 +785,22 @@ function switchView(name){
   }
   if(lateReturnsInterval) clearInterval(lateReturnsInterval);
   lateReturnsInterval = null;
+  if(circulationInterval) clearInterval(circulationInterval);
+  circulationInterval = null;
   if(name==='admin-tardanzas'){
     renderTardanzas();
     if(authToken && rolActivo==='admin'){
       void refreshAdminLateReturns();
       lateReturnsInterval = setInterval(()=>void refreshAdminLateReturns(), 30000);
     }
+  }
+  if(name==='admin-circulation' && authToken && rolActivo==='admin'){
+    const search = document.getElementById('circulationSearch').value.trim();
+    if(search.length >= 2) void buscarPrestamosAdmin(search);
+    circulationInterval = setInterval(()=>{
+      const currentSearch = document.getElementById('circulationSearch').value.trim();
+      if(currentSearch.length >= 2) void buscarPrestamosAdmin(currentSearch);
+    }, 30000);
   }
   if(authToken && ['prestamos', 'admin-lotes'].includes(name)){
     void cargarEstadoAPI().then(renderAll).catch(error=>showToast(error.message, 'warn'));
@@ -854,6 +933,8 @@ function renderAll(){
   renderTardanzas();
   renderInventarioForms();
   renderFallaNotebookOptions();
+  renderCirculationLoans();
+  renderLoanReminders();
 }
 
 function renderInventarioForms(){
@@ -865,14 +946,15 @@ function renderInventarioForms(){
           <td>Carro ${escapeHtml(carro.numero)} · ${escapeHtml(carro.disponibles)} disponibles / ${escapeHtml(carro.total)} total</td>
           <td><select id="carro-ubicacion-${escapeHtml(carro.numero)}" aria-label="Ubicación del carro ${escapeHtml(carro.numero)}">
             <option value="" ${carro.ubicacion===null?'selected':''}>Sin ubicación</option>
-            ${Object.entries(ubicacionCarroLabel).map(([key,label])=>`<option value="${escapeHtml(key)}" ${carro.ubicacion===key?'selected':''}>${escapeHtml(label)}</option>`).join('')}
+            ${ubicaciones.map(location=>`<option value="${escapeHtml(location.slug)}" ${carro.ubicacion===location.slug?'selected':''}>${escapeHtml(location.nombre)}</option>`).join('')}
           </select></td>
           <td><input id="carro-numero-${escapeHtml(carro.numero)}" type="text" inputmode="numeric" pattern="[0-9]{1,3}" maxlength="3" value="${escapeHtml(carro.numero)}" aria-label="Nuevo número para el carro ${escapeHtml(carro.numero)}"></td>
           <td><button class="btn btn-sm" onclick="guardarCarro(${escapeHtml(carro.numero)})">Guardar</button>
-            <button class="btn btn-sm btn-danger-outline" onclick="eliminarCarro(${escapeHtml(carro.numero)})" ${Number(carro.total)>0?'disabled title="El carro tiene notebooks"':''}>Eliminar</button></td>
+            <button class="btn btn-sm btn-danger-outline" onclick="eliminarCarro(${escapeHtml(carro.numero)})">Eliminar</button></td>
         </tr>`).join('')}</tbody></table>`
       : '<p class="hint">Todavía no hay carros cargados.</p>';
   }
+  renderUbicacionesManager();
   const select = document.getElementById('notebookCarro');
   if(select){
     const selected = select.value;
@@ -882,12 +964,70 @@ function renderInventarioForms(){
   }
 }
 
+function renderUbicacionesManager(){
+  const list = document.getElementById('ubicacionesList');
+  if(!list) return;
+  list.innerHTML = ubicaciones.length
+    ? `<table><thead><tr><th>Ubicación</th><th>Slug</th><th>Acciones</th></tr></thead><tbody>${ubicaciones.map(location=>`
+      <tr><td><input id="ubicacion-${escapeHtml(location.slug)}" maxlength="50" minlength="2" value="${escapeHtml(location.nombre)}" aria-label="Nombre de ${escapeHtml(location.nombre)}"></td>
+      <td class="mono">${escapeHtml(location.slug)}</td>
+      <td><button class="btn btn-sm" onclick="renombrarUbicacion(${escapeHtml(JSON.stringify(location.slug))})">Guardar</button>
+      <button class="btn btn-sm btn-danger-outline" onclick="eliminarUbicacion(${escapeHtml(JSON.stringify(location.slug))})">Eliminar</button></td></tr>`).join('')}</tbody></table>`
+    : '<p class="hint">No hay ubicaciones registradas.</p>';
+}
+
+async function crearUbicacion(event){
+  event.preventDefault();
+  const input = document.getElementById('ubicacionNombre');
+  try{
+    await apiRequest('/api/admin/ubicaciones', {
+      method:'POST', body:JSON.stringify({nombre:input.value})
+    });
+    input.value = '';
+    await cargarEstadoAPI();
+    renderAll();
+    showToast('Ubicación creada.', 'success');
+  }catch(error){ showToast(error.message, 'warn'); }
+}
+
+async function renombrarUbicacion(slug){
+  const nombre = document.getElementById(`ubicacion-${slug}`).value;
+  try{
+    await apiRequest(`/api/admin/ubicaciones/${encodeURIComponent(slug)}`, {
+      method:'PATCH', body:JSON.stringify({nombre})
+    });
+    await cargarEstadoAPI();
+    renderAll();
+    showToast('Ubicación actualizada.', 'success');
+  }catch(error){ showToast(error.message, 'warn'); }
+}
+
+async function eliminarUbicacion(slug){
+  const location = ubicaciones.find(item=>item.slug===slug);
+  if(!location || !window.confirm(`¿Eliminar la ubicación ${location.nombre}?`)) return;
+  try{
+    await apiRequest(`/api/admin/ubicaciones/${encodeURIComponent(slug)}`, {method:'DELETE'});
+    await cargarEstadoAPI();
+    renderAll();
+    showToast('Ubicación eliminada.', 'success');
+  }catch(error){ showToast(error.message, 'warn'); }
+}
+
 function renderReservaCarros(){
   const select = document.getElementById('resCarro');
   if(!select) return;
   const status = document.getElementById('resCarroStatus');
   const retry = document.getElementById('resCarroRetry');
   const selected = select.value;
+  const locationSelect = document.getElementById('resUbicacion');
+  if(locationSelect){
+    const currentLocation = locationSelect.value || 'todas';
+    locationSelect.innerHTML = '<option value="todas">Todas</option>'
+      + ubicaciones.map(location=>`<option value="${escapeHtml(location.slug)}">${escapeHtml(location.nombre)}</option>`).join('');
+    locationSelect.value = ubicaciones.some(location=>location.slug===currentLocation) || currentLocation==='todas'
+      ? currentLocation
+      : 'todas';
+  }
   const ubicacion = document.getElementById('resUbicacion')?.value || 'todas';
   const filteredCarros = ubicacion==='todas' ? carros : carros.filter(carro=>carro.ubicacion===ubicacion);
   const options = filteredCarros.map(carro=>`<option value="${escapeHtml(carro.numero)}" ${Number(carro.disponibles)===0?'disabled':''}>Carro ${escapeHtml(carro.numero)} · ${escapeHtml(carro.disponibles ?? 0)} disponibles</option>`).join('');
@@ -924,6 +1064,7 @@ async function cargarCarrosReserva(){
     const data = await apiRequest(currentUser?.rol==='admin' ? '/api/admin/carros' : '/api/carros');
     if(!Array.isArray(data.carros)) throw new Error('La respuesta de carros no es válida.');
     carros = data.carros;
+    ubicaciones = data.ubicaciones || [];
   }catch(error){
     reservationCarrosError = error.message;
   }finally{
@@ -938,8 +1079,8 @@ function renderFallaNotebookOptions(){
   if(!select) return;
   const selected = select.value;
   select.innerHTML = '<option value="">Seleccioná una notebook</option>'
-    + notebooks.map(notebook=>`<option value="${escapeHtml(notebook.id)}">${escapeHtml(notebook.id)}</option>`).join('')
-    + '<option value="otro">No lo sé / equipo del carro</option>';
+    + ticketNotebookHistory.map(notebook=>`<option value="${escapeHtml(notebook.codigo)}">${escapeHtml(notebook.codigo)} · último uso ${escapeHtml(formatBusinessDateTime(notebook.ultimo_uso, {dateStyle:'short'}))}</option>`).join('')
+    + '<option value="otro">Otra / no sé</option>';
   if([...select.options].some(option=>option.value===selected)) select.value = selected;
 }
 
@@ -1267,18 +1408,36 @@ function renderPrestamoActivo(){
     </div>`;
     return;
   }
-  wrap.innerHTML = prestamos.map(prestamo=>prestamo.pendiente ? `
-    <div class="action-card" style="cursor:default;margin-bottom:.8rem;">
-      <div class="action-icon" style="background:var(--red-bg);color:var(--red-text);">⏳</div>
-      <div class="action-info"><h4>${escapeHtml(prestamo.id)}</h4><p>Retirada ${escapeHtml(prestamo.desde)} · Devolución informada${prestamo.horaPrevista ? ` · Hora registrada ${escapeHtml(prestamo.horaPrevista)}` : ''}</p></div>
-      <span class="badge badge-pendiente_devolucion">Esperando confirmación del Admin</span>
-    </div>` : `
+  wrap.innerHTML = prestamos.map(prestamo=>{
+    const remaining = Math.ceil((new Date(prestamo.venceAt).getTime()-Date.now())/60_000);
+    const countdown = remaining >= 0 ? `Vence en ${remaining} min` : `Vencido hace ${Math.abs(remaining)} min`;
+    return `
     <div class="action-card" style="cursor:default;margin-bottom:.8rem;">
       <div class="action-icon" style="background:var(--blue-bg);color:var(--blue-text);">💻</div>
-      <div class="action-info"><h4>${escapeHtml(prestamo.id)}</h4><p>Retirada ${escapeHtml(prestamo.desde)} · Hora de devolución ${escapeHtml(prestamo.horaDevolucion || '—')} · Vence ${escapeHtml(prestamo.vence)}</p></div>
+      <div class="action-info"><h4>${escapeHtml(prestamo.id)}</h4><p>Entregada. La devolución la registra el administrador · Retirada ${escapeHtml(prestamo.desde)} · Vence ${escapeHtml(prestamo.vence)} · ${escapeHtml(countdown)}</p></div>
       ${prestamo.vencido ? '<span class="badge badge-vencido">Plazo vencido</span>' : ''}
-      <button class="btn btn-primary btn-sm" onclick="openReturnModal(${escapeHtml(JSON.stringify(prestamo.loanId))})">Devolver</button>
-    </div>`).join('');
+    </div>`;
+  }).join('');
+  renderLoanReminders();
+}
+
+function renderLoanReminders(){
+  const home = document.getElementById('homeLoanReminder');
+  const loansBanner = document.getElementById('loansReminderBanner');
+  if(!home || !loansBanner) return;
+  const minutes = Number(currentUser?.preferencias?.recordatorio || 0);
+  const loans = prestamosActivos[currentUser?.dni] || [];
+  const dueSoon = minutes > 0 ? loans.map(loan=>({
+    notebook:loan.id,
+    remaining:Math.ceil((new Date(loan.venceAt).getTime()-Date.now())/60_000)
+  })).filter(loan=>loan.remaining >= 0 && loan.remaining <= minutes) : [];
+  const html = dueSoon.map(loan=>
+    `<p>Notebook ${escapeHtml(loan.notebook)}: vence en ${escapeHtml(loan.remaining)} min.</p>`
+  ).join('');
+  home.innerHTML = html;
+  loansBanner.innerHTML = html;
+  home.hidden = dueSoon.length===0;
+  loansBanner.hidden = dueSoon.length===0;
 }
 
 function renderHistorialPrestamos(){
@@ -1301,28 +1460,6 @@ function renderHistorialPrestamos(){
     const overdueLabel = loan.estado==='activo' && loan.vencido ? ' · Plazo vencido' : '';
     return `<tr><td class="mono">${escapeHtml(loan.notebook)}</td><td>${escapeHtml(retirada)}</td><td>${escapeHtml(horaDevolucion)}</td><td>${escapeHtml(horaPrevista)}</td><td>${escapeHtml(devuelta)}</td><td><span class="badge ${escapeHtml(badge)}">${escapeHtml(label+overdueLabel)}</span></td></tr>`;
   }).join('');
-}
-
-let pendingReturnLoanId = null;
-function openReturnModal(loanId){
-  const prestamo = (prestamosActivos[currentUser.dni] || []).find(loan=>loan.loanId===loanId);
-  if(!prestamo) return;
-  pendingReturnLoanId = loanId;
-  document.getElementById('returnModalText').textContent = `¿Confirmás que estás devolviendo físicamente la notebook ${prestamo.id}? Un administrador deberá confirmar la recepción antes de que quede liberada.`;
-  document.getElementById('returnConfirmButton').disabled = false;
-  openModal('returnModal');
-}
-
-async function confirmarDevolucion(){
-  const prestamoAPI = (prestamosActivos[currentUser.dni] || []).find(loan=>loan.loanId===pendingReturnLoanId);
-  if(!prestamoAPI?.loanId) return;
-  try{
-    await apiRequest(`/api/loans/${prestamoAPI.loanId}/return`, {method:'POST'});
-    await cargarEstadoAPI();
-    renderAll();
-    closeModal('returnModal');
-    showToast('Devolución solicitada. Queda pendiente de confirmación del Administrador.', 'warn');
-  }catch(error){ showToast(error.message, 'warn'); }
 }
 
 /* ======================================================================
@@ -1598,9 +1735,10 @@ function renderLotes(){
         <p>${escapeHtml(r.ownerNombre)} · Retiro ${escapeHtml(formatFecha(r.fecha))} ${escapeHtml(r.hora)} · Devolución ${escapeHtml(r.horaDevolucion || '—')} · ${escapeHtml(r.motivo || 'Sin especificar')}</p>
       </div>
       <span class="badge">${escapeHtml(labels[r.estado] || r.estado)}</span>
-      ${canApprove?`<button class="btn btn-sm btn-success-outline" onclick="aprobarSolicitud(${escapeHtml(JSON.stringify(r.id))})">Aprobar</button>`:''}
+      ${canApprove && r.tipo==='lote'?`<button class="btn btn-sm btn-primary" onclick="aprobarYEntregar(${escapeHtml(JSON.stringify(r.id))})">Aprobar y entregar</button>`:''}
+      ${canApprove && r.tipo!=='lote'?`<button class="btn btn-sm btn-success-outline" onclick="aprobarSolicitud(${escapeHtml(JSON.stringify(r.id))})">Aprobar</button>`:''}
       ${canReject?`<button class="btn btn-sm btn-danger-outline" onclick="pedirRechazoSolicitud(${escapeHtml(JSON.stringify(r.id))})">Rechazar</button>`:''}
-      ${canCheckout?`<button class="btn btn-sm btn-primary" onclick="registrarRetiro(${escapeHtml(JSON.stringify(r.id))})">Registrar retiro</button>`:''}
+      ${canCheckout?`<button class="btn btn-sm btn-primary" onclick="registrarRetiro(${escapeHtml(JSON.stringify(r.id))})">Registrar entrega</button>`:''}
     </div>`;
   }).join('');
 }
@@ -1624,6 +1762,132 @@ async function registrarRetiro(id){
     await cargarEstadoAPI();
     renderAll();
     showToast(`${result.loansCreated || 0} préstamo(s) creado(s).`, 'success');
+  }catch(error){ showToast(error.message, 'warn'); }
+}
+
+async function aprobarYEntregar(id){
+  try{
+    const result = await apiRequest(`/api/admin/reservations/${id}/approve-checkout`, {method:'POST'});
+    await cargarEstadoAPI();
+    renderAll();
+    showToast(`${result.loansCreated || 0} préstamo(s) entregado(s).`, 'success');
+  }catch(error){ showToast(error.message, 'warn'); }
+}
+
+function buscarReservasAdmin(value){
+  if(reservationsSearchTimer) clearTimeout(reservationsSearchTimer);
+  const query = value.trim();
+  const results = document.getElementById('adminReservationSearchWrap');
+  const list = document.getElementById('lotesWrap');
+  if(query.length < 2){
+    results.hidden = true;
+    list.hidden = false;
+    return;
+  }
+  reservationsSearchTimer = setTimeout(async()=>{
+    try{
+      const data = await apiRequest(`/api/admin/reservations?q=${encodeURIComponent(query)}`);
+      list.hidden = true;
+      results.hidden = false;
+      if(!data.reservations.length){
+        results.innerHTML = '<p class="hint">No se encontraron solicitudes pendientes de entrega.</p>';
+        return;
+      }
+      results.innerHTML = data.reservations.map((item)=>{
+        const heading = item.curso ? `${item.curso} · ${item.cantidad} equipos` : `${item.cantidad} · ${item.tipo}`;
+        const approveAndDeliver = item.estado==='pendiente_aprobacion' && item.tipo==='lote'
+          ? `<button class="btn btn-sm btn-primary" onclick="aprobarYEntregar(${escapeHtml(JSON.stringify(item.id))})">Aprobar y entregar</button>` : '';
+        const approve = item.estado==='pendiente_aprobacion' && item.tipo!=='lote'
+          ? `<button class="btn btn-sm btn-success-outline" onclick="aprobarSolicitud(${escapeHtml(JSON.stringify(item.id))})">Aprobar</button>` : '';
+        const checkout = ['confirmada','aprobada'].includes(item.estado)
+          ? `<button class="btn btn-sm btn-primary" onclick="registrarRetiro(${escapeHtml(JSON.stringify(item.id))})">Registrar entrega</button>` : '';
+        const reject = ['pendiente_aprobacion','aprobada'].includes(item.estado)
+          ? `<button class="btn btn-sm btn-danger-outline" onclick="pedirRechazoSolicitud(${escapeHtml(JSON.stringify(item.id))})">Rechazar</button>` : '';
+        return `<div class="action-card" style="cursor:default;margin:.7rem 0">
+          <div class="action-info"><h4>${escapeHtml(heading)}</h4><p>${escapeHtml(item.nombre)} · ${escapeHtml(item.email)}</p></div>
+          <span class="badge">${escapeHtml(item.estado)}</span>${approveAndDeliver}${approve}${checkout}${reject}
+        </div>`;
+      }).join('');
+    }catch(error){
+      results.hidden = false;
+      results.textContent = error.message;
+    }
+  },300);
+}
+
+function programarBusquedaPrestamos(value){
+  if(circulationSearchTimer) clearTimeout(circulationSearchTimer);
+  const query = value.trim();
+  if(query.length < 2){
+    circulationLoans = [];
+    renderCirculationLoans('Ingresá al menos 2 caracteres para buscar.');
+    return;
+  }
+  circulationSearchTimer = setTimeout(()=>void buscarPrestamosAdmin(query),300);
+}
+
+async function buscarPrestamosAdmin(query){
+  if(!authToken || rolActivo!=='admin' || query.trim().length<2) return;
+  try{
+    const data = await apiRequest(`/api/admin/loans?q=${encodeURIComponent(query.trim())}&estado=activo`);
+    circulationLoans = data.loans;
+    renderCirculationLoans();
+  }catch(error){
+    renderCirculationLoans(error.message);
+  }
+}
+
+function renderCirculationLoans(message=''){
+  const wrap = document.getElementById('circulationResults');
+  if(!wrap) return;
+  if(message){
+    wrap.textContent = message;
+    return;
+  }
+  if(!circulationLoans.length){
+    wrap.innerHTML = '<p class="hint">No hay préstamos activos para mostrar.</p>';
+    return;
+  }
+  const groups = new Map();
+  for(const loan of circulationLoans){
+    const key = String(loan.user_id);
+    if(!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(loan);
+  }
+  wrap.innerHTML = [...groups.values()].map((loans)=>{
+    const first = loans[0];
+    const cards = loans.map(loan=>{
+      const overdue = Boolean(loan.vencido);
+      return `<div class="action-card" style="cursor:default;margin:.6rem 0;${overdue?'border-color:var(--red-text);color:var(--red-text);':''}">
+        <div class="action-info"><h4>${escapeHtml(loan.notebook)} · ${escapeHtml(loan.curso || 'Sin curso')}</h4>
+          <p>Retirada ${escapeHtml(formatBusinessDateTime(loan.retirada_at))} · Vence ${escapeHtml(formatBusinessDateTime(loan.vence_at))}${overdue?' · VENCIDA':''}</p></div>
+        <button class="btn btn-sm btn-primary" onclick="registrarDevolucionAdmin(${escapeHtml(JSON.stringify(loan.id))}, ${escapeHtml(JSON.stringify(loan.notebook))})">Registrar devolución</button>
+      </div>`;
+    }).join('');
+    const allButton = loans.length>1
+      ? `<button class="btn btn-primary" onclick="registrarTodasDevolucionesAdmin(${escapeHtml(JSON.stringify(loans.map(loan=>loan.id)))})">Registrar todas (${loans.length})</button>`
+      : '';
+    return `<section class="card" style="margin-top:1rem"><h4>${escapeHtml(first.usuario)} · ${escapeHtml(first.email)} · DNI ${escapeHtml(first.dni)}</h4>${cards}${allButton}</section>`;
+  }).join('');
+}
+
+async function registrarDevolucionAdmin(id, notebook){
+  if(!window.confirm(`¿Registrar la devolución de ${notebook}?`)) return;
+  try{
+    await apiRequest(`/api/admin/loans/${id}/return`, {method:'POST'});
+    showToast(`Devolución de ${notebook} registrada.`, 'success');
+    await buscarPrestamosAdmin(document.getElementById('circulationSearch').value);
+  }catch(error){ showToast(error.message, 'warn'); }
+}
+
+async function registrarTodasDevolucionesAdmin(ids){
+  if(!window.confirm(`¿Registrar la devolución de las ${ids.length} notebooks?`)) return;
+  try{
+    const result = await apiRequest('/api/admin/loans/return', {
+      method:'POST', body:JSON.stringify({loanIds:ids})
+    });
+    showToast(result.message, 'success');
+    await buscarPrestamosAdmin(document.getElementById('circulationSearch').value);
   }catch(error){ showToast(error.message, 'warn'); }
 }
 
@@ -1705,6 +1969,7 @@ function renderTicketsPropios(){
       <td>${escapeHtml(t.motivo)}</td>
       <td><span class="badge ${escapeHtml(ticketBadgeClass[t.estado])}">${escapeHtml(ticketBadgeLabel[t.estado])}</span></td>
       <td>${escapeHtml(t.fecha)}</td>
+      <td><button class="btn btn-sm" onclick="abrirRespuestasTicket(${escapeHtml(JSON.stringify(t.id))})">Ver / responder</button></td>
     </tr>`).join('');
 }
 
@@ -1713,7 +1978,7 @@ function renderAdminTickets(){
   const tbody = document.getElementById('adminTicketsTable');
   if(!tbody) return;
   if(tickets.length===0){
-    tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state">
+    tbody.innerHTML = `<tr><td colspan="7"><div class="empty-state">
       <div class="glyph">🎫</div><h4>No hay fallas reportadas</h4><p>Los reportes de alumnos y profesores van a aparecer acá.</p>
     </div></td></tr>`;
     updateAdminTicketsBadge();
@@ -1734,9 +1999,59 @@ function renderAdminTickets(){
         ${renderAdminStateSelect(`Cambiar estado del ticket ${escapeHtml(t.id)}`, t.estado, Object.keys(ticketBadgeLabel), 'ticket', t.id)}
       </td>
       <td>${equipoCol}</td>
+      <td><button class="btn btn-sm" onclick="abrirRespuestasTicket(${escapeHtml(JSON.stringify(t.id))})">Ver / responder</button></td>
     </tr>`;
   }).join('');
   updateAdminTicketsBadge();
+}
+
+async function abrirRespuestasTicket(code){
+  activeTicketRepliesCode = code;
+  document.getElementById('ticketRepliesTitle').textContent = `Respuestas · ${code}`;
+  document.getElementById('ticketReplyMessage').value = '';
+  actualizarContadorRespuesta();
+  openModal('ticketRepliesModal');
+  await cargarRespuestasTicket();
+}
+
+async function cargarRespuestasTicket(){
+  if(!activeTicketRepliesCode) return;
+  const thread = document.getElementById('ticketRepliesThread');
+  thread.textContent = 'Cargando respuestas…';
+  try{
+    const data = await apiRequest(`/api/tickets/${encodeURIComponent(activeTicketRepliesCode)}/replies`);
+    thread.innerHTML = data.replies.length
+      ? data.replies.map(reply=>`<div class="action-card" style="cursor:default;margin:.5rem 0">
+          <div class="action-info"><h4>${escapeHtml(reply.autor)} · ${escapeHtml(rolLabel[reply.author_role] || reply.author_role)}</h4>
+            <p>${escapeHtml(formatBusinessDateTime(reply.created_at))}</p><p>${escapeHtml(reply.mensaje)}</p></div>
+        </div>`).join('')
+      : '<p class="hint">Todavía no hay respuestas.</p>';
+  }catch(error){ thread.textContent = error.message; }
+}
+
+function actualizarContadorRespuesta(){
+  const input = document.getElementById('ticketReplyMessage');
+  document.getElementById('ticketReplyCounter').textContent = `${input.value.length}/500`;
+}
+
+async function enviarRespuestaTicket(event){
+  event.preventDefault();
+  const input = document.getElementById('ticketReplyMessage');
+  const mensaje = input.value.trim();
+  if(!mensaje || mensaje.length>500){
+    showToast('La respuesta debe tener entre 1 y 500 caracteres.', 'warn');
+    return;
+  }
+  try{
+    await apiRequest(`/api/tickets/${encodeURIComponent(activeTicketRepliesCode)}/replies`, {
+      method:'POST', body:JSON.stringify({mensaje})
+    });
+    input.value = '';
+    actualizarContadorRespuesta();
+    await cargarRespuestasTicket();
+    if(currentUser.rol!=='admin') await refreshOwnTickets();
+    showToast('Respuesta enviada.', 'success');
+  }catch(error){ showToast(error.message, 'warn'); }
 }
 
 async function refreshOwnTickets(){

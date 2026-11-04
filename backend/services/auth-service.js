@@ -22,7 +22,8 @@ async function authenticate(request) {
 async function login(body, request) {
   const email = loginEmail(body.email);
   if (loginRateLimiter.isRateLimited(request, email)) {
-    throw new AppError('Demasiados intentos. Intentá nuevamente en 15 minutos.', 429);
+    const minutes = loginRateLimiter.remainingMinutes(request, email);
+    throw new AppError(`Demasiados intentos. Intentá nuevamente en ${minutes} minuto(s).`, 429);
   }
   if (typeof body.password !== 'string') throw new AppError('Correo o contraseña incorrectos', 401);
   const result = await db.query(

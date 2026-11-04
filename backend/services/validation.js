@@ -67,8 +67,8 @@ function courseDivision(value) {
 function dniIdentifier(value) {
   const identifier = typeof value === 'string' ? value.trim() : '';
   if (!identifier) throw new AppError('El DNI no puede estar vacío', 400);
-  if (!/^\d{7,8}$/.test(identifier)) {
-    throw new AppError('El DNI debe contener 7 u 8 dígitos numéricos', 400);
+  if (!/^\d{7,10}$/.test(identifier)) {
+    throw new AppError('El DNI debe contener de 7 a 10 dígitos numéricos', 400);
   }
   return identifier;
 }

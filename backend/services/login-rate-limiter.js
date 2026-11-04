@@ -1,4 +1,8 @@
-const WINDOW_MS = 15 * 60 * 1000;
+const configuredMinutes = process.env.LOGIN_LOCK_MINUTES
+  ? Number(process.env.LOGIN_LOCK_MINUTES)
+  : 2;
+const LOCK_MINUTES = Number.isInteger(configuredMinutes) ? Math.max(1, configuredMinutes) : 2;
+const WINDOW_MS = LOCK_MINUTES * 60 * 1000;
 const MAX_FAILURES = 5;
 const attempts = new Map();
 
@@ -39,8 +43,23 @@ function clearFailures(request, email, namespace = 'login') {
   attempts.delete(keyFor(request, email, namespace));
 }
 
+function remainingMinutes(request, email, now = Date.now(), namespace = 'login') {
+  const entry = attempts.get(keyFor(request, email, namespace));
+  if (!entry || entry.expiresAt <= now) return 0;
+  return Math.ceil((entry.expiresAt - now) / 60_000);
+}
+
 function reset() {
   attempts.clear();
 }
 
-module.exports = { isRateLimited, recordFailure, clearFailures, reset, MAX_FAILURES, WINDOW_MS };
+module.exports = {
+  isRateLimited,
+  recordFailure,
+  clearFailures,
+  remainingMinutes,
+  reset,
+  MAX_FAILURES,
+  LOCK_MINUTES,
+  WINDOW_MS
+};

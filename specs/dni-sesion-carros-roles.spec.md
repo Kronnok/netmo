@@ -24,7 +24,7 @@ sin dependencias nuevas ni acceso a la base remota.
 - Cambiar los contratos, rutas, respuestas, formularios, tablas, perfil y
   búsquedas para usar DNI; la ruta administrativa de usuario usa
   `PATCH /api/admin/users/:dni`.
-- Validar únicamente las altas nuevas: DNI de 7 u 8 dígitos numéricos, con
+- Validar únicamente las altas nuevas: DNI de 7 a 10 dígitos numéricos, con
   error HTTP 400 claro; el input usa `inputmode="numeric"`. Las cuentas ya
   existentes no se reescriben ni se invalidan por este formato.
 - DNI solo se expone al administrador y al propio usuario; no se registra en
@@ -90,7 +90,7 @@ sin dependencias nuevas ni acceso a la base remota.
 
 ## Criterios de aceptación
 
-1. Las altas rechazan DNI fuera de 7/8 dígitos con 400; las cuentas existentes
+1. Las altas rechazan DNI fuera de 7–10 dígitos con 400; las cuentas existentes
    conservan sus identificadores. Las respuestas y la interfaz respetan la
    visibilidad de DNI; restore acepta tanto `dni` como `legajo`.
 2. Se restaura sesión desde el almacenamiento apropiado, valida `/api/me`,

@@ -37,6 +37,11 @@ test('resuelve rutas de API y sus parámetros', () => {
   assert.deepEqual(routes.resolve('PATCH', '/api/admin/users/1234567').params, { dni: '1234567' });
   assert.deepEqual(routes.resolve('PATCH', '/api/admin/users/1234567/rol').params, { dni: '1234567' });
   assert.equal(routes.resolve('POST', '/api/admin/notebooks').action, 'createNotebooks');
+  assert.equal(routes.resolve('GET', '/api/tickets/notebooks').action, 'ticketNotebooks');
+  assert.deepEqual(routes.resolve('POST', '/api/admin/loans/42/return').params, { id: 42 });
+  assert.equal(routes.resolve('POST', '/api/internal/reminders').action, 'sendReturnReminders');
+  assert.deepEqual(routes.resolve('GET', '/api/tickets/TCK-1/replies').params, { code: 'TCK-1' });
+  assert.equal(routes.resolve('POST', '/api/admin/reservations/42/approve-checkout').action, 'approveAndCheckoutReservation');
   assert.equal(routes.resolve('GET', '/api/missing'), null);
 });
 

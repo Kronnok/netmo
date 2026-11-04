@@ -8,6 +8,7 @@ const { AppError } = require('../errors');
 const statusCodes = {
   createUser: 201,
   createCarro: 201,
+  createUbicacion: 201,
   createNotebooks: 201,
   createReservation: 201,
   createTicket: 201,
@@ -15,7 +16,7 @@ const statusCodes = {
 };
 
 async function readBody(request, limit = 1024 * 1024) {
-  if (!['POST', 'PATCH'].includes(request.method)) return {};
+  if (!['POST', 'PATCH', 'DELETE'].includes(request.method)) return {};
   const chunks = [];
   let size = 0;
   for await (const chunk of request) {
@@ -47,6 +48,11 @@ function send(response, status, payload, corsHeaders) {
 
 async function handle(request, response, route, corsHeaders) {
   try {
+    if (route.action === 'sendReturnReminders') {
+      const result = await apiService.sendReturnReminders(request);
+      send(response, 200, result, corsHeaders);
+      return;
+    }
     let authenticatedUser = null;
     if (route.action === 'restoreAdminBackup') {
       authenticatedUser = await authService.authenticate(request);
@@ -100,7 +106,10 @@ async function handle(request, response, route, corsHeaders) {
     send(response, statusCodes[route.action] || 200, result, corsHeaders);
   } catch (error) {
     if (!error.status || error.status >= 500) console.error(error);
-    send(response, error.status || 500, { error: error.status ? error.message : 'Error interno del servidor' }, corsHeaders);
+    send(response, error.status || 500, {
+      error: error.status ? error.message : 'Error interno del servidor',
+      ...(error.details || {})
+    }, corsHeaders);
   }
 }
 

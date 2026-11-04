@@ -7,6 +7,7 @@ const FORMAT = 'netmo-backup';
 const TABLES = [
   'users',
   'user_preferences',
+  'ubicaciones',
   'carros',
   'notebooks',
   'reservations',
@@ -14,12 +15,14 @@ const TABLES = [
   'loans',
   'returns',
   'tickets',
+  'ticket_replies',
   'late_returns'
 ];
 
 const RESTORE_ORDER = [
   'returns',
   'late_returns',
+  'ticket_replies',
   'reservation_notebooks',
   'tickets',
   'loans',
@@ -27,14 +30,16 @@ const RESTORE_ORDER = [
   'notebooks',
   'user_preferences',
   'carros',
+  'ubicaciones',
   'users'
 ];
 
-const SERIAL_TABLES = ['users', 'notebooks', 'reservations', 'loans', 'returns', 'tickets', 'late_returns'];
+const SERIAL_TABLES = ['users', 'notebooks', 'reservations', 'loans', 'returns', 'tickets', 'ticket_replies', 'late_returns'];
 
 const REQUIRED_FIELDS = {
   users: ['id', 'dni', 'nombre', 'email', 'rol', 'password_hash'],
   user_preferences: ['user_id'],
+  ubicaciones: ['slug', 'nombre'],
   carros: ['numero'],
   notebooks: ['id', 'codigo', 'estado', 'ubicacion'],
   reservations: ['id', 'codigo', 'owner_id', 'tipo', 'cantidad', 'retiro_at', 'estado'],
@@ -42,6 +47,7 @@ const REQUIRED_FIELDS = {
   loans: ['id', 'notebook_id', 'user_id', 'vence_at', 'estado'],
   returns: ['id', 'loan_id'],
   tickets: ['id', 'codigo', 'owner_id', 'motivo', 'descripcion', 'estado'],
+  ticket_replies: ['id', 'ticket_id', 'author_id', 'mensaje', 'created_at'],
   late_returns: ['id', 'loan_id', 'user_id', 'notebook_id', 'returned_at', 'due_at']
 };
 
@@ -60,6 +66,7 @@ const NULLABLE_FIELDS = new Set([
   'notebooks.carro_id', 'notebooks.prestado_a',
   'reservations.carro', 'reservations.curso', 'reservations.hora_devolucion',
   'loans.reservation_id', 'loans.curso', 'loans.devuelta_at',
+  'loans.reminder_sent_at',
   'returns.hora_prevista', 'returns.confirmado_at', 'returns.confirmado_por',
   'tickets.notebook_id', 'tickets.resolved_at', 'tickets.resolved_by',
   'audit_log.user_id'
@@ -194,6 +201,7 @@ function validateRows(backup, availableTables, columnsByTable) {
   }
   for (const table of TABLES) {
     if (table === 'carros' && !availableTables.has(table) && backup.data[table] === undefined) continue;
+    if (backup.data[table] === undefined && table === 'ubicaciones') continue;
     if (!Array.isArray(backup.data[table])) throw new AppError(`La tabla ${table} debe ser una lista.`, 400);
     for (const [index, row] of backup.data[table].entries()) {
       if (!row || typeof row !== 'object' || Array.isArray(row)) {
@@ -214,18 +222,21 @@ function validateRows(backup, availableTables, columnsByTable) {
   if (!users.some((row) => row.rol === 'admin')) throw new AppError('El backup debe incluir al menos un administrador.', 400);
   for (const [table, key] of [
     ['users', 'id'], ['users', 'dni'], ['users', 'email'], ['user_preferences', 'user_id'],
+    ['ubicaciones', 'slug'],
     ['notebooks', 'id'], ['notebooks', 'codigo'],
     ['reservations', 'id'], ['reservations', 'codigo'], ['loans', 'id'], ['returns', 'id'],
-    ['returns', 'loan_id'], ['tickets', 'id'], ['tickets', 'codigo'], ['late_returns', 'id'],
+    ['returns', 'loan_id'], ['tickets', 'id'], ['tickets', 'codigo'], ['ticket_replies', 'id'], ['late_returns', 'id'],
     ['late_returns', 'loan_id'], ['carros', 'numero']
   ]) assertUnique(backup.data[table] || [], key, table);
 
-  const ids = Object.fromEntries(['users', 'notebooks', 'reservations', 'loans', 'returns'].map((table) => [
+  const ids = Object.fromEntries(['users', 'notebooks', 'reservations', 'loans', 'returns', 'tickets'].map((table) => [
     table,
     new Set((backup.data[table] || []).map((row) => String(row.id)))
   ]));
   const carIds = new Set((backup.data.carros || []).map((row) => String(row.numero)));
+  const locationSlugs = new Set((backup.data.ubicaciones || []).map((row) => String(row.slug)));
   const refs = [
+    ['carros', 'ubicacion', 'ubicaciones', true],
     ['user_preferences', 'user_id', 'users', false],
     ['notebooks', 'carro_id', 'carros', true],
     ['notebooks', 'prestado_a', 'users', true],
@@ -240,6 +251,8 @@ function validateRows(backup, availableTables, columnsByTable) {
     ['tickets', 'notebook_id', 'notebooks', true],
     ['tickets', 'owner_id', 'users', false],
     ['tickets', 'resolved_by', 'users', true],
+    ['ticket_replies', 'ticket_id', 'tickets', false],
+    ['ticket_replies', 'author_id', 'users', false],
     ['late_returns', 'loan_id', 'loans', false],
     ['late_returns', 'user_id', 'users', false],
     ['late_returns', 'notebook_id', 'notebooks', false]
@@ -248,7 +261,8 @@ function validateRows(backup, availableTables, columnsByTable) {
     for (const row of backup.data[table] || []) {
       if (row[field] === undefined && nullable) continue;
       if (row[field] === null && nullable) continue;
-      const targetIds = target === 'carros' ? carIds : ids[target];
+      const targetIds = target === 'carros' ? carIds
+        : target === 'ubicaciones' ? locationSlugs : ids[target];
       if (!targetIds.has(String(row[field]))) throw new AppError(`Referencia inválida en ${table}.${field}.`, 400);
     }
   }
@@ -327,6 +341,19 @@ async function restoreBackup(body, user) {
   const supplied = Buffer.from(backup.checksum, 'hex');
   if (!crypto.timingSafeEqual(expected, supplied)) throw new AppError('El checksum no coincide; el backup está dañado o fue modificado.', 400);
   normalizeLegacyUserIdentifiers(backup);
+  if (backup.data.ticket_replies === undefined) {
+    backup.data.ticket_replies = [];
+    backupMetadata.conteos = { ...backupMetadata.conteos, ticket_replies: 0 };
+  }
+  if (backup.data.ubicaciones === undefined) {
+    backup.data.ubicaciones = [
+      { slug: 'taller', nombre: 'Taller' },
+      { slug: 'teoria_pb', nombre: 'Teoría – Planta baja' },
+      { slug: 'teoria_p1', nombre: 'Teoría – 1.er piso' },
+      { slug: 'teoria_p2', nombre: 'Teoría – 2.º piso' }
+    ];
+    backupMetadata.conteos = { ...backupMetadata.conteos, ubicaciones: backup.data.ubicaciones.length };
+  }
   if (backupVersion < 3 && backup.data && backup.data.carros === undefined) {
     backup.data.carros = [];
     backupMetadata.conteos = { ...backupMetadata.conteos, carros: 0 };

@@ -27,8 +27,9 @@ también baneos con vencimiento y la relación de inventario con carros; el
 backfill conserva la ubicación existente y asigna `carro_id` cuando contiene un
 número de carro válido. La migración 010 renombra `users.legajo` a `users.dni`
 sin alterar sus valores, agrega ubicaciones a los carros y actualiza la relación
-de notebooks para permitir renumerarlos. Las ubicaciones de carros existentes
-quedan sin asignar hasta que administración las configure.
+de notebooks para permitir renumerarlos. La migración 011 crea el catálogo
+editable de ubicaciones, agrega el estado de envío del recordatorio de
+vencimiento y habilita respuestas en tickets.
 
 ## 2. API en Render
 
@@ -44,9 +45,13 @@ servicio completá:
 - `MAIL_PROVIDER`: elegí `brevo` o `gas`; configurá también las variables
   requeridas del proveedor y `MAIL_FROM_EMAIL`/`MAIL_FROM_NAME`. No uses
   `console` en producción.
+- `LOGIN_LOCK_MINUTES`: ventana de bloqueo de login en minutos (mínimo 1,
+  predeterminado 2; se mantienen cinco fallos).
+- `CRON_SECRET`: secreto generado para Render y usado por el cron externo de
+  recordatorios; es obligatorio en producción.
 
   Las cuentas nuevas se crean desde la sección **Usuarios** del panel de
-  administración; no existe registro público. Los DNI nuevos deben tener 7 u 8
+  administración; no existe registro público. Los DNI nuevos deben tener de 7 a 10
   dígitos. Desde **Inventario** se administran carros, ubicaciones y altas
   consecutivas de notebooks.
 
@@ -74,6 +79,18 @@ Render gratuito bloquea el SMTP saliente; por eso NetMO usa las APIs HTTPS de
 Brevo o Apps Script en lugar de SMTP. No escribas claves ni secretos en el
 repositorio. En desarrollo podés usar `MAIL_PROVIDER=console`; el correo de
 prueba se envía con `npm run mail:test -- destino@correo.com`.
+
+### Recordatorios de devolución
+
+Configurá `CRON_SECRET` en el servicio de Render. Un cron externo gratuito debe
+hacer una solicitud HTTPS cada cinco minutos a
+`POST https://<API>/api/internal/reminders` con el encabezado
+`x-cron-secret: <CRON_SECRET>` y sin cuerpo. Por ejemplo, en cron-job.org se
+crea un trabajo HTTP POST con esa URL y ese encabezado, en intervalo de cinco
+minutos. Guardá el valor del encabezado como secreto en el proveedor, nunca en
+el repositorio. Render gratuito puede dormir; un `setInterval` dentro de la
+API no garantiza la ejecución. El endpoint respeta los minutos configurados
+por cada usuario y no reenvía un recordatorio ya marcado.
 
 ## 3. Frontend estático
 

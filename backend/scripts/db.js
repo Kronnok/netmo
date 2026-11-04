@@ -27,7 +27,8 @@ async function migrate() {
       '007-ticket-resolution-metadata.sql',
       '008-return-scheduled-time.sql',
       '009-reservation-return-time.sql',
-      '010-dni-carros-y-sesiones.sql'
+      '010-dni-carros-y-sesiones.sql',
+      '011-ubicaciones-recordatorios-y-respuestas.sql'
     ];
     for (const version of migrations) {
       const applied = await client.query('SELECT 1 FROM schema_migrations WHERE version = $1', [version]);

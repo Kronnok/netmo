@@ -8,8 +8,8 @@ const db = require('../data/database');
 const backupService = require('../services/backup-service');
 
 const tableNames = [
-  'users', 'user_preferences', 'carros', 'notebooks', 'reservations',
-  'reservation_notebooks', 'loans', 'returns', 'tickets', 'late_returns'
+  'users', 'user_preferences', 'ubicaciones', 'carros', 'notebooks', 'reservations',
+  'reservation_notebooks', 'loans', 'returns', 'tickets', 'ticket_replies', 'late_returns'
 ];
 
 function createValidBackup() {
@@ -27,10 +27,10 @@ function createValidBackup() {
   }];
   const columns = Object.fromEntries(tableNames.map((table) => [table, new Set([
     'id', 'dni', 'nombre', 'email', 'rol', 'password_hash', 'baneado', 'baneado_hasta',
-    'created_at', 'user_id', 'email_notifications', 'return_reminder_minutes', 'updated_at',
+    'created_at', 'user_id', 'email_notifications', 'return_reminder_minutes', 'updated_at', 'slug', 'nombre',
     'numero', 'codigo', 'estado', 'ubicacion', 'carro_id', 'prestado_a', 'owner_id', 'tipo',
     'carro', 'curso', 'cantidad', 'retiro_at', 'motivo', 'reservation_id', 'notebook_id',
-    'active', 'vence_at', 'retirada_at', 'devuelta_at', 'loan_id', 'solicitado_at', 'hora_devolucion',
+    'active', 'vence_at', 'retirada_at', 'devuelta_at', 'reminder_sent_at', 'loan_id', 'ticket_id', 'author_id', 'mensaje', 'solicitado_at', 'hora_devolucion',
     'hora_prevista', 'confirmado_at', 'confirmado_por', 'descripcion', 'resolved_at', 'resolved_by',
     'returned_at', 'due_at'
   ])]));
@@ -117,10 +117,28 @@ test('rechaza referencias inconsistentes en datos de backup', () => {
   assert.throws(() => backupService.validateRows(backup, backup.available, backup.columns), /Referencia inválida/);
 });
 
+test('el backup valida ubicaciones y referencias de respuestas a tickets', () => {
+  const backup = createValidBackup();
+  backup.data.ubicaciones.push({ slug: 'taller', nombre: 'Taller' });
+  backup.data.carros.push({ numero: 1, ubicacion: 'taller' });
+  backup.data.tickets.push({
+    id: '5', codigo: 'TCK-5', owner_id: '1', notebook_id: null,
+    motivo: 'Falla', descripcion: 'No inicia', estado: 'abierto'
+  });
+  backup.data.ticket_replies.push({
+    id: '2', ticket_id: '5', author_id: '1', mensaje: 'Lo estamos revisando.',
+    created_at: '2026-10-25T10:00:00.000Z'
+  });
+  assert.doesNotThrow(() => backupService.validateRows(backup, backup.available, backup.columns));
+  backup.data.ticket_replies[0].ticket_id = '404';
+  assert.throws(() => backupService.validateRows(backup, backup.available, backup.columns), /Referencia inválida/);
+});
+
 test('acepta el esquema inicial y reconoce versiones de migración', () => {
   assert.equal(backupService.migrationNumber('000-initial-schema'), 0);
   assert.equal(backupService.migrationNumber('006-admin-backup-audit.sql'.replace('.sql', '')), 6);
   assert.equal(backupService.migrationNumber('010-dni-carros-y-sesiones.sql'), 10);
+  assert.equal(backupService.migrationNumber('011-ubicaciones-recordatorios-y-respuestas.sql'), 11);
   assert.equal(backupService.migrationNumber('future'), null);
 });
 

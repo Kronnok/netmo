@@ -19,6 +19,7 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
 
 const nodeEnv = process.env.NODE_ENV || 'development';
 const jwtSecret = process.env.JWT_SECRET || (nodeEnv === 'production' ? null : crypto.randomBytes(32).toString('hex'));
+const cronSecret = process.env.CRON_SECRET || null;
 const corsOrigins = process.env.CORS_ORIGIN
   ? process.env.CORS_ORIGIN.split(',').map((origin) => origin.trim().replace(/\/+$/, '')).filter(Boolean)
   : nodeEnv === 'production' ? [] : ['*'];
@@ -27,6 +28,9 @@ if (nodeEnv === 'production' && corsOrigins.length === 0) {
 }
 if (nodeEnv === 'production' && !jwtSecret) {
   throw new Error('JWT_SECRET es obligatorio en producción');
+}
+if (nodeEnv === 'production' && !cronSecret) {
+  throw new Error('CRON_SECRET es obligatorio en producción');
 }
 if (jwtSecret && Buffer.byteLength(jwtSecret, 'utf8') < 32) {
   throw new Error('JWT_SECRET debe tener al menos 32 bytes');
@@ -37,6 +41,7 @@ module.exports = Object.freeze({
   nodeEnv,
   databaseUrl: process.env.DATABASE_URL,
   jwtSecret,
+  cronSecret,
   corsOrigins,
   serveFrontend: nodeEnv !== 'production'
 });

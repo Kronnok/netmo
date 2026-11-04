@@ -22,17 +22,15 @@ function generateCode() {
   return String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
 }
 
-async function sendIssuedCode({ userId, email, purpose, codeHash, code }) {
+async function sendIssuedCode({ email, purpose, code }) {
   try {
     await sendMail({
       to: email,
       subject: purpose === 'reset' ? 'Recuperar contraseña de NetMO' : 'Cambiar contraseña de NetMO',
       html: `<p>Tu código de verificación es:</p><p style="font-size:24px;font-weight:bold;letter-spacing:4px">${code}</p><p>Vence en 10 minutos. Si no solicitaste este cambio, ignorá este correo.</p>`
     });
-  } catch (error) {
-    await db.query(`UPDATE password_resets SET used_at = now()
-      WHERE user_id = $1 AND purpose = $2 AND code_hash = $3 AND used_at IS NULL`, [userId, purpose, codeHash]);
-    throw error;
+  } catch {
+    console.error('No se pudo enviar un correo de recuperación.');
   }
 }
 
@@ -40,6 +38,11 @@ function recordRequest(request, email, namespace) {
   if (rateLimiter.isRateLimited(request, email, Date.now(), namespace)) return false;
   rateLimiter.recordFailure(request, email, Date.now(), namespace);
   return true;
+}
+
+function rateLimitMessage(request, email, namespace, prefix) {
+  const minutes = rateLimiter.remainingMinutes(request, email, Date.now(), namespace);
+  return `${prefix} Intentá nuevamente en ${minutes} minuto(s).`;
 }
 
 async function requestForgot(body, request) {
@@ -72,7 +75,7 @@ async function requestForgot(body, request) {
         VALUES ($1, $2, 'reset', now() + interval '10 minutes')`, [result.rows[0].id, codeHash]);
       return { ...result.rows[0], code, codeHash };
     });
-    if (issued) await sendIssuedCode({ userId: issued.id, email: issued.email, purpose: 'reset', code: issued.code, codeHash: issued.codeHash });
+    if (issued) await sendIssuedCode({ email: issued.email, purpose: 'reset', code: issued.code });
   } catch (error) {
     console.error('No se pudo procesar una solicitud de recuperación de contraseña.');
   }
@@ -81,14 +84,16 @@ async function requestForgot(body, request) {
 
 async function requestChange(body, user, request) {
   const email = user.email.toLowerCase();
-  if (!recordRequest(request, email, 'password-change-request')) throw new AppError('Demasiadas solicitudes. Intentá nuevamente más tarde.', 429);
+  if (!recordRequest(request, email, 'password-change-request')) {
+    throw new AppError(rateLimitMessage(request, email, 'password-change-request', 'Demasiadas solicitudes.'), 429);
+  }
   try {
     const issued = await db.transaction(async (client) => {
       await client.query('SELECT id FROM users WHERE id = $1 FOR UPDATE', [user.id]);
       const cooldown = await client.query(`SELECT 1 FROM password_resets
         WHERE user_id = $1 AND purpose = 'change' AND created_at > now() - interval '60 seconds'
         LIMIT 1`, [user.id]);
-      if (cooldown.rowCount) throw new AppError('Esperá 60 segundos antes de solicitar otro código.', 429);
+      if (cooldown.rowCount) throw new AppError('Esperá 1 minuto antes de solicitar otro código.', 429);
       const code = generateCode();
       const codeHash = digestCode(code, user.id);
       await client.query(`UPDATE password_resets SET used_at = now()
@@ -97,7 +102,7 @@ async function requestChange(body, user, request) {
         VALUES ($1, $2, 'change', now() + interval '10 minutes')`, [user.id, codeHash]);
       return { code, codeHash };
     });
-    await sendIssuedCode({ userId: user.id, email: user.email, purpose: 'change', ...issued });
+    await sendIssuedCode({ email: user.email, purpose: 'change', code: issued.code });
     return { message: 'Si el envío se completó, recibirás un código en tu correo.' };
   } catch (error) {
     if (error.status) throw error;
@@ -112,7 +117,9 @@ async function applyPasswordChange({ email, userId, purpose, code, password, req
     : 'No se pudo cambiar la contraseña. Revisá el código e intentá nuevamente.';
   const rateKey = email || String(userId);
   const rateNamespace = purpose === 'reset' ? 'password-reset' : 'password-change';
-  if (!recordRequest(request, rateKey, rateNamespace)) throw new AppError(genericError, 429);
+  if (!recordRequest(request, rateKey, rateNamespace)) {
+    throw new AppError(rateLimitMessage(request, rateKey, rateNamespace, genericError), 429);
+  }
   accountPassword(password);
   try {
     const updated = await db.transaction(async (client) => {

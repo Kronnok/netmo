@@ -16,7 +16,7 @@ function corsHeaders(request) {
   const origin = request.headers.origin;
   const allowed = config.corsOrigins.includes('*') || config.corsOrigins.includes(origin);
   const headers = {
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Cron-Secret',
     'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
     'Access-Control-Expose-Headers': 'Content-Disposition',
     'X-Content-Type-Options': 'nosniff',

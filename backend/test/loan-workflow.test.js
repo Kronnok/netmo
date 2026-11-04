@@ -28,7 +28,7 @@ function nextBusinessReservationTime() {
   throw new Error('No se encontró un día hábil para la prueba');
 }
 
-test('flujo API reserva, retiro, devolución con hora automática e historial', async () => {
+test('flujo API reserva, entrega administrativa, Mis préstamos y devolución directa al historial', async () => {
   const originalQuery = db.query;
   const originalTransaction = db.transaction;
   const originalAuthenticate = authService.authenticate;
@@ -37,7 +37,6 @@ test('flujo API reserva, retiro, devolución con hora automática e historial', 
   let reservation;
   let reservationLink = null;
   let loan = null;
-  let returnRequest = null;
 
   const execute = async (sql, params = []) => {
     const statement = sql.replace(/\s+/g, ' ').trim();
@@ -88,35 +87,16 @@ test('flujo API reserva, retiro, devolución con hora automática e historial', 
       reservation.estado = 'retirada';
       return { rowCount: 1, rows: [] };
     }
-    if (statement.startsWith("UPDATE loans SET estado = 'devolucion_pendiente'")) {
-      if (!loan || loan.id !== String(params[0]) || loan.user_id !== String(params[1]) || loan.estado !== 'activo') return { rowCount: 0, rows: [] };
-      loan.estado = 'devolucion_pendiente';
-      return { rowCount: 1, rows: [{ id: loan.id, notebook_id: notebook.id }] };
-    }
-    if (statement.startsWith('INSERT INTO returns')) {
-      assert.match(statement, /now\(\) AT TIME ZONE 'America\/Argentina\/Buenos_Aires'/);
-      assert.equal(params.length, 1);
-      const { hour, minute, second } = businessTimeParts(new Date());
-      returnRequest = {
-        id: '90', loan_id: params[0], hora_prevista: `${hour}:${minute}:${second}`, estado: 'pendiente'
-      };
-      return { rowCount: 1, rows: [] };
-    }
-    if (statement.startsWith("UPDATE notebooks SET estado = 'pendiente_devolucion'")) {
-      notebook.estado = 'pendiente_devolucion';
-      return { rowCount: 1, rows: [] };
-    }
-    if (statement.startsWith("UPDATE returns SET estado = 'confirmada'")) {
-      if (!returnRequest || returnRequest.id !== String(params[1])) return { rowCount: 0, rows: [] };
-      returnRequest.estado = 'confirmada';
-      return { rowCount: 1, rows: [{ loan_id: loan.id }] };
+    if (statement.startsWith('SELECT id, user_id, notebook_id, estado, vence_at')) {
+      return loan ? { rowCount: 1, rows: [loan] } : { rowCount: 0, rows: [] };
     }
     if (statement.startsWith("UPDATE loans SET estado = 'devuelto'")) {
       loan.estado = 'devuelto';
       loan.devuelta_at = new Date();
       return { rowCount: 1, rows: [] };
     }
-    if (statement.startsWith("UPDATE notebooks SET estado = 'disponible'")) {
+    if (statement.startsWith('INSERT INTO returns')) return { rowCount: 1, rows: [] };
+    if (statement.startsWith('UPDATE notebooks SET') && statement.includes('EXISTS (SELECT 1 FROM tickets')) {
       notebook.estado = 'disponible';
       notebook.prestado_a = null;
       return { rowCount: 1, rows: [] };
@@ -128,6 +108,7 @@ test('flujo API reserva, retiro, devolución con hora automática e historial', 
   db.query = async (sql) => {
     const statement = sql.replace(/\s+/g, ' ').trim();
     if (statement.startsWith('SELECT c.numero,')) return { rowCount: 1, rows: [{ numero: 2, disponibles: 1 }] };
+    if (statement.startsWith('SELECT slug, nombre FROM ubicaciones')) return { rowCount: 0, rows: [] };
     if (statement.startsWith('SELECT u.email FROM users u')) return { rowCount: 0, rows: [] };
     if (statement.startsWith('SELECT u.email FROM loans l')) return { rowCount: 0, rows: [] };
     if (statement.startsWith('SELECT r.codigo AS id')) return {
@@ -143,17 +124,12 @@ test('flujo API reserva, retiro, devolución con hora automática e historial', 
       rows: loan && loan.estado !== 'devuelto' ? [{
         id: loan.id, notebook: notebook.codigo, dni: user.dni, nombre: user.nombre, rol: user.rol,
         curso: loan.curso, retirada_at: loan.retirada_at, vence_at: loan.vence_at, estado: loan.estado,
-        return_id: returnRequest?.id ?? null, solicitado_at: returnRequest?.solicitado_at ?? null,
-        hora_prevista: returnRequest?.hora_prevista ?? null
+        return_id: null, solicitado_at: null, hora_prevista: null
       }] : []
     });
     if (statement.startsWith('SELECT l.id, n.codigo AS notebook')) return { rowCount: loan ? 1 : 0, rows: loan ? [{
       ...loan, hora_devolucion: reservation.hora_devolucion,
-      hora_prevista: returnRequest?.hora_prevista ?? null, devolucion_estado: returnRequest?.estado ?? null
-    }] : [] };
-    if (statement.startsWith('SELECT r.id, n.codigo AS notebook')) return { rowCount: returnRequest?.estado === 'pendiente' ? 1 : 0, rows: returnRequest?.estado === 'pendiente' ? [{
-      id: returnRequest.id, notebook: notebook.codigo, hora_prevista: returnRequest.hora_prevista,
-      hora_devolucion: reservation.hora_devolucion
+      hora_prevista: null, devolucion_estado: null
     }] : [] };
     throw new Error(`Consulta de lectura no prevista en prueba de flujo: ${statement}`);
   };
@@ -209,23 +185,8 @@ test('flujo API reserva, retiro, devolución con hora automática e historial', 
     assert.equal(activeLoans.payload.loans[0].notebook, notebook.codigo);
     assert.equal(activeLoans.payload.loans[0].hora_devolucion, '17:30:00');
 
-    const request = await apiCall('POST', '/api/loans/80/return', { horaPrevista: '01:02' }, 'profesor');
-    assert.equal(request.status, 202);
-    assert.equal(notebook.estado, 'pendiente_devolucion');
-    assert.equal(notebook.prestado_a, user.id);
-    assert.match(returnRequest.hora_prevista, /^(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d$/);
-    assert.equal((await apiCall('GET', '/api/loans', undefined, 'profesor')).payload.loans[0].estado, 'devolucion_pendiente');
-    const openLoans = await apiCall('GET', '/api/admin/open-loans', undefined, 'admin');
-    assert.equal(openLoans.status, 200);
-    assert.equal(openLoans.payload.loans[0].estado, 'devolucion_pendiente');
-    assert.equal(openLoans.payload.loans[0].return_id, '90');
-    const adminReturns = await apiCall('GET', '/api/admin/returns', undefined, 'admin');
-    assert.equal(adminReturns.payload.returns[0].id, '90');
-    assert.equal(adminReturns.payload.returns[0].hora_prevista, returnRequest.hora_prevista);
-    assert.equal(adminReturns.payload.returns[0].hora_devolucion, '17:30:00');
-    assert.equal((await apiCall('GET', '/api/loans', undefined, 'profesor')).payload.loans[0].hora_prevista, returnRequest.hora_prevista);
-
-    await apiCall('POST', '/api/admin/returns/90/confirm', {}, 'admin');
+    const returned = await apiCall('POST', '/api/admin/loans/80/return', {}, 'admin');
+    assert.equal(returned.status, 200);
     const history = await apiCall('GET', '/api/loans', undefined, 'profesor');
     assert.equal(history.payload.loans[0].estado, 'devuelto');
     assert.ok(history.payload.loans[0].devuelta_at);

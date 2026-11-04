@@ -11,6 +11,7 @@ process.env.JWT_SECRET = 'test-only-secret-that-is-long-enough-for-hmac';
 const db = require('../data/database');
 const authService = require('../services/auth-service');
 const apiService = require('../services/api-service');
+const passwordResetService = require('../services/password-reset-service');
 const controller = require('../controllers/api-controller');
 const loginRateLimiter = require('../services/login-rate-limiter');
 const routes = require('../routes');
@@ -46,16 +47,17 @@ test('los tokens HMAC se verifican, no admiten alteraciones y vencen a las 12 ho
   assert.equal(verifyToken(token, secret, now + TOKEN_LIFETIME_SECONDS * 1000), null);
 });
 
-test('las altas validan DNI numérico de 7 u 8 dígitos sin alterar ceros iniciales', () => {
+test('las altas validan DNI numérico de 7 a 10 dígitos sin alterar ceros iniciales', () => {
   assert.equal(dniIdentifier('0123456'), '0123456');
   assert.equal(dniIdentifier('01234567'), '01234567');
-  for (const invalid of ['', '123456', '123456789', '12A4567', 1234567, null]) {
+  assert.equal(dniIdentifier('0123456789'), '0123456789');
+  for (const invalid of ['', '123456', '12345678901', '12A4567', 1234567, null]) {
     assert.throws(
       () => dniIdentifier(invalid),
       (error) => error.status === 400
     );
   }
-  assert.throws(() => dniIdentifier('123456'), /DNI debe contener 7 u 8 dígitos numéricos/);
+  assert.throws(() => dniIdentifier('123456'), /DNI debe contener de 7 a 10 dígitos numéricos/);
 });
 
 test('refresh renueva un token válido y consulta el rol actual del usuario', async () => {
@@ -101,6 +103,23 @@ test('la configuración de producción requiere JWT_SECRET', () => {
   assert.match(result.stderr, /JWT_SECRET es obligatorio en producción/);
 });
 
+test('la configuración de producción requiere CRON_SECRET', () => {
+  const root = path.resolve(__dirname, '..', '..');
+  const result = spawnSync(process.execPath, ['-e', "require('./backend/config')"], {
+    cwd: root,
+    env: {
+      ...process.env,
+      NODE_ENV: 'production',
+      CORS_ORIGIN: 'https://frontend.test',
+      JWT_SECRET: 'test-only-secret-that-is-long-enough-for-hmac',
+      CRON_SECRET: ''
+    },
+    encoding: 'utf8'
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /CRON_SECRET es obligatorio en producción/);
+});
+
 test('las reservas interpretan fechas y horarios en Buenos Aires', () => {
   const mondayMorning = parseBusinessDateTime('2026-01-05T08:00');
   assert.equal(TIME_ZONE, 'America/Argentina/Buenos_Aires');
@@ -125,7 +144,7 @@ test('el vencimiento de préstamos usa Buenos Aires', () => {
   assert.throws(() => loanDueAt(parseBusinessDateTime('2026-01-05T10:00'), '17:31'), /hora de devolución/);
 });
 
-test('cinco fallos de login por IP y correo bloquean el siguiente intento durante 15 minutos', async () => {
+test('cinco fallos de login bloquean por 2 minutos y el 429 indica el tiempo restante', async () => {
   const originalQuery = db.query;
   const request = { headers: {}, socket: { remoteAddress: '192.0.2.10' } };
   loginRateLimiter.reset();
@@ -139,8 +158,10 @@ test('cinco fallos de login por IP y correo bloquean el siguiente intento durant
     }
     await assert.rejects(
       authService.login({ email: 'user@example.test', password: 'wrong' }, request),
-      (error) => error.status === 429
+      (error) => error.status === 429 && /2 minuto/.test(error.message)
     );
+    assert.equal(loginRateLimiter.WINDOW_MS, 2 * 60 * 1000);
+    assert.equal(loginRateLimiter.MAX_FAILURES, 5);
     assert.equal(loginRateLimiter.isRateLimited(
       { headers: {}, socket: { remoteAddress: '192.0.2.11' } },
       'user@example.test'
@@ -148,6 +169,49 @@ test('cinco fallos de login por IP y correo bloquean el siguiente intento durant
     assert.equal(loginRateLimiter.isRateLimited(request, 'USER@example.test', Date.now() + loginRateLimiter.WINDOW_MS), false);
   } finally {
     db.query = originalQuery;
+    loginRateLimiter.reset();
+  }
+});
+
+test('LOGIN_LOCK_MINUTES usa 2 por defecto y limita el mínimo a 1 minuto', () => {
+  const root = path.resolve(__dirname, '..', '..');
+  for (const [value, expected] of [['', 120000], ['0', 60000], ['-5', 60000], ['4', 240000], ['invalid', 120000]]) {
+    const script = `process.env.LOGIN_LOCK_MINUTES=${JSON.stringify(value)}; console.log(require('./backend/services/login-rate-limiter').WINDOW_MS)`;
+    const result = spawnSync(process.execPath, ['-e', script], { cwd: root, encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(Number(result.stdout.trim()), expected);
+  }
+});
+
+test('forgot y reset comparten la ventana configurable y el 429 informa minutos restantes', async () => {
+  const originalTransaction = db.transaction;
+  const request = { headers: {}, socket: { remoteAddress: '192.0.2.19' } };
+  let forgotTransactions = 0;
+  loginRateLimiter.reset();
+  db.transaction = async (callback) => {
+    forgotTransactions += 1;
+    return callback({ query: async () => ({ rowCount: 0, rows: [] }) });
+  };
+  try {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      await passwordResetService.requestForgot({ email: 'forgot@example.test' }, request);
+    }
+    await passwordResetService.requestForgot({ email: 'forgot@example.test' }, request);
+    assert.equal(forgotTransactions, 5);
+
+    loginRateLimiter.reset();
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      await assert.rejects(
+        passwordResetService.resetPassword({ email: 'reset@example.test', password: 'x', code: '000000' }, request),
+        (error) => error.status === 400
+      );
+    }
+    await assert.rejects(
+      passwordResetService.resetPassword({ email: 'reset@example.test', password: 'x', code: '000000' }, request),
+      (error) => error.status === 429 && /2 minuto/.test(error.message)
+    );
+  } finally {
+    db.transaction = originalTransaction;
     loginRateLimiter.reset();
   }
 });
@@ -244,6 +308,10 @@ test('todos los servicios detrás de rutas admin rechazan alumnos y aceptan admi
     ['GET', '/api/admin/users'],
     ['POST', '/api/admin/users'],
     ['GET', '/api/admin/carros'],
+    ['GET', '/api/admin/ubicaciones'],
+    ['POST', '/api/admin/ubicaciones'],
+    ['PATCH', '/api/admin/ubicaciones/taller'],
+    ['DELETE', '/api/admin/ubicaciones/taller'],
     ['POST', '/api/admin/carros'],
     ['PATCH', '/api/admin/carros/12'],
     ['DELETE', '/api/admin/carros/12'],
@@ -252,8 +320,12 @@ test('todos los servicios detrás de rutas admin rechazan alumnos y aceptan admi
     ['POST', '/api/admin/reservations/8/approve'],
     ['POST', '/api/admin/reservations/8/reject'],
     ['POST', '/api/admin/reservations/8/checkout'],
+    ['POST', '/api/admin/reservations/8/approve-checkout'],
     ['GET', '/api/admin/returns'],
     ['GET', '/api/admin/open-loans'],
+    ['GET', '/api/admin/loans'],
+    ['POST', '/api/admin/loans/8/return'],
+    ['POST', '/api/admin/loans/return'],
     ['POST', '/api/admin/returns/8/confirm'],
     ['GET', '/api/admin/tickets'],
     ['GET', '/api/admin/late-returns'],
@@ -343,8 +415,10 @@ test('admin puede aprobar una reserva individual pendiente y completar sus asign
       if (sql.includes('SELECT id, owner_id, cantidad, carro FROM reservations')) {
         return { rowCount: 1, rows: [{ id: 9, owner_id: 4, cantidad: 2, carro: '1', tipo: 'individual' }] };
       }
-      if (sql.includes('SELECT rn.notebook_id FROM reservation_notebooks')) return { rowCount: 0, rows: [] };
-      if (sql.includes('SELECT n.id FROM notebooks n')) return { rowCount: 2, rows: [{ id: 21 }, { id: 22 }] };
+      if (sql.includes('SELECT n.id, n.codigo FROM reservation_notebooks')) return { rowCount: 0, rows: [] };
+      if (sql.includes('SELECT n.id, n.codigo FROM notebooks n')) {
+        return { rowCount: 2, rows: [{ id: 21, codigo: 'NB-021' }, { id: 22, codigo: 'NB-022' }] };
+      }
       return { rowCount: 1, rows: [] };
     }
   });
@@ -386,7 +460,7 @@ test('las altas administrativas validan cuenta, almacenan hashes y crean prefere
     );
     await assert.rejects(
       apiService.createUser({ nombre: 'Ana', apellido: 'Pérez', email: 'ana@example.test', dni: '123456', rol: 'alumno', password: 'long-enough' }, { id: 1, rol: 'admin' }),
-      (error) => error.status === 400 && /DNI.*7 u 8 dígitos/.test(error.message)
+      (error) => error.status === 400 && /DNI.*7 a 10 dígitos/.test(error.message)
     );
     const result = await apiService.createUser({
       nombre: 'Ana', apellido: 'Pérez', email: 'USER@example.test', dni: '1234567', rol: 'alumno', password: 'long-enough'
@@ -516,8 +590,10 @@ test('los valores de texto nuevos se recortan y respetan 50 caracteres', () => {
   assert.equal(courseDivision(' 2°14° '), '2°14°');
   assert.equal(dniIdentifier('1234567'), '1234567');
   assert.equal(dniIdentifier('12345678'), '12345678');
-  for (const invalid of ['123456', '123456789', '1234A67']) {
-    assert.throws(() => dniIdentifier(invalid), (error) => error.status === 400 && /7 u 8 dígitos/.test(error.message));
+  assert.equal(dniIdentifier('123456789'), '123456789');
+  assert.equal(dniIdentifier('1234567890'), '1234567890');
+  for (const invalid of ['123456', '12345678901', '1234A67']) {
+    assert.throws(() => dniIdentifier(invalid), (error) => error.status === 400 && /7 a 10 dígitos/.test(error.message));
   }
   assert.throws(() => dniIdentifier(''), (error) => error.status === 400 && /no puede estar vacío/.test(error.message));
   for (const invalid of ['2°0°', '8°1°', '2°100°', '6° Informática']) {
@@ -542,19 +618,23 @@ test('el login no aplica el máximo de 50 caracteres a cuentas preexistentes', a
   }
 });
 
-test('GET /api/carros requiere autenticación y devuelve disponibilidad por carro', async () => {
+test('GET /api/carros devuelve carros y ubicaciones y requiere autenticación', async () => {
   const originalQuery = db.query;
   const originalAuthenticate = authService.authenticate;
   const calls = [];
   db.query = async (sql) => {
     calls.push(sql);
+    if (sql.includes('SELECT slug, nombre FROM ubicaciones')) {
+      return { rows: [{ slug: 'teoria_pb', nombre: 'Teoría – Planta baja' }], rowCount: 1 };
+    }
     return { rows: [{ numero: 2, ubicacion: 'teoria_pb', total: 5, disponibles: 4 }], rowCount: 1 };
   };
   try {
     const route = routes.resolve('GET', '/api/carros');
     assert.equal(route.action, 'availableCarros');
     assert.deepEqual(await apiService[route.action]({}, { id: 7, rol: 'alumno' }), {
-      carros: [{ numero: 2, ubicacion: 'teoria_pb', total: 5, disponibles: 4 }]
+      carros: [{ numero: 2, ubicacion: 'teoria_pb', total: 5, disponibles: 4 }],
+      ubicaciones: [{ slug: 'teoria_pb', nombre: 'Teoría – Planta baja' }]
     });
     assert.match(calls[0], /NOT EXISTS/);
     authService.authenticate = async () => {
@@ -762,17 +842,23 @@ test('carros, series de notebooks y cambios de estado validan entradas', async (
   }
 });
 
-test('admin edita o renumera carros y solo elimina carros sin notebooks', async () => {
+test('admin edita carros y mover elimina notebooks; los fallos FK nunca responden 500', async () => {
   const originalQuery = db.query;
   const originalTransaction = db.transaction;
   let duplicate = false;
   let carExists = true;
   let hasNotebooks = true;
-  let deletionAllowed = false;
+  let simulateForeignKeyFailure = false;
   const calls = [];
   db.query = async (sql, params) => {
     calls.push({ sql, params });
-    if (duplicate) {
+    if (sql.includes('SELECT COUNT(*)::integer AS cantidad FROM notebooks')) {
+      return { rowCount: 1, rows: [{ cantidad: hasNotebooks ? 5 : 0 }] };
+    }
+    if (sql.includes('SELECT 1 FROM ubicaciones')) {
+      return params[0] === 'auditorio' ? { rowCount: 0, rows: [] } : { rowCount: 1, rows: [{ slug: params[0] }] };
+    }
+    if (duplicate && sql.includes('UPDATE carros SET')) {
       const error = new Error('duplicate key');
       error.code = '23505';
       throw error;
@@ -782,13 +868,24 @@ test('admin edita o renumera carros y solo elimina carros sin notebooks', async 
   db.transaction = async (callback) => callback({
     query: async (sql, params) => {
       calls.push({ sql, params });
-      if (sql.includes('DELETE FROM carros')) {
-        return deletionAllowed ? { rowCount: 1, rows: [{ numero: params[0] }] } : { rowCount: 0, rows: [] };
+      if (sql.includes('SELECT numero FROM carros WHERE')) {
+        return { rowCount: carExists ? 1 : 0, rows: carExists ? [{ numero: params[0] }] : [] };
       }
-      return {
-        rowCount: 1,
-        rows: [{ existe: carExists, tiene_notebooks: hasNotebooks }]
-      };
+      if (sql.includes('COUNT(*)::integer AS cantidad FROM notebooks')) {
+        return { rowCount: 1, rows: [{ cantidad: hasNotebooks ? 5 : 0 }] };
+      }
+      if (sql.includes('SELECT numero FROM carros WHERE numero = $1 FOR UPDATE')) {
+        return { rowCount: 1, rows: [{ numero: params[0] }] };
+      }
+      if (sql.includes('DELETE FROM carros')) {
+        if (simulateForeignKeyFailure) {
+          const error = new Error('insert or update violates foreign key constraint notebooks_carro_id_fkey');
+          error.code = '23503';
+          throw error;
+        }
+        return { rowCount: 1, rows: [{ numero: params[0] }] };
+      }
+      return { rowCount: 1, rows: [] };
     }
   });
   try {
@@ -796,7 +893,7 @@ test('admin edita o renumera carros y solo elimina carros sin notebooks', async 
       { numero: '23', ubicacion: 'teoria_p1' }, { id: 1, rol: 'admin' }, { numero: '2' }
     );
     assert.deepEqual(updated.carro, { numero: 23, ubicacion: 'teoria_p1' });
-    assert.match(calls[0].sql, /UPDATE carros SET numero = \$2, ubicacion = \$3/);
+    assert.match(calls.find((call) => call.sql.includes('UPDATE carros SET')).sql, /UPDATE carros SET numero = \$2, ubicacion = \$3/);
     await assert.rejects(
       apiService.updateCarro({ ubicacion: 'auditorio' }, { id: 1, rol: 'admin' }, { numero: '23' }),
       (error) => error.status === 400
@@ -809,7 +906,7 @@ test('admin edita o renumera carros y solo elimina carros sin notebooks', async 
     duplicate = false;
     await assert.rejects(
       apiService.deleteCarro({}, { id: 1, rol: 'admin' }, { numero: '23' }),
-      (error) => error.status === 409 && /tiene notebooks/.test(error.message)
+      (error) => error.status === 409 && error.details.notebookCount === 5 && /5 notebooks/.test(error.message)
     );
     hasNotebooks = false;
     carExists = false;
@@ -818,10 +915,16 @@ test('admin edita o renumera carros y solo elimina carros sin notebooks', async 
       (error) => error.status === 404
     );
     carExists = true;
-    deletionAllowed = true;
+    hasNotebooks = true;
     assert.deepEqual(
-      await apiService.deleteCarro({}, { id: 1, rol: 'admin' }, { numero: '23' }),
-      { message: 'Carro eliminado' }
+      await apiService.deleteCarro({ destino: 24 }, { id: 1, rol: 'admin' }, { numero: '23' }),
+      { message: 'Carro eliminado', moved: 5 }
+    );
+    hasNotebooks = false;
+    simulateForeignKeyFailure = true;
+    await assert.rejects(
+      apiService.deleteCarro({}, { id: 1, rol: 'admin' }, { numero: '23' }),
+      (error) => error.status === 409 && error.details.notebookCount === 0
     );
     await assert.rejects(
       apiService.updateCarro({ ubicacion: 'taller' }, { id: 1, rol: 'alumno' }, { numero: '23' }),
@@ -1067,7 +1170,7 @@ test('la interfaz muestra selector reabrible, contador de texto, carro y curso e
   const api = fs.readFileSync(path.join(root, 'backend', 'services', 'api-service.js'), 'utf8');
   assert.match(html, /id="resCarro"/);
   assert.match(html, /id="resUbicacion"/);
-  assert.match(html, /id="userDni"[^>]+inputmode="numeric"[^>]+pattern="\[0-9\]\{7,8\}"/);
+  assert.match(html, /id="userDni"[^>]+inputmode="numeric"[^>]+pattern="\[0-9\]\{7,10\}" maxlength="10"/);
   assert.match(html, /Mantener sesión iniciada/);
   assert.match(html, /data-roles-el="alumno,profesor" onclick="switchView\('tickets'\)"/);
   assert.match(html, /<div class="card" data-roles-el="alumno,profesor">[\s\S]*?Notificaciones por email/);
@@ -1089,12 +1192,9 @@ test('la interfaz muestra selector reabrible, contador de texto, carro y curso e
   assert.match(api, /Confirmá tu contraseña para ascender/);
   assert.match(html, /id="resCantidad" min="1" max="2"/);
   assert.match(html, /id="loteCantidad" min="3" max="10"/);
-  assert.match(html, /id="returnModalText"/);
-  assert.match(html, /La hora actual de Buenos Aires se registra automáticamente/);
-  assert.doesNotMatch(html, /id="returnHour"/);
-  const returnAction = app.slice(app.indexOf('async function confirmarDevolucion'), app.indexOf('/* ======================================================================', app.indexOf('async function confirmarDevolucion')));
-  assert.match(returnAction, /method:'POST'/);
-  assert.doesNotMatch(returnAction, /horaPrevista/);
+  assert.doesNotMatch(html, /returnModal|returnConfirmButton/);
+  assert.doesNotMatch(app, /function confirmarDevolucion|openReturnModal|\/api\/loans\/\$\{[^}]+\}\/return/);
+  assert.match(app, /Entregada\. La devolución la registra el administrador/);
   assert.match(html, /id="resHoraDevolucion" min="08:01" max="17:30"/);
   assert.match(html, /id="adminFilterEstado" onchange="filterAdminNotebooks\(\)"/);
   assert.match(html, /option value="pendiente_devolucion"/);
@@ -1112,8 +1212,6 @@ test('la interfaz muestra selector reabrible, contador de texto, carro y curso e
   assert.match(app, /validarHoraDevolucionReserva\(hora, horaDevolucion\)/);
   assert.match(app, /horaDevolucion, motivo/);
   assert.match(app, /Hora acordada \$\{escapeHtml\(n\.horaDevolucion/);
-  assert.match(html, /La hora actual de Buenos Aires se registra automáticamente/);
-  assert.doesNotMatch(html, /id="returnHour"/);
   assert.match(html, /id="prestamosNoEntregadosTable"/);
   assert.match(app, /apiRequest\('\/api\/admin\/open-loans'\)/);
   assert.match(app, /loan\.estado==='devolucion_pendiente' && loan\.returnId/);
@@ -1125,6 +1223,14 @@ test('la interfaz muestra selector reabrible, contador de texto, carro y curso e
   assert.doesNotMatch(app, /function aprobarLote\(id\)/);
   assert.doesNotMatch(app, /function pedirRechazoLote\(id\)/);
   assert.match(app, /const adminReservations = reservas\.filter\(r=>!\['cancelada','retirada'\]\.includes\(r\.estado\)\)/);
+  assert.match(app, /loanReminderInterval = setInterval\([\s\S]{0,120}60_000/);
+  assert.match(app, /minutes > 0 \? loans\.map/);
+  assert.match(app, /circulationInterval = setInterval\([\s\S]{0,240}30000/);
+  assert.match(app, /setTimeout\(\(\)=>void buscarPrestamosAdmin\(query\),300\)/);
+  assert.match(app, /ticketNotebookHistory\.map\(notebook=>/);
+  assert.match(app, /'<option value="otro">Otra \/ no sé<\/option>'/);
+  assert.match(app, /function registrarTodasDevolucionesAdmin/);
+  assert.match(app, /await buscarPrestamosAdmin\(document\.getElementById\('circulationSearch'\)\.value\)/);
   assert.match(app, /const priority = \{confirmada:0, aprobada:0, pendiente_aprobacion:1, rechazada:2\}/);
   assert.match(app, /\(priority\[a\.estado\] \?\? 2\) - \(priority\[b\.estado\] \?\? 2\) \|\| b\.fecha\.localeCompare\(a\.fecha\)/);
   assert.match(app, /let reservationSubmitting = false/);
@@ -1134,4 +1240,416 @@ test('la interfaz muestra selector reabrible, contador de texto, carro y curso e
   assert.match(app, /refreshOwnTickets\(\)/);
   assert.match(app, /initializeTextLimits\(\)/);
   assert.doesNotMatch(app, /adminSetTicketEstado/);
+});
+
+test('el catálogo de ubicaciones valida nombres, genera slugs únicos y no elimina ubicaciones en uso', async () => {
+  const originalQuery = db.query;
+  const originalTransaction = db.transaction;
+  const slugs = new Set(['sala-nandu']);
+  const calls = [];
+  db.query = async (sql, params) => {
+    calls.push({ sql, params });
+    if (sql.includes('SELECT 1 FROM ubicaciones WHERE slug')) {
+      return { rowCount: slugs.has(params[0]) ? 1 : 0, rows: [] };
+    }
+    if (sql.includes('INSERT INTO ubicaciones')) {
+      slugs.add(params[0]);
+      return { rowCount: 1, rows: [{ slug: params[0], nombre: params[1] }] };
+    }
+    if (sql.includes('UPDATE ubicaciones SET nombre')) {
+      return { rowCount: 1, rows: [{ slug: params[1], nombre: params[0] }] };
+    }
+    return { rowCount: 0, rows: [] };
+  };
+  db.transaction = async (callback) => callback({
+    query: async (sql, params) => {
+      calls.push({ sql, params });
+      if (sql.includes('SELECT slug FROM ubicaciones')) return { rowCount: 1, rows: [{ slug: params[0] }] };
+      if (sql.includes('COUNT(*)::integer AS cantidad FROM carros')) {
+        return { rowCount: 1, rows: [{ cantidad: 3 }] };
+      }
+      throw new Error(`Consulta no prevista: ${sql}`);
+    }
+  });
+  try {
+    await assert.rejects(
+      apiService.createUbicacion({ nombre: '   ' }, { id: 1, rol: 'admin' }),
+      (error) => error.status === 400
+    );
+    const created = await apiService.createUbicacion({ nombre: ' Sala Ñandú ' }, { id: 1, rol: 'admin' });
+    assert.deepEqual(created.ubicacion, { slug: 'sala-nandu-2', nombre: 'Sala Ñandú' });
+    const renamed = await apiService.updateUbicacion({ nombre: 'Sala nueva' }, { id: 1, rol: 'admin' }, { slug: 'sala-nandu-2' });
+    assert.equal(renamed.ubicacion.slug, 'sala-nandu-2');
+    await assert.rejects(
+      apiService.deleteUbicacion({}, { id: 1, rol: 'admin' }, { slug: 'sala-nandu-2' }),
+      (error) => error.status === 409 && error.details.carros === 3
+    );
+    assert.equal(calls.some(({ sql }) => sql.includes('DELETE FROM ubicaciones')), false);
+    await assert.rejects(
+      apiService.createUbicacion({ nombre: 'Nueva' }, { id: 2, rol: 'alumno' }),
+      (error) => error.status === 403
+    );
+  } finally {
+    db.query = originalQuery;
+    db.transaction = originalTransaction;
+  }
+});
+
+test('las búsquedas de préstamos y reservas normalizan acentos, escapan comodines y limitan q', async () => {
+  const originalQuery = db.query;
+  const queries = [];
+  db.query = async (sql, params) => {
+    queries.push({ sql, params });
+    return { rowCount: 0, rows: [] };
+  };
+  try {
+    await apiService.adminLoans({}, { id: 1, rol: 'admin' }, {}, new URLSearchParams('estado=activo&q=P%C3%A9rez'));
+    assert.deepEqual(queries[0].params, ['activo', '%perez%']);
+    assert.match(queries[0].sql, /n\.codigo/);
+    assert.match(queries[0].sql, /LIMIT 50/);
+    await apiService.adminReservations({}, { id: 1, rol: 'admin' }, {}, new URLSearchParams('q=P%C3%A9rez_%'));
+    assert.deepEqual(queries[1].params, ['%perez\\_\\%%']);
+    assert.match(queries[1].sql, /r\.estado IN \('pendiente_aprobacion', 'aprobada', 'confirmada'\)/);
+    assert.match(queries[1].sql, /LIMIT 50/);
+    assert.doesNotMatch(queries[1].sql, /Pérez/);
+    await assert.rejects(
+      apiService.adminLoans({}, { id: 1, rol: 'admin' }, {}, new URLSearchParams(`q=${'x'.repeat(51)}`)),
+      (error) => error.status === 400
+    );
+  } finally {
+    db.query = originalQuery;
+  }
+});
+
+test('aprobar y entregar un lote asigna equipos dentro de la transacción y falla claro si faltan', async () => {
+  const originalQuery = db.query;
+  const originalTransaction = db.transaction;
+  const notebooks = [
+    { id: '11', codigo: 'NB-011' },
+    { id: '12', codigo: 'NB-012' },
+    { id: '13', codigo: 'NB-013' }
+  ];
+  const assigned = [];
+  const statements = [];
+  let availableCount = 2;
+  let reservationState = 'pendiente_aprobacion';
+  let loanCount = 0;
+  db.query = async () => ({ rowCount: 0, rows: [] });
+  db.transaction = async (callback) => callback({
+    query: async (sql, params) => {
+      statements.push(sql.replace(/\s+/g, ' '));
+      if (sql.includes('FROM reservations WHERE id = $1 AND estado IN')) {
+        return { rowCount: 1, rows: [{
+          id: '8', owner_id: '7', tipo: 'lote', cantidad: 3, carro: '2', curso: '6°14°',
+          retiro_at: new Date('2026-01-05T11:00:00Z'), hora_devolucion: null,
+          estado: reservationState
+        }] };
+      }
+      if (sql.includes("FROM reservations WHERE id = $1 AND estado = 'pendiente_aprobacion'")) {
+        return reservationState === 'pendiente_aprobacion'
+          ? { rowCount: 1, rows: [{
+            id: '8', owner_id: '7', tipo: 'lote', cantidad: 3, carro: '2', curso: '6°14°',
+            retiro_at: new Date('2026-01-05T11:00:00Z'), hora_devolucion: null,
+            estado: reservationState
+          }] }
+          : { rowCount: 0, rows: [] };
+      }
+      if (sql.includes('UPDATE reservation_notebooks rn SET active = FALSE')) return { rowCount: 0, rows: [] };
+      if (sql.includes('SELECT n.id, n.codigo FROM reservation_notebooks')) {
+        return { rowCount: assigned.length, rows: assigned.map((id) => notebooks.find((notebook) => notebook.id === id)) };
+      }
+      if (sql.includes('SELECT n.id, n.codigo FROM notebooks n')) {
+        return { rowCount: availableCount, rows: notebooks.slice(0, availableCount) };
+      }
+      if (sql.includes('INSERT INTO reservation_notebooks')) {
+        assigned.push(params[1]);
+        return { rowCount: 1, rows: [] };
+      }
+      if (sql.includes("UPDATE reservations SET estado = 'aprobada'")) {
+        reservationState = 'aprobada';
+        return { rowCount: 1, rows: [] };
+      }
+      if (sql.includes('SELECT id, owner_id, tipo, curso, cantidad, retiro_at, hora_devolucion')) {
+        return { rowCount: 1, rows: [{
+          id: '8', owner_id: '7', tipo: 'lote', cantidad: 3, carro: '2', curso: '6°14°',
+          retiro_at: new Date('2026-01-05T11:00:00Z'), hora_devolucion: null,
+          estado: reservationState
+        }] };
+      }
+      if (sql.includes('SELECT id FROM loans WHERE reservation_id')) return { rowCount: loanCount, rows: [] };
+      if (sql.includes('INSERT INTO loans')) {
+        loanCount += 1;
+        return { rowCount: 1, rows: [] };
+      }
+      if (sql.includes("UPDATE notebooks SET estado = 'prestada'")) return { rowCount: 1, rows: [] };
+      if (sql.includes('UPDATE reservation_notebooks SET active = FALSE')) return { rowCount: 3, rows: [] };
+      if (sql.includes("UPDATE reservations SET estado = 'retirada'")) {
+        reservationState = 'retirada';
+        return { rowCount: 1, rows: [] };
+      }
+      throw new Error(`Consulta no prevista: ${sql}`);
+    }
+  });
+  try {
+    await assert.rejects(
+      apiService.approveAndCheckoutReservation({}, { id: 1, rol: 'alumno' }, { id: 8 }),
+      (error) => error.status === 403
+    );
+    await assert.rejects(
+      apiService.approveAndCheckoutReservation({}, { id: 1, rol: 'admin' }, { id: 8 }),
+      (error) => error.status === 409 && /No hay suficientes notebooks disponibles/.test(error.message)
+    );
+    availableCount = 3;
+    const result = await apiService.approveAndCheckoutReservation({}, { id: 1, rol: 'admin' }, { id: 8 });
+    assert.deepEqual(result, { message: 'Retiro registrado', loansCreated: 3 });
+    assert.equal(loanCount, 3);
+    assert.equal(reservationState, 'retirada');
+    assert.ok(statements.some((sql) => sql.includes('FOR UPDATE SKIP LOCKED LIMIT $1')));
+  } finally {
+    db.query = originalQuery;
+    db.transaction = originalTransaction;
+  }
+});
+
+test('la devolución administrativa es transaccional, idempotente y libera según los tickets activos', async () => {
+  const originalQuery = db.query;
+  const originalTransaction = db.transaction;
+  const originalMailProvider = process.env.MAIL_PROVIDER;
+  const originalConsoleError = console.error;
+  const calls = [];
+  let state = 'activo';
+  process.env.MAIL_PROVIDER = 'invalid';
+  console.error = () => {};
+  db.query = async () => ({ rowCount: 1, rows: [{ email: 'user@example.test' }] });
+  db.transaction = async (callback) => callback({
+    query: async (sql, params) => {
+      calls.push({ sql: sql.replace(/\s+/g, ' '), params });
+      if (sql.includes('SELECT id, user_id, notebook_id, estado, vence_at')) {
+        return { rowCount: 1, rows: [{ id: '80', user_id: '7', notebook_id: '11', estado: state, vence_at: new Date(0) }] };
+      }
+      if (sql.includes("UPDATE loans SET estado = 'devuelto'")) {
+        state = 'devuelto';
+        return { rowCount: 1, rows: [{ devuelta_at: new Date() }] };
+      }
+      if (sql.includes('INSERT INTO returns')) return { rowCount: 1, rows: [] };
+      if (sql.includes('UPDATE notebooks SET')) return { rowCount: 1, rows: [] };
+      throw new Error(`Consulta no prevista: ${sql}`);
+    }
+  });
+  try {
+    await assert.rejects(
+      apiService.adminReturnLoan({}, { id: 1, rol: 'alumno' }, { id: 80 }),
+      (error) => error.status === 403
+    );
+    const returned = await apiService.adminReturnLoan({}, { id: 1, rol: 'admin' }, { id: 80 });
+    assert.deepEqual(returned, { message: 'Devolución registrada' });
+    const loanUpdate = calls.find(({ sql }) => sql.includes("UPDATE loans SET estado = 'devuelto'"));
+    assert.match(loanUpdate.sql, /devuelta_at = now\(\)/);
+    const returnInsert = calls.find(({ sql }) => sql.includes('INSERT INTO returns'));
+    assert.match(returnInsert.sql, /confirmado_por/);
+    const notebookUpdate = calls.find(({ sql }) => sql.includes('UPDATE notebooks SET'));
+    assert.match(notebookUpdate.sql, /EXISTS \(SELECT 1 FROM tickets/);
+    assert.match(notebookUpdate.sql, /notebook_id = \$1::bigint/);
+    await assert.rejects(
+      apiService.adminReturnLoan({}, { id: 1, rol: 'admin' }, { id: 80 }),
+      (error) => error.status === 409 && /ya fue devuelto/i.test(error.message)
+    );
+
+    state = 'devolucion_pendiente';
+    calls.length = 0;
+    await apiService.adminReturnLoan({}, { id: 1, rol: 'admin' }, { id: 80 });
+    assert.ok(calls.some(({ sql }) => sql.includes("estado IN ('activo', 'devolucion_pendiente')")));
+  } finally {
+    db.query = originalQuery;
+    db.transaction = originalTransaction;
+    console.error = originalConsoleError;
+    if (originalMailProvider === undefined) delete process.env.MAIL_PROVIDER;
+    else process.env.MAIL_PROVIDER = originalMailProvider;
+  }
+});
+
+test('la confirmación de devoluciones antiguas sigue usando la ruta compatible', async () => {
+  const originalQuery = db.query;
+  const originalTransaction = db.transaction;
+  const calls = [];
+  db.query = async () => ({ rowCount: 0, rows: [] });
+  db.transaction = async (callback) => callback({
+    query: async (sql, params) => {
+      calls.push(sql.replace(/\s+/g, ' '));
+      if (sql.includes('SELECT loan_id FROM returns')) {
+        return { rowCount: 1, rows: [{ loan_id: '80' }] };
+      }
+      if (sql.includes('SELECT id, user_id, notebook_id, estado, vence_at')) {
+        return { rowCount: 1, rows: [{
+          id: '80', user_id: '7', notebook_id: '11', estado: 'devolucion_pendiente',
+          vence_at: new Date(Date.now() - 60_000)
+        }] };
+      }
+      if (sql.includes("UPDATE loans SET estado = 'devuelto'")) return { rowCount: 1, rows: [{ devuelta_at: new Date() }] };
+      if (sql.includes('INSERT INTO returns')) return { rowCount: 1, rows: [] };
+      if (sql.includes('UPDATE notebooks SET')) return { rowCount: 1, rows: [] };
+      throw new Error(`Consulta no prevista: ${sql}`);
+    }
+  });
+  try {
+    assert.deepEqual(
+      await apiService.confirmReturn({}, { id: 1, rol: 'admin' }, { id: 90 }),
+      { message: 'Devolución confirmada' }
+    );
+    assert.ok(calls.some((sql) => sql.includes('SELECT loan_id FROM returns')));
+    assert.ok(calls.some((sql) => sql.includes("estado IN ('activo', 'devolucion_pendiente')")));
+  } finally {
+    db.query = originalQuery;
+    db.transaction = originalTransaction;
+  }
+});
+
+test('los recordatorios solo seleccionan préstamos activos con correo y son idempotentes', async () => {
+  const originalQuery = db.query;
+  const originalTransaction = db.transaction;
+  const previousSecret = process.env.CRON_SECRET;
+  process.env.CRON_SECRET = 'unit-test-cron-secret';
+  const calls = [];
+  let marked = false;
+  db.query = async () => ({ rowCount: 0, rows: [] });
+  db.transaction = async (callback) => callback({
+    query: async (sql, params) => {
+      calls.push({ sql: sql.replace(/\s+/g, ' '), params });
+      if (sql.includes('SELECT l.id, l.user_id, n.codigo AS notebook')) {
+        return marked ? { rowCount: 0, rows: [] } : {
+          rowCount: 1,
+          rows: [{ id: '80', user_id: '7', notebook: 'NB-011', vence_at: new Date(Date.now() + 60_000) }]
+        };
+      }
+      if (sql.includes('UPDATE loans SET reminder_sent_at')) {
+        marked = true;
+        return { rowCount: 1, rows: [] };
+      }
+      throw new Error(`Consulta no prevista: ${sql}`);
+    }
+  });
+  try {
+    await assert.rejects(
+      apiService.sendReturnReminders({ headers: { 'x-cron-secret': 'incorrecto' } }),
+      (error) => error.status === 401
+    );
+    assert.deepEqual(await apiService.sendReturnReminders({ headers: { 'x-cron-secret': process.env.CRON_SECRET } }), { sent: 1 });
+    assert.deepEqual(await apiService.sendReturnReminders({ headers: { 'x-cron-secret': process.env.CRON_SECRET } }), { sent: 0 });
+    const select = calls.find(({ sql }) => sql.includes('SELECT l.id, l.user_id, n.codigo AS notebook')).sql;
+    assert.match(select, /l\.estado = 'activo'/);
+    assert.match(select, /l\.reminder_sent_at IS NULL/);
+    assert.match(select, /p\.return_reminder_minutes > 0/);
+    assert.match(select, /p\.email_notifications = TRUE/);
+    assert.match(select, /make_interval\(mins => p\.return_reminder_minutes\)/);
+  } finally {
+    db.query = originalQuery;
+    db.transaction = originalTransaction;
+    if (previousSecret === undefined) delete process.env.CRON_SECRET;
+    else process.env.CRON_SECRET = previousSecret;
+  }
+});
+
+test('los tickets solo aceptan notebooks existentes del historial y los dueños pueden reabrir al responder', async () => {
+  const originalQuery = db.query;
+  const originalTransaction = db.transaction;
+  let exists = true;
+  let inHistory = false;
+  let ticketState = 'resuelto';
+  const calls = [];
+  db.query = async (sql, params) => {
+    calls.push({ sql, params });
+    if (sql.includes('MAX(l.retirada_at)')) {
+      return { rowCount: 1, rows: [{ codigo: 'NB-011', ultimo_uso: new Date('2026-10-25T10:00:00Z') }] };
+    }
+    if (sql.includes('SELECT id, owner_id FROM tickets')) return { rowCount: 1, rows: [{ id: '9', owner_id: '7' }] };
+    if (sql.includes('FROM ticket_replies')) return { rowCount: 0, rows: [] };
+    return { rowCount: 0, rows: [] };
+  };
+  db.transaction = async (callback) => callback({
+    query: async (sql, params) => {
+      calls.push({ sql: sql.replace(/\s+/g, ' '), params });
+      if (sql.includes('EXISTS (SELECT 1 FROM loans l WHERE l.notebook_id = n.id')) {
+        return exists ? { rowCount: 1, rows: [{ id: '11', in_history: inHistory }] } : { rowCount: 0, rows: [] };
+      }
+      if (sql.includes('INSERT INTO tickets')) return { rowCount: 1, rows: [{ id: 'TCK-1', estado: 'abierto' }] };
+      if (sql.includes('UPDATE notebooks SET')) return { rowCount: 1, rows: [] };
+      if (sql.includes('SELECT id, owner_id, estado, notebook_id FROM tickets')) {
+        return { rowCount: 1, rows: [{ id: '9', owner_id: '7', estado: ticketState, notebook_id: '11' }] };
+      }
+      if (sql.includes('INSERT INTO ticket_replies')) return {
+        rowCount: 1, rows: [{ id: '3', mensaje: params[2], created_at: new Date() }]
+      };
+      if (sql.includes("UPDATE tickets SET estado = 'abierto'")) {
+        ticketState = 'abierto';
+        return { rowCount: 1, rows: [] };
+      }
+      throw new Error(`Consulta no prevista: ${sql}`);
+    }
+  });
+  try {
+    const history = await apiService.ticketNotebooks({}, { id: 7, rol: 'alumno' });
+    assert.equal(history.notebooks[0].codigo, 'NB-011');
+    assert.match(calls.find(({ sql }) => sql.includes('MAX(l.retirada_at)')).sql, /GROUP BY n\.id, n\.codigo\s+ORDER BY MAX\(l\.retirada_at\) DESC/);
+    assert.deepEqual(calls.find(({ sql }) => sql.includes('MAX(l.retirada_at)')).params, [7]);
+    await assert.rejects(
+      apiService.createTicket({ notebook: 'NB-011', motivo: 'Falla', descripcion: 'No inicia' }, { id: 7, rol: 'alumno' }),
+      (error) => error.status === 400 && /historial/.test(error.message)
+    );
+    exists = false;
+    await assert.rejects(
+      apiService.createTicket({ notebook: 'NB-404', motivo: 'Falla', descripcion: 'No inicia' }, { id: 7, rol: 'alumno' }),
+      (error) => error.status === 400 && /no existe/.test(error.message)
+    );
+    exists = true;
+    inHistory = true;
+    await apiService.createTicket({ notebook: 'NB-011', motivo: 'Falla', descripcion: 'No inicia' }, { id: 7, rol: 'alumno' });
+    const ticketInsert = calls.find(({ sql }) => sql.includes('INSERT INTO tickets'));
+    assert.equal(ticketInsert.params[2], 7);
+    assert.match(calls.find(({ sql }) => sql.includes('UPDATE notebooks SET')).sql, /CASE WHEN estado = 'disponible' THEN 'mantenimiento'/);
+
+    await assert.rejects(
+      apiService.createTicketReply({ mensaje: '   ' }, { id: 7, rol: 'alumno' }, { code: 'TCK-1' }),
+      (error) => error.status === 400
+    );
+    await assert.rejects(
+      apiService.createTicketReply({ mensaje: 'x'.repeat(501) }, { id: 7, rol: 'alumno' }, { code: 'TCK-1' }),
+      (error) => error.status === 400
+    );
+    await assert.rejects(
+      apiService.createTicketReply({ mensaje: 'respuesta' }, { id: 8, rol: 'alumno' }, { code: 'TCK-1' }),
+      (error) => error.status === 403
+    );
+    await apiService.createTicketReply({ mensaje: ' respuesta válida ' }, { id: 7, rol: 'alumno' }, { code: 'TCK-1' });
+    assert.equal(ticketState, 'abierto');
+    assert.equal(calls.find(({ sql }) => sql.includes('INSERT INTO ticket_replies')).params[2], 'respuesta válida');
+    assert.ok(calls.some(({ sql }) => sql.includes("UPDATE notebooks SET estado = 'mantenimiento'")
+      && sql.includes("AND estado = 'disponible'")));
+    await assert.rejects(
+      apiService.ticketReplies({}, { id: 8, rol: 'alumno' }, { code: 'TCK-1' }),
+      (error) => error.status === 403
+    );
+    assert.deepEqual(await apiService.ticketReplies({}, { id: 7, rol: 'alumno' }, { code: 'TCK-1' }), { replies: [] });
+  } finally {
+    db.query = originalQuery;
+    db.transaction = originalTransaction;
+  }
+});
+
+test('la migración 011 y el esquema incluyen ubicaciones, recordatorios y respuestas sin modificar migraciones aplicadas', () => {
+  const root = path.resolve(__dirname, '..', '..');
+  const migration = fs.readFileSync(path.join(root, 'database', 'migrations', '011-ubicaciones-recordatorios-y-respuestas.sql'), 'utf8');
+  const schema = fs.readFileSync(path.join(root, 'database', 'schema.sql'), 'utf8');
+  const runner = fs.readFileSync(path.join(root, 'backend', 'scripts', 'db.js'), 'utf8');
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS ubicaciones/i);
+  assert.match(migration, /DROP CONSTRAINT IF EXISTS carros_ubicacion_check/i);
+  assert.match(migration, /FOREIGN KEY \(ubicacion\) REFERENCES ubicaciones\(slug\)/i);
+  assert.match(migration, /ADD COLUMN IF NOT EXISTS reminder_sent_at TIMESTAMPTZ/i);
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS ticket_replies/i);
+  assert.match(schema, /CREATE TABLE ticket_replies/);
+  assert.match(schema, /reminder_sent_at TIMESTAMPTZ/);
+  assert.match(schema, /NEW\.devuelta_at > NEW\.vence_at/);
+  assert.match(schema, /AFTER UPDATE OF estado, devuelta_at ON loans/);
+  assert.match(fs.readFileSync(path.join(root, 'backend', 'services', 'api-service.js'), 'utf8'), /\$1::ticket_status/);
+  assert.match(fs.readFileSync(path.join(root, 'backend', 'services', 'api-service.js'), 'utf8'), /\$1::bigint/);
+  assert.match(runner, /'011-ubicaciones-recordatorios-y-respuestas\.sql'/);
 });
