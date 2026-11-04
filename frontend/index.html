@@ -453,6 +453,7 @@
           <label class="label" for="preferenciasEmail">Notificaciones por email</label>
           <input type="checkbox" id="preferenciasEmail" onchange="actualizarPreferencias()">
         </div>
+        <p class="hint" id="preferenciasRecordatorioInfo" style="margin:.4rem 0 1rem;">El recordatorio por correo está desactivado.</p>
         <div class="info-row">
           <label class="label" for="preferenciasRecordatorio">Recordatorio de devolución</label>
           <select id="preferenciasRecordatorio" class="btn btn-sm" onchange="actualizarPreferencias()">
@@ -609,7 +610,10 @@
   <!-- ============ VIEW: ADMIN · ENTREGAS Y DEVOLUCIONES ============ -->
   <section class="view" id="view-admin-circulation">
     <div class="card">
-      <div class="card-header"><div><h3>Entregas y devoluciones</h3><p>Buscá una persona para consultar sus préstamos activos.</p></div></div>
+      <div class="card-header">
+        <div><h3>Entregas y devoluciones</h3><p>Buscá una persona para consultar sus préstamos activos.</p></div>
+        <button class="btn btn-primary" type="button" onclick="enviarRecordatoriosAdmin()">Enviar recordatorios ahora</button>
+      </div>
       <div class="field"><label for="circulationSearch">Buscar por nombre, correo, DNI o notebook</label>
         <input id="circulationSearch" type="search" maxlength="50" oninput="programarBusquedaPrestamos(this.value)" autocomplete="off"></div>
       <div id="circulationResults" aria-live="polite"></div>

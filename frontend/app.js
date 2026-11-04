@@ -1876,7 +1876,7 @@ async function registrarDevolucionAdmin(id, notebook){
   try{
     await apiRequest(`/api/admin/loans/${id}/return`, {method:'POST'});
     showToast(`Devolución de ${notebook} registrada.`, 'success');
-    await buscarPrestamosAdmin(document.getElementById('circulationSearch').value);
+    await refreshAdminCirculationLoans();
   }catch(error){ showToast(error.message, 'warn'); }
 }
 
@@ -1887,7 +1887,20 @@ async function registrarTodasDevolucionesAdmin(ids){
       method:'POST', body:JSON.stringify({loanIds:ids})
     });
     showToast(result.message, 'success');
-    await buscarPrestamosAdmin(document.getElementById('circulationSearch').value);
+    await refreshAdminCirculationLoans();
+  }catch(error){ showToast(error.message, 'warn'); }
+}
+
+async function refreshAdminCirculationLoans(){
+  await cargarEstadoAPI();
+  renderAll();
+  await buscarPrestamosAdmin(document.getElementById('circulationSearch').value);
+}
+
+async function enviarRecordatoriosAdmin(){
+  try{
+    const result = await apiRequest('/api/admin/reminders/run', {method:'POST'});
+    showToast(`Se enviaron ${result.sent} recordatorio(s).`, 'success');
   }catch(error){ showToast(error.message, 'warn'); }
 }
 
@@ -2176,6 +2189,9 @@ function renderPerfil(){
   const preferencias = currentUser.preferencias || {email:true, recordatorio:'30'};
   document.getElementById('preferenciasEmail').checked = preferencias.email;
   document.getElementById('preferenciasRecordatorio').value = preferencias.recordatorio;
+  document.getElementById('preferenciasRecordatorioInfo').textContent = preferencias.email && Number(preferencias.recordatorio) > 0
+    ? `El recordatorio por correo se envía cuando falten ${preferencias.recordatorio} minutos para el vencimiento.`
+    : 'El recordatorio por correo está desactivado.';
 }
 
 async function actualizarPreferencias(){

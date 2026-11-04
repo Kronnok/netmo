@@ -10,6 +10,7 @@ const backend = path.resolve(__dirname, '..');
 const root = path.resolve(backend, '..');
 const testUrl = process.env.TEST_DATABASE_URL;
 const fakeJwtSecret = 'integration-only-secret-that-is-never-reused';
+const fakeCronSecret = 'integration-only-cron-secret';
 let pool;
 let api;
 let mailSink;
@@ -98,6 +99,7 @@ async function startApi(port, mailUrl) {
       NODE_ENV: 'test',
       DATABASE_URL: testUrl,
       JWT_SECRET: fakeJwtSecret,
+      CRON_SECRET: fakeCronSecret,
       CORS_ORIGIN: 'http://localhost',
       MAIL_PROVIDER: 'gas',
       MAIL_GAS_URL: mailUrl,
@@ -143,8 +145,8 @@ async function closePool() {
   if (pool) await pool.end();
 }
 
-async function request(method, pathname, body, token) {
-  const headers = {};
+async function request(method, pathname, body, token, additionalHeaders = {}) {
+  const headers = { ...additionalHeaders };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   if (token) headers.Authorization = `Bearer ${token}`;
   const response = await fetch(`${baseUrl}${pathname}`, {
@@ -231,6 +233,8 @@ async function adminPermissions(admin, adminUserId, professor, student) {
     ['POST', '/api/admin/reservations/999999/checkout', {}],
     ['GET', '/api/admin/returns', undefined],
     ['GET', '/api/admin/open-loans', undefined],
+    ['GET', '/api/admin/loans', undefined],
+    ['POST', '/api/admin/reminders/run', {}],
     ['POST', '/api/admin/returns/999999/confirm', {}],
     ['GET', '/api/admin/tickets', undefined],
     ['GET', '/api/admin/late-returns', undefined],
@@ -397,6 +401,80 @@ async function runFlows(users) {
     const lateReturn = await pool.query('SELECT id FROM late_returns WHERE loan_id = $1', [id]);
     assert.equal(lateReturn.rowCount, 1);
     return id;
+  });
+
+  await report('checkout del profesor, recordatorio, ticket activo y devolución directa admin', async () => {
+    const reserved = await request('POST', '/api/reservations', {
+      tipo: 'individual', cantidad: 1, curso: '6°14°', carro: '1',
+      retiroAt: reservationTime, horaDevolucion: '17:30', motivo: 'Prueba flujo profesor'
+    }, tokens.professor);
+    assert.equal(reserved.status, 201);
+    const reservationId = reserved.payload.reservation.id;
+    assert.equal((await request('POST', `/api/admin/reservations/${reservationId}/approve`, {}, tokens.admin)).status, 200);
+    const checkout = await request('POST', `/api/admin/reservations/${reservationId}/checkout`, {}, tokens.admin);
+    assert.equal(checkout.status, 200);
+    assert.equal(checkout.payload.loansCreated, 1);
+    let professorLoans = await request('GET', '/api/loans', undefined, tokens.professor);
+    assert.equal(professorLoans.status, 200);
+    const loan = professorLoans.payload.loans.find((item) => item.estado === 'activo');
+    assert.ok(loan);
+    let adminLoans = await request('GET', '/api/admin/loans', undefined, tokens.admin);
+    assert.equal(adminLoans.status, 200);
+    assert.ok(adminLoans.payload.loans.some((item) => String(item.id) === String(loan.id)));
+    const partialProfessorName = encodeURIComponent(users.professor.nombre.slice(0, 4));
+    const searchedAdminLoans = await request('GET', `/api/admin/loans?q=${partialProfessorName}`, undefined, tokens.admin);
+    assert.equal(searchedAdminLoans.status, 200);
+    assert.ok(searchedAdminLoans.payload.loans.some((item) => String(item.id) === String(loan.id)));
+    await pool.query(`UPDATE loans SET vence_at = now() + interval '20 minutes'
+      WHERE id = $1`, [loan.id]);
+    await pool.query(`UPDATE user_preferences SET email_notifications = TRUE, return_reminder_minutes = 30
+      WHERE user_id = $1`, [users.professor.id]);
+    assert.equal((await request('POST', '/api/internal/reminders', {})).status, 401);
+    const reminder = await request('POST', '/api/admin/reminders/run', {}, tokens.admin);
+    assert.equal(reminder.status, 200);
+    assert.equal(reminder.payload.sent, 1);
+    const reminderMark = await pool.query('SELECT reminder_sent_at FROM loans WHERE id = $1', [loan.id]);
+    assert.ok(reminderMark.rows[0].reminder_sent_at);
+    const noDuplicate = await request('POST', '/api/admin/reminders/run', {}, tokens.admin);
+    assert.equal(noDuplicate.payload.sent, 0);
+
+    const ticketOne = await request('POST', '/api/tickets', {
+      notebook: loan.notebook, motivo: 'Prueba', descripcion: 'Falla al devolver equipo prestado'
+    }, tokens.professor);
+    assert.equal(ticketOne.status, 201);
+    let notebook = await pool.query(`SELECT n.estado, n.prestado_a FROM loans l
+      JOIN notebooks n ON n.id = l.notebook_id WHERE l.id = $1`, [loan.id]);
+    assert.equal(notebook.rows[0].estado, 'prestada');
+    assert.equal(String(notebook.rows[0].prestado_a), users.professor.id);
+    const ticketTwo = await request('POST', '/api/tickets', {
+      notebook: loan.notebook, motivo: 'Prueba', descripcion: 'Segundo reporte'
+    }, tokens.professor);
+    assert.equal(ticketTwo.status, 201);
+
+    const returned = await request('POST', `/api/admin/loans/${loan.id}/return`, {}, tokens.admin);
+    assert.equal(returned.status, 200);
+    professorLoans = await request('GET', '/api/loans', undefined, tokens.professor);
+    assert.equal(professorLoans.payload.loans.find((item) => String(item.id) === String(loan.id)).estado, 'devuelto');
+    adminLoans = await request('GET', '/api/admin/loans', undefined, tokens.admin);
+    assert.ok(!adminLoans.payload.loans.some((item) => String(item.id) === String(loan.id)));
+    notebook = await pool.query(`SELECT n.estado, n.prestado_a FROM loans l
+      JOIN notebooks n ON n.id = l.notebook_id WHERE l.id = $1`, [loan.id]);
+    assert.equal(notebook.rows[0].estado, 'mantenimiento');
+    assert.equal(notebook.rows[0].prestado_a, null);
+
+    assert.equal((await request('PATCH', `/api/tickets/${ticketOne.payload.ticket.id}`, {
+      estado: 'resuelto'
+    }, tokens.admin)).status, 200);
+    notebook = await pool.query('SELECT estado FROM notebooks WHERE codigo = $1', [loan.notebook]);
+    assert.equal(notebook.rows[0].estado, 'mantenimiento');
+    assert.equal((await request('PATCH', `/api/tickets/${ticketTwo.payload.ticket.id}`, {
+      estado: 'progreso'
+    }, tokens.admin)).status, 200);
+    assert.equal((await request('PATCH', `/api/tickets/${ticketTwo.payload.ticket.id}`, {
+      estado: 'resuelto'
+    }, tokens.admin)).status, 200);
+    notebook = await pool.query('SELECT estado FROM notebooks WHERE codigo = $1', [loan.notebook]);
+    assert.equal(notebook.rows[0].estado, 'disponible');
   });
 
   await report('inventario expone todos los estados físicos y filtra reservas sin ocultarlos', async () => {

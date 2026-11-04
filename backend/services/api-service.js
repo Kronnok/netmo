@@ -86,6 +86,38 @@ function minutesUntil(dueAt, now = new Date()) {
   return Math.max(0, Math.ceil((new Date(dueAt).getTime() - now.getTime()) / 60_000));
 }
 
+async function runReturnReminders(now) {
+  let sent = 0;
+  await db.transaction(async (client) => {
+    const selected = await client.query(`SELECT l.id, l.user_id, u.email, n.codigo AS notebook, l.vence_at
+      FROM loans l JOIN notebooks n ON n.id = l.notebook_id
+      JOIN users u ON u.id = l.user_id
+      JOIN user_preferences p ON p.user_id = l.user_id
+      WHERE l.estado = 'activo' AND l.reminder_sent_at IS NULL
+        AND p.email_notifications = TRUE AND p.return_reminder_minutes > 0
+        AND l.vence_at > $1
+        AND l.vence_at <= $1 + make_interval(mins => p.return_reminder_minutes)
+      ORDER BY l.vence_at FOR UPDATE OF l SKIP LOCKED`, [now]);
+    for (const loan of selected.rows) {
+      const remaining = minutesUntil(loan.vence_at, now);
+      try {
+        await sendMail({
+          to: loan.email,
+          subject: 'Recordatorio de devolución',
+          html: `<p>La notebook ${escapeEmailHtml(loan.notebook)} vence en ${remaining} min.</p>`
+        });
+      } catch (error) {
+        console.error('No se pudo enviar un recordatorio de devolución.', error);
+        continue;
+      }
+      const marked = await client.query(`UPDATE loans SET reminder_sent_at = now()
+        WHERE id = $1 AND reminder_sent_at IS NULL`, [loan.id]);
+      sent += marked.rowCount;
+    }
+  });
+  return { sent };
+}
+
 function escapeEmailHtml(value) {
   return String(value).replace(/[&<>"']/g, (character) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
@@ -882,7 +914,7 @@ const actions = {
       return { ticket: { id: result.rows[0].id, estado: result.rows[0].estado } };
     });
   },
-  async sendReturnReminders(request) {
+  async sendReturnReminders(request, now = new Date()) {
     const expected = process.env.CRON_SECRET || config.cronSecret;
     if (!expected) throw new AppError('CRON_SECRET no está configurado', 503);
     const provided = request.headers['x-cron-secret'];
@@ -895,26 +927,11 @@ const actions = {
       || provided.length !== expected.length) {
       throw new AppError('No autorizado', 401);
     }
-    const dueLoans = await db.transaction(async (client) => {
-      const selected = await client.query(`SELECT l.id, l.user_id, n.codigo AS notebook, l.vence_at
-        FROM loans l JOIN notebooks n ON n.id = l.notebook_id
-        JOIN user_preferences p ON p.user_id = l.user_id
-        WHERE l.estado = 'activo' AND l.reminder_sent_at IS NULL
-          AND p.email_notifications = TRUE AND p.return_reminder_minutes > 0
-          AND l.vence_at > now()
-          AND l.vence_at <= now() + make_interval(mins => p.return_reminder_minutes)
-        ORDER BY l.vence_at FOR UPDATE OF l SKIP LOCKED`);
-      if (!selected.rowCount) return [];
-      await client.query('UPDATE loans SET reminder_sent_at = now() WHERE id = ANY($1::bigint[])',
-        [selected.rows.map((loan) => loan.id)]);
-      return selected.rows;
-    });
-    for (const loan of dueLoans) {
-      const remaining = minutesUntil(loan.vence_at);
-      await notifyByEmail(loan.user_id, 'Recordatorio de devolución',
-        `<p>La notebook ${loan.notebook} vence en ${remaining} min.</p>`);
-    }
-    return { sent: dueLoans.length };
+    return runReturnReminders(now);
+  },
+  async runAdminReminders(_body, user) {
+    requireAdmin(user, 'Solo admin puede enviar recordatorios');
+    return runReturnReminders(new Date());
   },
   async lateReturns(_body, user) {
     requireAdmin(user, 'Solo admin puede consultar demoras');

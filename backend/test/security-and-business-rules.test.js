@@ -326,6 +326,7 @@ test('todos los servicios detrás de rutas admin rechazan alumnos y aceptan admi
     ['GET', '/api/admin/loans'],
     ['POST', '/api/admin/loans/8/return'],
     ['POST', '/api/admin/loans/return'],
+    ['POST', '/api/admin/reminders/run'],
     ['POST', '/api/admin/returns/8/confirm'],
     ['GET', '/api/admin/tickets'],
     ['GET', '/api/admin/late-returns'],
@@ -1202,6 +1203,12 @@ test('la interfaz muestra selector reabrible, contador de texto, carro y curso e
   assert.match(html, /type="number" id="resCursoAnio"/);
   assert.match(html, /type="number" id="resCursoDivision"/);
   assert.match(html, /id="fallaDesc" maxlength="50"/);
+  assert.match(html, /onclick="enviarRecordatoriosAdmin\(\)">Enviar recordatorios ahora/);
+  assert.match(html, /id="preferenciasRecordatorioInfo"/);
+  assert.match(app, /preferencias\.email && Number\(preferencias\.recordatorio\) > 0/);
+  assert.match(app, /El recordatorio por correo se envía cuando falten \$\{preferencias\.recordatorio\} minutos para el vencimiento\./);
+  assert.match(app, /apiRequest\('\/api\/admin\/reminders\/run', \{method:'POST'\}\)/);
+  assert.match(app, /function enviarRecordatoriosAdmin\(\)[\s\S]*catch\(error\)\{ showToast\(error\.message, 'warn'\); \}/);
   assert.match(html, /id="userNombre" type="text" maxlength="50"/);
   assert.match(app, /renderAdminStateSelect\(`Cambiar estado de \$\{escapeHtml\(nb\.id\)\}/);
   assert.match(app, /renderAdminStateSelect\(`Cambiar estado del ticket \$\{escapeHtml\(t\.id\)\}/);
@@ -1224,12 +1231,16 @@ test('la interfaz muestra selector reabrible, contador de texto, carro y curso e
   assert.doesNotMatch(app, /function pedirRechazoLote\(id\)/);
   assert.match(app, /const adminReservations = reservas\.filter\(r=>!\['cancelada','retirada'\]\.includes\(r\.estado\)\)/);
   assert.match(app, /loanReminderInterval = setInterval\([\s\S]{0,120}60_000/);
+  assert.match(app, /function switchView\(name\)[\s\S]*name==='admin-circulation'[\s\S]{0,160}void buscarPrestamosAdmin\(search\)/);
   assert.match(app, /minutes > 0 \? loans\.map/);
   assert.match(app, /circulationInterval = setInterval\([\s\S]{0,240}30000/);
   assert.match(app, /setTimeout\(\(\)=>void buscarPrestamosAdmin\(query\),300\)/);
   assert.match(app, /ticketNotebookHistory\.map\(notebook=>/);
   assert.match(app, /'<option value="otro">Otra \/ no sé<\/option>'/);
   assert.match(app, /function registrarTodasDevolucionesAdmin/);
+  assert.match(app, /async function registrarRetiro\(id\)[\s\S]*catch\(error\)\{ showToast\(error\.message, 'warn'\); \}/);
+  assert.match(app, /async function aprobarYEntregar\(id\)[\s\S]*catch\(error\)\{ showToast\(error\.message, 'warn'\); \}/);
+  assert.match(app, /async function registrarDevolucionAdmin\(id, notebook\)[\s\S]*catch\(error\)\{ showToast\(error\.message, 'warn'\); \}/);
   assert.match(app, /await buscarPrestamosAdmin\(document\.getElementById\('circulationSearch'\)\.value\)/);
   assert.match(app, /const priority = \{confirmada:0, aprobada:0, pendiente_aprobacion:1, rechazada:2\}/);
   assert.match(app, /\(priority\[a\.estado\] \?\? 2\) - \(priority\[b\.estado\] \?\? 2\) \|\| b\.fecha\.localeCompare\(a\.fecha\)/);
@@ -1504,28 +1515,55 @@ test('la confirmación de devoluciones antiguas sigue usando la ruta compatible'
   }
 });
 
-test('los recordatorios solo seleccionan préstamos activos con correo y son idempotentes', async () => {
+test('los recordatorios marcan solo tras enviar y respetan vencimiento, preferencias y ventana', async () => {
   const originalQuery = db.query;
   const originalTransaction = db.transaction;
   const previousSecret = process.env.CRON_SECRET;
+  const previousMailProvider = process.env.MAIL_PROVIDER;
+  const previousMailUrl = process.env.MAIL_GAS_URL;
+  const previousMailSecret = process.env.MAIL_GAS_SECRET;
+  const previousMailFromEmail = process.env.MAIL_FROM_EMAIL;
+  const previousMailFromName = process.env.MAIL_FROM_NAME;
+  const previousFetch = global.fetch;
+  const previousConsoleError = console.error;
   process.env.CRON_SECRET = 'unit-test-cron-secret';
+  process.env.MAIL_PROVIDER = 'gas';
+  process.env.MAIL_GAS_URL = 'http://mail.test/send';
+  process.env.MAIL_GAS_SECRET = 'unit-test-mail-secret';
+  process.env.MAIL_FROM_EMAIL = 'test@netmo.invalid';
+  process.env.MAIL_FROM_NAME = 'NetMO test';
+  const now = new Date('2026-11-04T20:00:00.000Z');
   const calls = [];
-  let marked = false;
+  const delivered = [];
+  const marked = new Set();
+  let mailStatus = 200;
+  let eligibleLoans = [{
+    id: '80', user_id: '7', email: 'user@example.test', notebook: 'NB-011',
+    vence_at: new Date(now.getTime() + 20 * 60_000), email_notifications: true, reminder_minutes: 30
+  }];
+  global.fetch = async (_url, options) => {
+    delivered.push(JSON.parse(options.body));
+    return { ok: mailStatus === 200, status: mailStatus, text: async () => 'ok' };
+  };
+  console.error = () => {};
   db.query = async () => ({ rowCount: 0, rows: [] });
   db.transaction = async (callback) => callback({
     query: async (sql, params) => {
-      calls.push({ sql: sql.replace(/\s+/g, ' '), params });
-      if (sql.includes('SELECT l.id, l.user_id, n.codigo AS notebook')) {
-        return marked ? { rowCount: 0, rows: [] } : {
-          rowCount: 1,
-          rows: [{ id: '80', user_id: '7', notebook: 'NB-011', vence_at: new Date(Date.now() + 60_000) }]
-        };
+      const statement = sql.replace(/\s+/g, ' ');
+      calls.push({ sql: statement, params });
+      if (statement.includes('SELECT l.id, l.user_id, u.email')) {
+        if (eligibleLoans.length) assert.equal(params[0].toISOString(), now.toISOString());
+        const rows = eligibleLoans.filter((loan) => !marked.has(loan.id)
+          && loan.email_notifications && loan.reminder_minutes > 0
+          && loan.vence_at > params[0]
+          && loan.vence_at <= new Date(params[0].getTime() + loan.reminder_minutes * 60_000));
+        return { rowCount: rows.length, rows };
       }
-      if (sql.includes('UPDATE loans SET reminder_sent_at')) {
-        marked = true;
+      if (statement.includes('UPDATE loans SET reminder_sent_at')) {
+        marked.add(params[0]);
         return { rowCount: 1, rows: [] };
       }
-      throw new Error(`Consulta no prevista: ${sql}`);
+      throw new Error(`Consulta no prevista: ${statement}`);
     }
   });
   try {
@@ -1533,19 +1571,57 @@ test('los recordatorios solo seleccionan préstamos activos con correo y son ide
       apiService.sendReturnReminders({ headers: { 'x-cron-secret': 'incorrecto' } }),
       (error) => error.status === 401
     );
-    assert.deepEqual(await apiService.sendReturnReminders({ headers: { 'x-cron-secret': process.env.CRON_SECRET } }), { sent: 1 });
-    assert.deepEqual(await apiService.sendReturnReminders({ headers: { 'x-cron-secret': process.env.CRON_SECRET } }), { sent: 0 });
-    const select = calls.find(({ sql }) => sql.includes('SELECT l.id, l.user_id, n.codigo AS notebook')).sql;
+    await assert.rejects(
+      apiService.sendReturnReminders({ headers: {} }),
+      (error) => error.status === 401
+    );
+    const request = { headers: { 'x-cron-secret': process.env.CRON_SECRET } };
+    mailStatus = 503;
+    assert.deepEqual(await apiService.sendReturnReminders(request, now), { sent: 0 });
+    assert.equal(marked.size, 0);
+    mailStatus = 200;
+    assert.deepEqual(await apiService.sendReturnReminders(request, now), { sent: 1 });
+    assert.deepEqual(await apiService.sendReturnReminders(request, now), { sent: 0 });
+    assert.equal(delivered.length, 2);
+    const select = calls.find(({ sql }) => sql.includes('SELECT l.id, l.user_id, u.email')).sql;
     assert.match(select, /l\.estado = 'activo'/);
     assert.match(select, /l\.reminder_sent_at IS NULL/);
     assert.match(select, /p\.return_reminder_minutes > 0/);
     assert.match(select, /p\.email_notifications = TRUE/);
     assert.match(select, /make_interval\(mins => p\.return_reminder_minutes\)/);
+    assert.match(select, /l\.vence_at > \$1/);
+    assert.match(select, /l\.vence_at <= \$1 \+ make_interval/);
+    assert.ok(calls.some(({ sql }) => sql.includes('UPDATE loans SET reminder_sent_at')));
+
+    eligibleLoans = [
+      { id: '81', user_id: '7', email: 'user@example.test', notebook: 'NB-081', vence_at: new Date(now.getTime() + 20 * 60_000), email_notifications: true, reminder_minutes: 0 },
+      { id: '82', user_id: '7', email: 'user@example.test', notebook: 'NB-082', vence_at: new Date(now.getTime() + 20 * 60_000), email_notifications: false, reminder_minutes: 30 },
+      { id: '83', user_id: '7', email: 'user@example.test', notebook: 'NB-083', vence_at: new Date(now.getTime() - 1), email_notifications: true, reminder_minutes: 30 }
+    ];
+    assert.deepEqual(await apiService.sendReturnReminders(request, now), { sent: 0 });
+    await assert.rejects(
+      apiService.runAdminReminders({}, { id: 2, rol: 'alumno' }),
+      (error) => error.status === 403
+    );
+    eligibleLoans = [];
+    assert.deepEqual(await apiService.runAdminReminders({}, { id: 1, rol: 'admin' }), { sent: 0 });
   } finally {
     db.query = originalQuery;
     db.transaction = originalTransaction;
+    global.fetch = previousFetch;
+    console.error = previousConsoleError;
     if (previousSecret === undefined) delete process.env.CRON_SECRET;
     else process.env.CRON_SECRET = previousSecret;
+    if (previousMailProvider === undefined) delete process.env.MAIL_PROVIDER;
+    else process.env.MAIL_PROVIDER = previousMailProvider;
+    if (previousMailUrl === undefined) delete process.env.MAIL_GAS_URL;
+    else process.env.MAIL_GAS_URL = previousMailUrl;
+    if (previousMailSecret === undefined) delete process.env.MAIL_GAS_SECRET;
+    else process.env.MAIL_GAS_SECRET = previousMailSecret;
+    if (previousMailFromEmail === undefined) delete process.env.MAIL_FROM_EMAIL;
+    else process.env.MAIL_FROM_EMAIL = previousMailFromEmail;
+    if (previousMailFromName === undefined) delete process.env.MAIL_FROM_NAME;
+    else process.env.MAIL_FROM_NAME = previousMailFromName;
   }
 });
 
