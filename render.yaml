@@ -19,7 +19,6 @@ services:
       - key: LOGIN_LOCK_MINUTES
         sync: false
       - key: CRON_SECRET
-        sync: false
         generateValue: true
       - key: MAIL_PROVIDER
         sync: false
