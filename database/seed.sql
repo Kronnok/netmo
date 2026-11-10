@@ -14,11 +14,11 @@ ON CONFLICT (user_id) DO NOTHING;
 INSERT INTO carros (numero) VALUES (1), (2) ON CONFLICT (numero) DO NOTHING;
 
 INSERT INTO notebooks (codigo, estado, ubicacion, prestado_a, carro_id) VALUES
-  ('NB-001', 'disponible', 'Carro 1', NULL, 1),
-  ('NB-002', 'disponible', 'Carro 1', NULL, 1),
+  ('NB-001', 'disponible', 'Carro 1', NULL, (SELECT id FROM carros WHERE numero = 1)),
+  ('NB-002', 'disponible', 'Carro 1', NULL, (SELECT id FROM carros WHERE numero = 1)),
   ('NB-003', 'prestada', '—', (SELECT id FROM users WHERE dni = 'PRF-010'), NULL),
   ('NB-004', 'mantenimiento', 'Taller', NULL, NULL),
-  ('NB-005', 'disponible', 'Carro 2', NULL, 2),
+  ('NB-005', 'disponible', 'Carro 2', NULL, (SELECT id FROM carros WHERE numero = 2)),
   ('NB-014', 'prestada', '—', (SELECT id FROM users WHERE dni = '2024-0417'), NULL)
 ON CONFLICT (codigo) DO NOTHING;
 

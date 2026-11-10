@@ -3,6 +3,20 @@ const path = require('node:path');
 const { pool } = require('../data/database');
 
 const databaseDir = path.resolve(__dirname, '..', '..', 'database');
+const migrations = [
+  '001-course-belongs-to-operations.sql',
+  '002-business-timezone.sql',
+  '003-admin-accounts-and-carros.sql',
+  '004-reservation-schedule.sql',
+  '005-password-resets.sql',
+  '006-admin-backup-audit.sql',
+  '007-ticket-resolution-metadata.sql',
+  '008-return-scheduled-time.sql',
+  '009-reservation-return-time.sql',
+  '010-dni-carros-y-sesiones.sql',
+  '011-ubicaciones-recordatorios-y-respuestas.sql',
+  '012-stable-carro-location-ids.sql'
+];
 
 async function migrate() {
   const client = await pool.connect();
@@ -13,23 +27,20 @@ async function migrate() {
     )`);
     const exists = await client.query("SELECT to_regclass('public.users') AS users_table");
     if (!exists.rows[0].users_table) {
-      await client.query(await fs.readFile(path.join(databaseDir, 'schema.sql'), 'utf8'));
-      await client.query("INSERT INTO schema_migrations (version) VALUES ('000-initial-schema')");
+      await client.query('BEGIN');
+      try {
+        await client.query(await fs.readFile(path.join(databaseDir, 'schema.sql'), 'utf8'));
+        await client.query("INSERT INTO schema_migrations (version) VALUES ('000-initial-schema')");
+        for (const version of migrations) {
+          await client.query('INSERT INTO schema_migrations (version) VALUES ($1)', [version]);
+        }
+        await client.query('COMMIT');
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      }
       console.log('Esquema inicial aplicado.');
     }
-    const migrations = [
-      '001-course-belongs-to-operations.sql',
-      '002-business-timezone.sql',
-      '003-admin-accounts-and-carros.sql',
-      '004-reservation-schedule.sql',
-      '005-password-resets.sql',
-      '006-admin-backup-audit.sql',
-      '007-ticket-resolution-metadata.sql',
-      '008-return-scheduled-time.sql',
-      '009-reservation-return-time.sql',
-      '010-dni-carros-y-sesiones.sql',
-      '011-ubicaciones-recordatorios-y-respuestas.sql'
-    ];
     for (const version of migrations) {
       const applied = await client.query('SELECT 1 FROM schema_migrations WHERE version = $1', [version]);
       if (applied.rowCount) continue;

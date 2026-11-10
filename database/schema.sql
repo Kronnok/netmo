@@ -50,7 +50,8 @@ CREATE TABLE user_preferences (
 );
 
 CREATE TABLE ubicaciones (
-  slug VARCHAR(20) PRIMARY KEY,
+  id BIGSERIAL PRIMARY KEY,
+  slug VARCHAR(20) NOT NULL UNIQUE,
   nombre VARCHAR(50) NOT NULL
 );
 
@@ -61,8 +62,9 @@ INSERT INTO ubicaciones (slug, nombre) VALUES
   ('teoria_p2', 'Teoría – 2.º piso');
 
 CREATE TABLE carros (
-  numero INTEGER PRIMARY KEY CHECK (numero BETWEEN 1 AND 999),
-  ubicacion VARCHAR(20) REFERENCES ubicaciones(slug) ON UPDATE CASCADE,
+  id BIGSERIAL PRIMARY KEY,
+  numero INTEGER NOT NULL UNIQUE CHECK (numero BETWEEN 1 AND 999),
+  ubicacion_id BIGINT REFERENCES ubicaciones(id),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -71,7 +73,7 @@ CREATE TABLE notebooks (
   codigo VARCHAR(32) NOT NULL UNIQUE,
   estado notebook_status NOT NULL DEFAULT 'disponible',
   ubicacion VARCHAR(80) NOT NULL,
-  carro_id INTEGER REFERENCES carros(numero) ON UPDATE CASCADE,
+  carro_id BIGINT REFERENCES carros(id),
   prestado_a BIGINT REFERENCES users(id) ON DELETE SET NULL,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CHECK ((estado IN ('prestada', 'pendiente_devolucion')) = (prestado_a IS NOT NULL))
@@ -217,6 +219,7 @@ CREATE INDEX ticket_replies_ticket_idx ON ticket_replies(ticket_id, created_at);
 CREATE INDEX late_returns_user_idx ON late_returns(user_id, returned_at DESC);
 CREATE INDEX users_rol_nombre_idx ON users(rol, nombre);
 CREATE INDEX notebooks_carro_estado_idx ON notebooks(carro_id, estado);
+CREATE INDEX carros_ubicacion_id_idx ON carros(ubicacion_id);
 
 CREATE OR REPLACE FUNCTION sync_late_return()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$

@@ -22,11 +22,21 @@ migración de carros conserva las ubicaciones existentes y rellena `carro_id`
 cuando la ubicación contiene un número de carro válido.
 
 La migración 010 renombra `users.legajo` a `users.dni` conservando los valores y
-la restricción de unicidad; agrega ubicaciones opcionales a los carros y
-actualiza la FK de notebooks para permitir renumerarlos. La 011 crea el
-catálogo editable de ubicaciones, agrega `loans.reminder_sent_at` y la tabla
+la restricción de unicidad; agrega ubicaciones opcionales a los carros. La 011
+crea el catálogo de ubicaciones, agrega `loans.reminder_sent_at` y la tabla
 `ticket_replies`. Las cuentas nuevas requieren un DNI numérico de 7 a 10
 dígitos; no se modifican los DNI de cuentas ya existentes.
+
+La migración 012 asigna IDs internos estables a carros y ubicaciones. Las
+notebooks se relacionan con `carros.id` y los carros con `ubicaciones.id`;
+`carros.numero` y `ubicaciones.slug` quedan como valores únicos editables.
+La migración conserva las relaciones existentes al cambiar esas claves. La
+restauración de backups JSON también convierte las referencias antiguas por
+número/slug a las nuevas relaciones por ID.
+
+El envío de recordatorios de devolución permanece deshabilitado hasta integrar
+Gmail. `loans.reminder_sent_at` no se actualiza mientras ese envío no esté
+disponible; la configuración de otros correos no se altera.
 
 Antes de aplicar cambios en producción, guardá un backup. El script opcional
 [`scripts/backup-loop.sh`](scripts/backup-loop.sh) usa `DATABASE_URL` y requiere

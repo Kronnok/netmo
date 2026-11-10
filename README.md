@@ -49,7 +49,10 @@ migraciones de cuentas administradas, vencimiento de baneos, carros, DNI y
 sesiones. La migración 010 conserva los identificadores actuales al renombrar
 `users.legajo` a `users.dni` y agrega ubicaciones a los carros.
 La migración 011 agrega el catálogo administrable de ubicaciones, recordatorios
-previos al vencimiento y respuestas de tickets.
+previos al vencimiento y respuestas de tickets. La migración 012 agrega IDs
+estables para carros y ubicaciones, manteniendo el número y el slug como valores
+editables. El envío de recordatorios permanece deshabilitado hasta integrar
+Gmail; otros correos no se ven afectados.
 `npm run db:seed` registra la aplicación del seed para evitar ejecutarlo una
 segunda vez. Las credenciales se suministran mediante variables de entorno y no
 deben guardarse en el repositorio.

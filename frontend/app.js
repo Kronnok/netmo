@@ -23,13 +23,13 @@ let stats = {disponibles:0, prestadas:0, mantenimiento:0, total:0};
 let prestamosActivos = {};
 let historialPrestamos = [];
 
-let notificacionesDevolucion = [];
-let prestamosNoDevueltos = [];
 let historialTardanzas = [];
+let historialDevoluciones = [];
 let reservas = [];
 let tickets = [];
 let reservationSubmitting = false;
 let lateReturnsInterval = null;
+let returnHistorySearchTimer = null;
 let loanReminderInterval = null;
 let circulationInterval = null;
 let circulationSearchTimer = null;
@@ -145,7 +145,7 @@ const pageMeta = {
   perfil:   ['Mi perfil', 'Tus datos institucionales y preferencias de la cuenta.'],
   'admin-profesores':   ['Usuarios', 'Creá cuentas y consultá alumnos y profesores.'],
   'admin-inventario':   ['Inventario completo', 'Estado de todas las notebooks del sistema.'],
-  'admin-devoluciones': ['Devoluciones pendientes', 'Confirmá la recepción física de los equipos.'],
+  'admin-devoluciones': ['Historial de devoluciones', 'Consultá las recepciones físicas ya confirmadas.'],
   'admin-circulation':  ['Entregas y devoluciones', 'Registrá las entregas y devoluciones de notebooks.'],
   'admin-lotes':        ['Préstamos', 'Aprobá y registrá el retiro de las solicitudes de préstamo (individuales o por lote).'],
   'admin-tickets':      ['Fallas reportadas', 'Tickets enviados por alumnos y profesores. Actualizá el estado del equipo según corresponda.'],
@@ -243,11 +243,13 @@ function expireSession(message){
   if(circulationInterval) clearInterval(circulationInterval);
   if(circulationSearchTimer) clearTimeout(circulationSearchTimer);
   if(reservationsSearchTimer) clearTimeout(reservationsSearchTimer);
+  if(returnHistorySearchTimer) clearTimeout(returnHistorySearchTimer);
   lateReturnsInterval = null;
   loanReminderInterval = null;
   circulationInterval = null;
   circulationSearchTimer = null;
   reservationsSearchTimer = null;
+  returnHistorySearchTimer = null;
   authToken = null;
   currentUser = null;
   rolActivo = null;
@@ -303,8 +305,6 @@ async function cargarEstadoAPI(){
     );
   }else{
     requests.push(
-      ['returns', apiRequest('/api/admin/returns')],
-      ['openLoans', apiRequest('/api/admin/open-loans')],
       ['lateReturns', apiRequest('/api/admin/late-returns')],
       ['users', apiRequest('/api/admin/users')]
     );
@@ -350,20 +350,6 @@ async function cargarEstadoAPI(){
     ownerNombre:ticket.owner_nombre || currentUser.nombre, ownerRol:ticket.owner_rol || currentUser.rol
   }));
   if(esAdmin){
-    notificacionesDevolucion = loaded.returns.returns.map(item=>({
-      id:item.id, notebookId:item.notebook, alumnoDni:item.dni, alumnoNombre:item.nombre,
-      curso:item.curso, fechaSolicitud:formatBusinessDateTime(item.solicitado_at),
-      horaPrevista:item.hora_prevista ? String(item.hora_prevista).slice(0,5) : null,
-      horaDevolucion:item.hora_devolucion ? String(item.hora_devolucion).slice(0,5) : null,
-      rol:'alumno', returnId:item.id
-    }));
-    prestamosNoDevueltos = loaded.openLoans.loans.map(item=>({
-      loanId:item.id, notebook:item.notebook, dni:item.dni, nombre:item.nombre,
-      rol:item.rol, curso:item.curso, retirada:formatBusinessDateTime(item.retirada_at),
-      vence:formatBusinessDateTime(item.vence_at), estado:item.estado,
-      returnId:item.return_id,
-      horaPrevista:item.hora_prevista ? String(item.hora_prevista).slice(0,5) : null
-    }));
     usuariosRegistrados = loaded.users.users;
     usuariosConTardanzas = loaded.lateReturns.users;
     historialTardanzas = loaded.lateReturns.history.map(item=>({
@@ -702,7 +688,6 @@ function toggleLoteBlock(){
 
 function tieneEquiposPendientes(dni){
   if(prestamosActivos[dni]?.length) return true;
-  if(notificacionesDevolucion.some(notificacion=>notificacion.alumnoDni===dni)) return true;
   return reservas.some(reserva=>reserva.ownerDni===dni &&
     !['rechazada','cancelada'].includes(reserva.estado) &&
     reserva.notebookIds?.length > 0);
@@ -775,7 +760,13 @@ function switchView(name){
   if(name==='perfil') renderPerfil();
   if(name==='admin-profesores') renderProfesoresTable();
   if(name==='admin-inventario') renderAdminInventario();
-  if(name==='admin-devoluciones') renderDevoluciones();
+  if(name==='admin-devoluciones'){
+    renderDevoluciones();
+    if(authToken && rolActivo==='admin'){
+      const query = document.getElementById('returnsHistorySearch').value.trim();
+      void buscarHistorialDevoluciones(query);
+    }
+  }
   if(name==='admin-lotes') renderLotes();
   if(name==='admin-tickets') renderAdminTickets();
   if(name==='admin-backup'){
@@ -798,10 +789,10 @@ function switchView(name){
   }
   if(name==='admin-circulation' && authToken && rolActivo==='admin'){
     const search = document.getElementById('circulationSearch').value.trim();
-    if(search.length >= 2) void buscarPrestamosAdmin(search);
+    void buscarPrestamosAdmin(search);
     circulationInterval = setInterval(()=>{
       const currentSearch = document.getElementById('circulationSearch').value.trim();
-      if(currentSearch.length >= 2) void buscarPrestamosAdmin(currentSearch);
+      void buscarPrestamosAdmin(currentSearch);
     }, 30000);
   }
   if(authToken && ['prestamos', 'admin-lotes'].includes(name)){
@@ -929,7 +920,6 @@ function renderAll(){
   renderProfesoresTable();
   renderAdminInventario();
   renderDevoluciones();
-  renderPrestamosNoDevueltos();
   renderLotes();
   renderAdminTickets();
   renderTardanzas();
@@ -1474,79 +1464,54 @@ function renderHistorialPrestamos(){
 }
 
 /* ======================================================================
-   ADMIN · DEVOLUCIONES PENDIENTES
+   ADMIN · HISTORIAL DE DEVOLUCIONES
 ====================================================================== */
-function renderDevoluciones(){
+function renderDevoluciones(message=''){
   const wrap = document.getElementById('devolucionesWrap');
   if(!wrap) return;
-  const badge = document.getElementById('devBadge');
-  if(notificacionesDevolucion.length===0){
+  if(message){
+    wrap.textContent = message;
+    return;
+  }
+  if(!historialDevoluciones.length){
     wrap.innerHTML = `<div class="empty-state">
-      <div class="glyph">📭</div>
-      <h4>No hay devoluciones pendientes</h4>
-      <p>Cuando un alumno solicite devolver un equipo, va a aparecer acá.</p>
+      <div class="glyph">📚</div>
+      <h4>No hay devoluciones registradas</h4>
+      <p>Las recepciones confirmadas aparecerán acá.</p>
     </div>`;
-    badge.style.display = 'none';
     return;
   }
-  badge.style.display = 'inline-flex';
-  badge.textContent = notificacionesDevolucion.length;
-  wrap.innerHTML = notificacionesDevolucion.map((n,i)=>`
-    <div class="action-card" style="cursor:default;margin-bottom:.8rem;">
-      <div class="action-icon" style="background:var(--red-bg);color:var(--red-text);">📥</div>
-      <div class="action-info">
-        <h4>${escapeHtml(n.notebookId)} · ${escapeHtml(n.alumnoNombre)}</h4>
-        <p>${escapeHtml(n.curso)} · DNI ${escapeHtml(n.alumnoDni)} · Solicitado ${escapeHtml(n.fechaSolicitud)} · Hora acordada ${escapeHtml(n.horaDevolucion || 'No informada')} · Hora informada ${escapeHtml(n.horaPrevista || 'No informada')}</p>
-      </div>
-      <button class="btn btn-primary btn-sm" onclick="confirmarRecepcion(${escapeHtml(i)})">Confirmar recepción física</button>
-    </div>`).join('');
+  wrap.innerHTML = `<div class="inventory-table-scroll"><table class="inventory-table">
+    <thead><tr><th>Notebook</th><th>Devolvió</th><th>DNI</th><th>Préstamo</th><th>Recibió</th><th>Fecha y hora</th><th>Estado</th></tr></thead>
+    <tbody>${historialDevoluciones.map(item=>{
+      const state = item.demorada ? 'Devuelta con demora' : 'Devuelta a tiempo';
+      return `<tr><td class="mono">${escapeHtml(item.notebook)}</td>
+        <td>${escapeHtml(item.nombre)}</td><td>${escapeHtml(item.dni)}</td>
+        <td class="mono">#${escapeHtml(item.loan_id)}</td>
+        <td>${escapeHtml(item.recibido_por || '—')}</td>
+        <td>${escapeHtml(item.devuelta_at ? formatBusinessDateTime(item.devuelta_at) : '—')}</td>
+        <td><span class="badge ${item.demorada?'badge-vencido':'badge-resuelto'}">${state}</span></td></tr>`;
+    }).join('')}</tbody></table></div>`;
 }
 
-function renderPrestamosNoDevueltos(){
-  const tbody = document.getElementById('prestamosNoEntregadosTable');
-  if(!tbody) return;
-  if(!prestamosNoDevueltos.length){
-    tbody.innerHTML = '<tr><td colspan="7"><div class="empty-state"><p>No hay notebooks sin devolución confirmada.</p></div></td></tr>';
-    return;
+async function buscarHistorialDevoluciones(query=''){
+  if(!authToken || rolActivo!=='admin') return;
+  const search = query.trim();
+  const url = `/api/admin/returns?estado=confirmada${search ? `&q=${encodeURIComponent(search)}` : ''}`;
+  renderDevoluciones('Cargando historial de devoluciones…');
+  try{
+    const data = await apiRequest(url);
+    historialDevoluciones = data.returns;
+    renderDevoluciones();
+  }catch(error){
+    historialDevoluciones = [];
+    renderDevoluciones(error.message);
   }
-  tbody.innerHTML = prestamosNoDevueltos.map((loan, index)=>{
-    const pending = loan.estado==='devolucion_pendiente' && loan.returnId;
-    const label = pending ? 'Devolución pendiente' : 'Préstamo activo';
-    const confirmActionHtml = pending
-      ? `<button class="btn btn-primary btn-sm" onclick="confirmarRecepcionPrestamo(${escapeHtml(index)})">Confirmar recepción</button>`
-      : '—';
-    return `<tr>
-      <td class="mono">${escapeHtml(loan.notebook)}</td>
-      <td>${escapeHtml(loan.nombre)} · ${escapeHtml(rolLabel[loan.rol] || loan.rol)} · ${escapeHtml(loan.dni)}</td>
-      <td>${escapeHtml(loan.curso || '—')}</td>
-      <td>${escapeHtml(loan.retirada)}</td>
-      <td>${escapeHtml(loan.vence)}</td>
-      <td>${escapeHtml(label)}${pending && loan.horaPrevista ? ` · Hora informada ${escapeHtml(loan.horaPrevista)}` : ''}</td>
-      <td>${confirmActionHtml}</td>
-    </tr>`;
-  }).join('');
 }
 
-async function confirmarRecepcionPrestamo(index){
-  const loan = prestamosNoDevueltos[index];
-  if(!loan || loan.estado!=='devolucion_pendiente' || !loan.returnId) return;
-  try{
-    await apiRequest(`/api/admin/returns/${loan.returnId}/confirm`, {method:'POST'});
-    await cargarEstadoAPI();
-    renderAll();
-    showToast(`Recepción de ${loan.notebook} confirmada.`, 'success');
-  }catch(error){ showToast(mensajeErrorDevolucion(error), 'warn'); }
-}
-
-async function confirmarRecepcion(idx){
-  const n = notificacionesDevolucion[idx];
-  if(!n) return;
-  try{
-    await apiRequest(`/api/admin/returns/${n.returnId || n.id}/confirm`, {method:'POST'});
-    await cargarEstadoAPI();
-    renderAll();
-    showToast(`Recepción de ${n.notebookId} confirmada.`, 'success');
-  }catch(error){ showToast(mensajeErrorDevolucion(error), 'warn'); }
+function programarBusquedaHistorialDevoluciones(value){
+  if(returnHistorySearchTimer) clearTimeout(returnHistorySearchTimer);
+  returnHistorySearchTimer = setTimeout(()=>void buscarHistorialDevoluciones(value),300);
 }
 
 function mensajeErrorDevolucion(error){
@@ -1835,18 +1800,15 @@ function buscarReservasAdmin(value){
 function programarBusquedaPrestamos(value){
   if(circulationSearchTimer) clearTimeout(circulationSearchTimer);
   const query = value.trim();
-  if(query.length < 2){
-    circulationLoans = [];
-    renderCirculationLoans('Ingresá al menos 2 caracteres para buscar.');
-    return;
-  }
   circulationSearchTimer = setTimeout(()=>void buscarPrestamosAdmin(query),300);
 }
 
-async function buscarPrestamosAdmin(query){
-  if(!authToken || rolActivo!=='admin' || query.trim().length<2) return;
+async function buscarPrestamosAdmin(query=''){
+  if(!authToken || rolActivo!=='admin') return;
   try{
-    const data = await apiRequest(`/api/admin/loans?q=${encodeURIComponent(query.trim())}&estado=activo`);
+    const search = query.trim();
+    const suffix = search ? `&q=${encodeURIComponent(search)}` : '';
+    const data = await apiRequest(`/api/admin/loans?estado=pendientes${suffix}`);
     circulationLoans = data.loans;
     renderCirculationLoans();
   }catch(error){
@@ -1862,7 +1824,7 @@ function renderCirculationLoans(message=''){
     return;
   }
   if(!circulationLoans.length){
-    wrap.innerHTML = '<p class="hint">No hay préstamos activos para mostrar.</p>';
+    wrap.innerHTML = '<p class="hint">No hay préstamos pendientes de devolución.</p>';
     return;
   }
   const groups = new Map();
@@ -1875,10 +1837,12 @@ function renderCirculationLoans(message=''){
     const first = loans[0];
     const cards = loans.map(loan=>{
       const overdue = Boolean(loan.vencido);
+      const returnPending = loan.estado==='devolucion_pendiente';
+      const stateLabel = returnPending ? 'Devolución informada; falta confirmar la recepción física' : 'Préstamo activo';
       return `<div class="action-card" style="cursor:default;margin:.6rem 0;${overdue?'border-color:var(--red-text);color:var(--red-text);':''}">
         <div class="action-info"><h4>${escapeHtml(loan.notebook)} · ${escapeHtml(loan.curso || 'Sin curso')}</h4>
-          <p>Retirada ${escapeHtml(formatBusinessDateTime(loan.retirada_at))} · Vence ${escapeHtml(formatBusinessDateTime(loan.vence_at))}${overdue?' · VENCIDA':''}</p></div>
-        <button class="btn btn-sm btn-primary" onclick="registrarDevolucionAdmin(${escapeHtml(JSON.stringify(loan.id))}, ${escapeHtml(JSON.stringify(loan.notebook))})">Registrar devolución</button>
+          <p>${escapeHtml(stateLabel)} · Retirada ${escapeHtml(formatBusinessDateTime(loan.retirada_at))} · Vence ${escapeHtml(formatBusinessDateTime(loan.vence_at))}${overdue?' · VENCIDA':''}</p></div>
+        <button class="btn btn-sm btn-primary" onclick="registrarDevolucionAdmin(${escapeHtml(JSON.stringify(loan.id))}, ${escapeHtml(JSON.stringify(loan.notebook))})">${returnPending?'Confirmar recepción':'Registrar devolución'}</button>
       </div>`;
     }).join('');
     const allButton = loans.length>1
@@ -1912,13 +1876,6 @@ async function refreshAdminCirculationLoans(){
   await cargarEstadoAPI();
   renderAll();
   await buscarPrestamosAdmin(document.getElementById('circulationSearch').value);
-}
-
-async function enviarRecordatoriosAdmin(){
-  try{
-    const result = await apiRequest('/api/admin/reminders/run', {method:'POST'});
-    showToast(`Se enviaron ${result.sent} recordatorio(s).`, 'success');
-  }catch(error){ showToast(error.message, 'warn'); }
 }
 
 let pendingRejectId = null;
@@ -2068,8 +2025,13 @@ async function abrirRespuestasTicket(code){
   document.getElementById('ticketReplyMessage').value = '';
   actualizarContadorRespuesta();
   const canReply = currentUser?.rol==='admin';
-  document.getElementById('ticketReplyForm').hidden = !canReply;
-  document.getElementById('ticketReplySubmit').hidden = !canReply;
+  const form = document.getElementById('ticketReplyForm');
+  const submit = document.getElementById('ticketReplySubmit');
+  form.hidden = !canReply;
+  form.setAttribute('aria-hidden', String(!canReply));
+  form.querySelectorAll('textarea, button').forEach(control=>{ control.disabled = !canReply; });
+  submit.hidden = !canReply;
+  submit.disabled = !canReply;
   openModal('ticketRepliesModal');
   await cargarRespuestasTicket();
 }
@@ -2238,9 +2200,8 @@ function renderPerfil(){
   const preferencias = currentUser.preferencias || {email:true, recordatorio:'30'};
   document.getElementById('preferenciasEmail').checked = preferencias.email;
   document.getElementById('preferenciasRecordatorio').value = preferencias.recordatorio;
-  document.getElementById('preferenciasRecordatorioInfo').textContent = preferencias.email && Number(preferencias.recordatorio) > 0
-    ? `El recordatorio por correo se envía cuando falten ${preferencias.recordatorio} minutos para el vencimiento.`
-    : 'El recordatorio por correo está desactivado.';
+  document.getElementById('preferenciasRecordatorioInfo').textContent =
+    'Las preferencias se guardan, pero el envío de notificaciones no está disponible hasta integrar Gmail.';
 }
 
 async function actualizarPreferencias(){

@@ -34,13 +34,13 @@ const RESTORE_ORDER = [
   'users'
 ];
 
-const SERIAL_TABLES = ['users', 'notebooks', 'reservations', 'loans', 'returns', 'tickets', 'ticket_replies', 'late_returns'];
+const SERIAL_TABLES = ['users', 'ubicaciones', 'carros', 'notebooks', 'reservations', 'loans', 'returns', 'tickets', 'ticket_replies', 'late_returns'];
 
 const REQUIRED_FIELDS = {
   users: ['id', 'dni', 'nombre', 'email', 'rol', 'password_hash'],
   user_preferences: ['user_id'],
-  ubicaciones: ['slug', 'nombre'],
-  carros: ['numero'],
+  ubicaciones: ['id', 'slug', 'nombre'],
+  carros: ['id', 'numero'],
   notebooks: ['id', 'codigo', 'estado', 'ubicacion'],
   reservations: ['id', 'codigo', 'owner_id', 'tipo', 'cantidad', 'retiro_at', 'estado'],
   reservation_notebooks: ['reservation_id', 'notebook_id'],
@@ -63,6 +63,7 @@ const ENUMS = {
 
 const NULLABLE_FIELDS = new Set([
   'users.baneado_hasta',
+  'carros.ubicacion_id',
   'notebooks.carro_id', 'notebooks.prestado_a',
   'reservations.carro', 'reservations.curso', 'reservations.hora_devolucion',
   'loans.reservation_id', 'loans.curso', 'loans.devuelta_at',
@@ -222,7 +223,7 @@ function validateRows(backup, availableTables, columnsByTable) {
   if (!users.some((row) => row.rol === 'admin')) throw new AppError('El backup debe incluir al menos un administrador.', 400);
   for (const [table, key] of [
     ['users', 'id'], ['users', 'dni'], ['users', 'email'], ['user_preferences', 'user_id'],
-    ['ubicaciones', 'slug'],
+    ['ubicaciones', 'id'], ['ubicaciones', 'slug'], ['carros', 'id'],
     ['notebooks', 'id'], ['notebooks', 'codigo'],
     ['reservations', 'id'], ['reservations', 'codigo'], ['loans', 'id'], ['returns', 'id'],
     ['returns', 'loan_id'], ['tickets', 'id'], ['tickets', 'codigo'], ['ticket_replies', 'id'], ['late_returns', 'id'],
@@ -233,10 +234,10 @@ function validateRows(backup, availableTables, columnsByTable) {
     table,
     new Set((backup.data[table] || []).map((row) => String(row.id)))
   ]));
-  const carIds = new Set((backup.data.carros || []).map((row) => String(row.numero)));
-  const locationSlugs = new Set((backup.data.ubicaciones || []).map((row) => String(row.slug)));
+  const carIds = new Set((backup.data.carros || []).map((row) => String(row.id)));
+  const locationIds = new Set((backup.data.ubicaciones || []).map((row) => String(row.id)));
   const refs = [
-    ['carros', 'ubicacion', 'ubicaciones', true],
+    ['carros', 'ubicacion_id', 'ubicaciones', true],
     ['user_preferences', 'user_id', 'users', false],
     ['notebooks', 'carro_id', 'carros', true],
     ['notebooks', 'prestado_a', 'users', true],
@@ -262,7 +263,7 @@ function validateRows(backup, availableTables, columnsByTable) {
       if (row[field] === undefined && nullable) continue;
       if (row[field] === null && nullable) continue;
       const targetIds = target === 'carros' ? carIds
-        : target === 'ubicaciones' ? locationSlugs : ids[target];
+        : target === 'ubicaciones' ? locationIds : ids[target];
       if (!targetIds.has(String(row[field]))) throw new AppError(`Referencia inválida en ${table}.${field}.`, 400);
     }
   }
@@ -276,6 +277,34 @@ function normalizeLegacyUserIdentifiers(backup) {
     }
     if (!Object.hasOwn(row, 'dni')) row.dni = row.legajo;
     delete row.legajo;
+  }
+}
+
+function normalizeLegacyStableIdentifiers(backup) {
+  const locations = backup.data.ubicaciones || [];
+  let nextLocationId = Math.max(0, ...locations.map((location) => Number(location.id) || 0)) + 1;
+  for (const location of locations) {
+    if (!Object.hasOwn(location, 'id')) location.id = String(nextLocationId++);
+  }
+  const locationIds = new Map(locations.map((location) => [String(location.slug), location.id]));
+
+  const carros = backup.data.carros || [];
+  const legacyCarros = carros.some((carro) => !Object.hasOwn(carro, 'id'));
+  let nextCarroId = Math.max(0, ...carros.map((carro) => Number(carro.id) || 0)) + 1;
+  for (const carro of carros) {
+    if (!Object.hasOwn(carro, 'id')) carro.id = String(nextCarroId++);
+    if (!Object.hasOwn(carro, 'ubicacion_id')) {
+      carro.ubicacion_id = carro.ubicacion == null ? null : locationIds.get(String(carro.ubicacion)) ?? null;
+    }
+    delete carro.ubicacion;
+  }
+  const carroIds = new Map(carros.map((carro) => [String(carro.numero), carro.id]));
+  if (legacyCarros) {
+    for (const notebook of backup.data.notebooks || []) {
+      if (notebook.carro_id == null) continue;
+      const stableId = carroIds.get(String(notebook.carro_id));
+      if (stableId !== undefined) notebook.carro_id = stableId;
+    }
   }
 }
 
@@ -347,10 +376,10 @@ async function restoreBackup(body, user) {
   }
   if (backup.data.ubicaciones === undefined) {
     backup.data.ubicaciones = [
-      { slug: 'taller', nombre: 'Taller' },
-      { slug: 'teoria_pb', nombre: 'Teoría – Planta baja' },
-      { slug: 'teoria_p1', nombre: 'Teoría – 1.er piso' },
-      { slug: 'teoria_p2', nombre: 'Teoría – 2.º piso' }
+      { id: '1', slug: 'taller', nombre: 'Taller' },
+      { id: '2', slug: 'teoria_pb', nombre: 'Teoría – Planta baja' },
+      { id: '3', slug: 'teoria_p1', nombre: 'Teoría – 1.er piso' },
+      { id: '4', slug: 'teoria_p2', nombre: 'Teoría – 2.º piso' }
     ];
     backupMetadata.conteos = { ...backupMetadata.conteos, ubicaciones: backup.data.ubicaciones.length };
   }
@@ -358,6 +387,7 @@ async function restoreBackup(body, user) {
     backup.data.carros = [];
     backupMetadata.conteos = { ...backupMetadata.conteos, carros: 0 };
   }
+  normalizeLegacyStableIdentifiers(backup);
   const availableTables = await existingTables();
   const columnsByTable = {};
   for (const table of TABLES) {
@@ -434,5 +464,6 @@ module.exports = {
   checksumFor,
   validateRows,
   normalizeLegacyUserIdentifiers,
+  normalizeLegacyStableIdentifiers,
   migrationNumber
 };

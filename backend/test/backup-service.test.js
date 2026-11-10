@@ -28,7 +28,7 @@ function createValidBackup() {
   const columns = Object.fromEntries(tableNames.map((table) => [table, new Set([
     'id', 'dni', 'nombre', 'email', 'rol', 'password_hash', 'baneado', 'baneado_hasta',
     'created_at', 'user_id', 'email_notifications', 'return_reminder_minutes', 'updated_at', 'slug', 'nombre',
-    'numero', 'codigo', 'estado', 'ubicacion', 'carro_id', 'prestado_a', 'owner_id', 'tipo',
+    'numero', 'ubicacion_id', 'codigo', 'estado', 'ubicacion', 'carro_id', 'prestado_a', 'owner_id', 'tipo',
     'carro', 'curso', 'cantidad', 'retiro_at', 'motivo', 'reservation_id', 'notebook_id',
     'active', 'vence_at', 'retirada_at', 'devuelta_at', 'reminder_sent_at', 'loan_id', 'ticket_id', 'author_id', 'mensaje', 'solicitado_at', 'hora_devolucion',
     'hora_prevista', 'confirmado_at', 'confirmado_por', 'descripcion', 'resolved_at', 'resolved_by',
@@ -119,8 +119,8 @@ test('rechaza referencias inconsistentes en datos de backup', () => {
 
 test('el backup valida ubicaciones y referencias de respuestas a tickets', () => {
   const backup = createValidBackup();
-  backup.data.ubicaciones.push({ slug: 'taller', nombre: 'Taller' });
-  backup.data.carros.push({ numero: 1, ubicacion: 'taller' });
+  backup.data.ubicaciones.push({ id: '10', slug: 'taller', nombre: 'Taller' });
+  backup.data.carros.push({ id: '20', numero: 1, ubicacion_id: '10' });
   backup.data.tickets.push({
     id: '5', codigo: 'TCK-5', owner_id: '1', notebook_id: null,
     motivo: 'Falla', descripcion: 'No inicia', estado: 'abierto'
@@ -132,6 +132,22 @@ test('el backup valida ubicaciones y referencias de respuestas a tickets', () =>
   assert.doesNotThrow(() => backupService.validateRows(backup, backup.available, backup.columns));
   backup.data.ticket_replies[0].ticket_id = '404';
   assert.throws(() => backupService.validateRows(backup, backup.available, backup.columns), /Referencia inválida/);
+});
+
+test('normaliza backups antiguos para conservar las relaciones por carro y ubicación', () => {
+  const backup = {
+    data: {
+      ubicaciones: [{ slug: 'taller', nombre: 'Taller' }],
+      carros: [{ numero: 3, ubicacion: 'taller' }],
+      notebooks: [{ carro_id: 3 }]
+    }
+  };
+  backupService.normalizeLegacyStableIdentifiers(backup);
+  assert.equal(backup.data.ubicaciones[0].id, '1');
+  assert.equal(backup.data.carros[0].id, '1');
+  assert.equal(backup.data.carros[0].ubicacion_id, '1');
+  assert.equal(Object.hasOwn(backup.data.carros[0], 'ubicacion'), false);
+  assert.equal(backup.data.notebooks[0].carro_id, '1');
 });
 
 test('acepta el esquema inicial y reconoce versiones de migración', () => {

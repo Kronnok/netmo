@@ -128,7 +128,7 @@
       Inventario</button></li>
     <li data-roles="admin"><button class="nav-item" data-view="admin-devoluciones" onclick="switchView('admin-devoluciones')">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9"/><path d="M3 4v8h8"/></svg>
-      Devoluciones <span class="nav-badge" id="devBadge" style="display:none;">0</span></button></li>
+      Devoluciones</button></li>
     <li data-roles="admin"><button class="nav-item" data-view="admin-circulation" onclick="switchView('admin-circulation')">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M8 8h8M8 12h8M8 16h4"/></svg>
       Entregas y devoluciones</button></li>
@@ -250,8 +250,8 @@
           <span class="action-arrow">›</span>
         </button>
         <button class="action-card" data-roles="admin" onclick="switchView('admin-devoluciones')">
-          <div class="action-icon" style="background:var(--red-bg);color:var(--red-text);">📥</div>
-          <div class="action-info"><h4>Confirmar devoluciones</h4><p>Revisar la cola de pendientes</p></div>
+          <div class="action-icon" style="background:var(--blue-bg);color:var(--blue-text);">📚</div>
+          <div class="action-info"><h4>Historial de devoluciones</h4><p>Consultar recepciones confirmadas</p></div>
           <span class="action-arrow">›</span>
         </button>
         <button class="action-card" data-roles="admin" onclick="switchView('admin-lotes')">
@@ -453,7 +453,7 @@
           <label class="label" for="preferenciasEmail">Notificaciones por email</label>
           <input type="checkbox" id="preferenciasEmail" onchange="actualizarPreferencias()">
         </div>
-        <p class="hint" id="preferenciasRecordatorioInfo" style="margin:.4rem 0 1rem;">El recordatorio por correo está desactivado.</p>
+        <p class="hint" id="preferenciasRecordatorioInfo" style="margin:.4rem 0 1rem;">Las preferencias se guardan, pero el envío de notificaciones no está disponible hasta integrar Gmail.</p>
         <div class="info-row">
           <label class="label" for="preferenciasRecordatorio">Recordatorio de devolución</label>
           <select id="preferenciasRecordatorio" class="btn btn-sm" onchange="actualizarPreferencias()">
@@ -591,22 +591,16 @@
     </div>
   </section>
 
-  <!-- ============ VIEW: ADMIN · DEVOLUCIONES PENDIENTES ============ -->
+  <!-- ============ VIEW: ADMIN · HISTORIAL DE DEVOLUCIONES ============ -->
   <section class="view" id="view-admin-devoluciones">
     <div class="card">
       <div class="card-header">
-        <div><h3>Notificaciones de devolución</h3><p>Confirmá la recepción física del equipo para cerrar el préstamo.</p></div>
+        <div><h3>Historial de devoluciones</h3><p>Consultá quién devolvió cada equipo, quién confirmó la recepción y cuándo.</p></div>
       </div>
-      <div id="devolucionesWrap"></div>
-    </div>
-    <div class="card" style="margin-top:1.5rem;">
-      <div class="card-header">
-        <div><h3>Equipos aún no entregados</h3><p>Préstamos activos y devoluciones que esperan confirmación física.</p></div>
-      </div>
-      <table>
-        <thead><tr><th>Notebook</th><th>Responsable</th><th>Curso</th><th>Retirada</th><th>Vencimiento</th><th>Estado</th><th>Acción</th></tr></thead>
-        <tbody id="prestamosNoEntregadosTable"></tbody>
-      </table>
+      <div class="field"><label for="returnsHistorySearch">Buscar por persona, DNI, notebook, préstamo o administrador receptor</label>
+        <input id="returnsHistorySearch" type="search" maxlength="50" oninput="programarBusquedaHistorialDevoluciones(this.value)" autocomplete="off"></div>
+      <div id="devolucionesWrap" aria-live="polite"></div>
+      <p class="hint">Este historial es de consulta; no permite registrar devoluciones.</p>
     </div>
   </section>
 
@@ -614,10 +608,11 @@
   <section class="view" id="view-admin-circulation">
     <div class="card">
       <div class="card-header">
-        <div><h3>Entregas y devoluciones</h3><p>Buscá una persona para consultar sus préstamos activos.</p></div>
-        <button class="btn btn-primary" type="button" onclick="enviarRecordatoriosAdmin()">Enviar recordatorios ahora</button>
+        <div><h3>Entregas y devoluciones</h3><p>Préstamos pendientes de devolución; podés registrar una recepción antes del vencimiento.</p></div>
+        <button class="btn btn-primary" type="button" disabled aria-describedby="remindersUnavailableMessage">Enviar recordatorios</button>
       </div>
-      <div class="field"><label for="circulationSearch">Buscar por nombre, correo, DNI o notebook</label>
+      <p id="remindersUnavailableMessage" class="hint" role="status">El envío de recordatorios no está disponible hasta integrar Gmail.</p>
+      <div class="field"><label for="circulationSearch">Buscar por nombre, apellido, DNI, notebook o número de préstamo</label>
         <input id="circulationSearch" type="search" maxlength="50" oninput="programarBusquedaPrestamos(this.value)" autocomplete="off"></div>
       <div id="circulationResults" aria-live="polite"></div>
     </div>
@@ -751,14 +746,14 @@
   <div class="modal">
     <h3 id="ticketRepliesTitle">Respuestas del ticket</h3>
     <div id="ticketRepliesThread" aria-live="polite"></div>
-    <form id="ticketReplyForm" onsubmit="enviarRespuestaTicket(event)">
+    <form id="ticketReplyForm" hidden onsubmit="enviarRespuestaTicket(event)">
       <div class="field"><label for="ticketReplyMessage">Respuesta</label>
-        <textarea id="ticketReplyMessage" maxlength="500" data-no-counter required oninput="actualizarContadorRespuesta()"></textarea>
+        <textarea id="ticketReplyMessage" maxlength="500" data-no-counter disabled required oninput="actualizarContadorRespuesta()"></textarea>
         <span id="ticketReplyCounter" class="hint">0/500</span></div>
     </form>
     <div class="modal-actions">
       <button type="button" class="btn" onclick="closeModal('ticketRepliesModal')">Cerrar</button>
-      <button type="submit" form="ticketReplyForm" id="ticketReplySubmit" class="btn btn-primary">Enviar respuesta</button>
+      <button type="submit" form="ticketReplyForm" id="ticketReplySubmit" class="btn btn-primary" hidden disabled>Enviar respuesta</button>
     </div>
   </div>
 </div>

@@ -183,10 +183,10 @@ async function prepareDatabase() {
   users.resetAttempts = await insertUser('990009', 'Reset Intentos', 'reset-attempts@netmo.invalid', 'alumno');
   await pool.query("UPDATE users SET baneado = TRUE, baneado_hasta = now() - interval '1 minute' WHERE id = $1", [users.expiredBan.id]);
   await pool.query("UPDATE users SET baneado = TRUE, baneado_hasta = now() + interval '1 hour' WHERE id = $1", [users.activeBan.id]);
-  await pool.query('INSERT INTO carros (numero) VALUES (1)');
+  const carro = await pool.query('INSERT INTO carros (numero) VALUES (1) RETURNING id');
   for (let index = 1; index <= 8; index += 1) {
     await pool.query(`INSERT INTO notebooks (codigo, ubicacion, carro_id)
-      VALUES ($1, 'Carro 1', 1)`, [`NB-${String(index).padStart(3, '0')}`]);
+      VALUES ($1, 'Carro 1', $2)`, [`NB-${String(index).padStart(3, '0')}`, carro.rows[0].id]);
   }
   return users;
 }
@@ -234,6 +234,9 @@ async function adminPermissions(admin, adminUserId, professor, student) {
     ['GET', '/api/admin/returns', undefined],
     ['GET', '/api/admin/open-loans', undefined],
     ['GET', '/api/admin/loans', undefined],
+    ['POST', '/api/admin/loans/999999/return', {}],
+    ['POST', '/api/admin/loans/return', { loanIds: [1, 2] }],
+    ['PATCH', '/api/admin/ubicaciones/taller', { nombre: 'Piso 6767' }],
     ['POST', '/api/admin/reminders/run', {}],
     ['POST', '/api/admin/returns/999999/confirm', {}],
     ['GET', '/api/admin/tickets', undefined],
@@ -355,6 +358,10 @@ async function runFlows(users) {
     assert.equal(adminOpenLoans.status, 200);
     assert.equal(adminOpenLoans.payload.loans.length, 1);
     assert.equal(adminOpenLoans.payload.loans[0].estado, 'activo');
+    const pendingLoans = await request('GET', '/api/admin/loans', undefined, tokens.admin);
+    assert.equal(pendingLoans.status, 200);
+    assert.equal(pendingLoans.payload.loans.length, 1);
+    assert.equal(pendingLoans.payload.loans[0].estado, 'activo');
     let loans = await request('GET', '/api/loans', undefined, tokens.student);
     assert.equal(loans.status, 200);
     assert.equal(loans.payload.loans.length, 1);
@@ -421,6 +428,7 @@ async function runFlows(users) {
     let adminLoans = await request('GET', '/api/admin/loans', undefined, tokens.admin);
     assert.equal(adminLoans.status, 200);
     assert.ok(adminLoans.payload.loans.some((item) => String(item.id) === String(loan.id)));
+    assert.ok(adminLoans.payload.loans.some((item) => String(item.id) === String(loan.id) && !item.vencido));
     const partialProfessorName = encodeURIComponent(users.professor.nombre.slice(0, 4));
     const searchedAdminLoans = await request('GET', `/api/admin/loans?q=${partialProfessorName}`, undefined, tokens.admin);
     assert.equal(searchedAdminLoans.status, 200);
@@ -431,17 +439,23 @@ async function runFlows(users) {
       WHERE user_id = $1`, [users.professor.id]);
     assert.equal((await request('POST', '/api/internal/reminders', {})).status, 401);
     const reminder = await request('POST', '/api/admin/reminders/run', {}, tokens.admin);
-    assert.equal(reminder.status, 200);
-    assert.equal(reminder.payload.sent, 1);
+    assert.equal(reminder.status, 503);
+    assert.match(reminder.payload.error, /Gmail/);
     const reminderMark = await pool.query('SELECT reminder_sent_at FROM loans WHERE id = $1', [loan.id]);
-    assert.ok(reminderMark.rows[0].reminder_sent_at);
+    assert.equal(reminderMark.rows[0].reminder_sent_at, null);
     const noDuplicate = await request('POST', '/api/admin/reminders/run', {}, tokens.admin);
-    assert.equal(noDuplicate.payload.sent, 0);
+    assert.equal(noDuplicate.status, 503);
 
     const ticketOne = await request('POST', '/api/tickets', {
       notebook: loan.notebook, motivo: 'Prueba', descripcion: 'Falla al devolver equipo prestado'
     }, tokens.professor);
     assert.equal(ticketOne.status, 201);
+    const ticketReplyPath = `/api/tickets/${ticketOne.payload.ticket.id}/replies`;
+    assert.equal((await request('POST', ticketReplyPath, { mensaje: 'Respuesta administrativa' }, tokens.professor)).status, 403);
+    assert.equal((await request('POST', ticketReplyPath, { mensaje: 'Respuesta administrativa' }, tokens.admin)).status, 200);
+    const professorReplies = await request('GET', ticketReplyPath, undefined, tokens.professor);
+    assert.equal(professorReplies.status, 200);
+    assert.equal(professorReplies.payload.replies[0].mensaje, 'Respuesta administrativa');
     let notebook = await pool.query(`SELECT n.estado, n.prestado_a FROM loans l
       JOIN notebooks n ON n.id = l.notebook_id WHERE l.id = $1`, [loan.id]);
     assert.equal(notebook.rows[0].estado, 'prestada');
@@ -453,10 +467,18 @@ async function runFlows(users) {
 
     const returned = await request('POST', `/api/admin/loans/${loan.id}/return`, {}, tokens.admin);
     assert.equal(returned.status, 200);
+    const duplicateReturn = await request('POST', `/api/admin/loans/${loan.id}/return`, {}, tokens.admin);
+    assert.equal(duplicateReturn.status, 409);
     professorLoans = await request('GET', '/api/loans', undefined, tokens.professor);
     assert.equal(professorLoans.payload.loans.find((item) => String(item.id) === String(loan.id)).estado, 'devuelto');
     adminLoans = await request('GET', '/api/admin/loans', undefined, tokens.admin);
     assert.ok(!adminLoans.payload.loans.some((item) => String(item.id) === String(loan.id)));
+    const returnHistory = await request('GET', `/api/admin/returns?estado=confirmada&q=${loan.id}`, undefined, tokens.admin);
+    assert.equal(returnHistory.status, 200);
+    assert.ok(returnHistory.payload.returns.some((item) => String(item.loan_id) === String(loan.id)
+      && String(item.receptor_id) === users.admin.id));
+    const returnCount = await pool.query('SELECT COUNT(*)::integer AS count FROM returns WHERE loan_id = $1', [loan.id]);
+    assert.equal(returnCount.rows[0].count, 1);
     notebook = await pool.query(`SELECT n.estado, n.prestado_a FROM loans l
       JOIN notebooks n ON n.id = l.notebook_id WHERE l.id = $1`, [loan.id]);
     assert.equal(notebook.rows[0].estado, 'mantenimiento');
@@ -692,6 +714,38 @@ async function runFlows(users) {
     assert.equal((await request('POST', '/api/admin/notebooks', {
       numero: '020', carro_id: 2, cantidad: 2
     }, tokens.admin)).status, 201);
+    const locationBefore = await pool.query('SELECT id FROM ubicaciones WHERE slug = $1', ['taller']);
+    const linkedCarBefore = await pool.query('SELECT id, ubicacion_id FROM carros WHERE numero = $1', [2]);
+    assert.equal((await request('PATCH', '/api/admin/carros/2', { ubicacion: 'taller' }, tokens.admin)).status, 200);
+    const renamedLocation = await request('PATCH', '/api/admin/ubicaciones/taller', {
+      nombre: 'Piso 6767'
+    }, tokens.admin);
+    assert.equal(renamedLocation.status, 200);
+    assert.equal(renamedLocation.payload.ubicacion.slug, 'piso-6767');
+    const locationAfter = await pool.query('SELECT id FROM ubicaciones WHERE slug = $1', ['piso-6767']);
+    const linkedCarAfter = await pool.query('SELECT id, ubicacion_id FROM carros WHERE numero = $1', [2]);
+    assert.equal(String(locationAfter.rows[0].id), String(locationBefore.rows[0].id));
+    assert.equal(String(linkedCarAfter.rows[0].id), String(linkedCarBefore.rows[0].id));
+    assert.equal(String(linkedCarAfter.rows[0].ubicacion_id), String(linkedCarBefore.rows[0].id));
+    assert.equal((await request('PATCH', '/api/admin/ubicaciones/piso-6767', {
+      nombre: 'Taller'
+    }, tokens.admin)).payload.ubicacion.slug, 'taller');
+
+    const stableCar = await pool.query('SELECT id FROM carros WHERE numero = $1', [1]);
+    const loanRelationsBefore = await pool.query(`SELECT l.id, n.carro_id FROM loans l
+      JOIN notebooks n ON n.id = l.notebook_id WHERE n.carro_id = $1 ORDER BY l.id`, [stableCar.rows[0].id]);
+    assert.ok(loanRelationsBefore.rowCount > 0);
+    assert.equal((await request('PATCH', '/api/admin/carros/1', { numero: 4 }, tokens.admin)).status, 200);
+    const loanRelationsAfter = await pool.query(`SELECT l.id, n.carro_id FROM loans l
+      JOIN notebooks n ON n.id = l.notebook_id WHERE n.carro_id = $1 ORDER BY l.id`, [stableCar.rows[0].id]);
+    assert.deepEqual(loanRelationsAfter.rows, loanRelationsBefore.rows);
+    assert.equal((await pool.query('SELECT COUNT(*)::integer AS count FROM carros WHERE numero = $1', [4])).rows[0].count, 1);
+    const inventory = (await request('GET', '/api/notebooks', undefined, tokens.admin)).payload.notebooks;
+    assert.ok(inventory.filter((item) => ['NB-020', 'NB-021'].includes(item.id))
+      .every((item) => Number(item.carro_id) === 2));
+    const renumberedNotebooks = inventory.filter((item) => /^NB-00[1-8]$/.test(item.id));
+    assert.equal(renumberedNotebooks.length, 8);
+    assert.ok(renumberedNotebooks.every((item) => Number(item.carro_id) === 4));
     assert.equal((await request('PATCH', '/api/notebooks/NB-020', { estado: 'mantenimiento' }, tokens.admin)).status, 200);
     assert.equal((await request('PATCH', '/api/notebooks/NB-020', { estado: 'disponible' }, tokens.admin)).status, 200);
   });
