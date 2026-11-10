@@ -99,7 +99,7 @@ test('sirve frontend en desarrollo, valida JSON y responde CORS', async (context
   assert.equal(preflight.status, 204);
   assert.equal(preflight.headers.get('access-control-allow-origin'), allowedOrigin);
   assert.equal(preflight.headers.get('access-control-allow-methods'), 'GET, POST, PATCH, DELETE, OPTIONS');
-  assert.equal(preflight.headers.get('access-control-allow-headers'), 'Content-Type, Authorization');
+  assert.equal(preflight.headers.get('access-control-allow-headers'), 'Content-Type, Authorization, X-Cron-Secret');
 
   const listedOriginPreflight = await fetch(`${baseUrl}/api/auth/login`, {
     method: 'OPTIONS',

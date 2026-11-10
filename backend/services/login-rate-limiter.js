@@ -1,7 +1,6 @@
-const configuredMinutes = process.env.LOGIN_LOCK_MINUTES
-  ? Number(process.env.LOGIN_LOCK_MINUTES)
-  : 2;
-const LOCK_MINUTES = Number.isInteger(configuredMinutes) ? Math.max(1, configuredMinutes) : 2;
+const lockMinutesSetting = process.env.LOGIN_LOCK_MINUTES?.trim();
+const configuredMinutes = lockMinutesSetting ? Number(lockMinutesSetting) : 2;
+const LOCK_MINUTES = Number.isSafeInteger(configuredMinutes) ? Math.max(1, configuredMinutes) : 2;
 const WINDOW_MS = LOCK_MINUTES * 60 * 1000;
 const MAX_FAILURES = 5;
 const attempts = new Map();

@@ -36,6 +36,7 @@ let circulationSearchTimer = null;
 let reservationsSearchTimer = null;
 let circulationLoans = [];
 let activeTicketRepliesCode = null;
+const ticketRepliesLastRead = Object.create(null);
 let pendingDeleteCarro = null;
 let pendingRestoreBackup = null;
 let rolePasswordResolver = null;
@@ -345,6 +346,7 @@ async function cargarEstadoAPI(){
   tickets = ticketsData.tickets.map(ticket=>({
     id:ticket.id, notebook:ticket.notebook || 'otro', motivo:ticket.motivo, motivoCompleto:ticket.descripcion,
     estado:ticket.estado, fecha:formatBusinessDateTime(ticket.created_at, {dateStyle:'short'}), ownerDni:currentUser.dni,
+    latestAdminReplyAt:ticket.latest_admin_reply_at,
     ownerNombre:ticket.owner_nombre || currentUser.nombre, ownerRol:ticket.owner_rol || currentUser.rol
   }));
   if(esAdmin){
@@ -941,18 +943,18 @@ function renderInventarioForms(){
   const list = document.getElementById('carrosList');
   if(list){
     list.innerHTML = carros.length
-      ? `<table><thead><tr><th>Carro</th><th>Ubicación</th><th>Nuevo número</th><th>Acciones</th></tr></thead><tbody>${carros.map(carro=>`
+      ? `<div class="inventory-table-scroll"><table class="inventory-table inventory-table-carros"><thead><tr><th>Carro</th><th>Ubicación</th><th>Nuevo número</th><th>Acciones</th></tr></thead><tbody>${carros.map(carro=>`
         <tr>
           <td>Carro ${escapeHtml(carro.numero)} · ${escapeHtml(carro.disponibles)} disponibles / ${escapeHtml(carro.total)} total</td>
           <td><select id="carro-ubicacion-${escapeHtml(carro.numero)}" aria-label="Ubicación del carro ${escapeHtml(carro.numero)}">
             <option value="" ${carro.ubicacion===null?'selected':''}>Sin ubicación</option>
             ${ubicaciones.map(location=>`<option value="${escapeHtml(location.slug)}" ${carro.ubicacion===location.slug?'selected':''}>${escapeHtml(location.nombre)}</option>`).join('')}
           </select></td>
-          <td><input id="carro-numero-${escapeHtml(carro.numero)}" type="text" inputmode="numeric" pattern="[0-9]{1,3}" maxlength="3" value="${escapeHtml(carro.numero)}" aria-label="Nuevo número para el carro ${escapeHtml(carro.numero)}"></td>
-          <td><button class="btn btn-sm" onclick="guardarCarro(${escapeHtml(carro.numero)})">Guardar</button>
-            <button class="btn btn-sm btn-danger-outline" onclick="eliminarCarro(${escapeHtml(carro.numero)})">Eliminar</button></td>
-        </tr>`).join('')}</tbody></table>`
-      : '<p class="hint">Todavía no hay carros cargados.</p>';
+          <td><input class="inventory-input" id="carro-numero-${escapeHtml(carro.numero)}" type="text" inputmode="numeric" pattern="[0-9]{1,3}" maxlength="3" value="${escapeHtml(carro.numero)}" aria-label="Nuevo número para el carro ${escapeHtml(carro.numero)}"></td>
+          <td><div class="inventory-actions"><button class="btn btn-sm" onclick="guardarCarro(${escapeHtml(carro.numero)})">Guardar</button>
+            <button class="btn btn-sm btn-danger-outline" onclick="eliminarCarro(${escapeHtml(carro.numero)})">Eliminar</button></div></td>
+        </tr>`).join('')}</tbody></table></div>`
+      : '<p class="empty-state">Todavía no hay carros.</p>';
   }
   renderUbicacionesManager();
   const select = document.getElementById('notebookCarro');
@@ -968,12 +970,18 @@ function renderUbicacionesManager(){
   const list = document.getElementById('ubicacionesList');
   if(!list) return;
   list.innerHTML = ubicaciones.length
-    ? `<table><thead><tr><th>Ubicación</th><th>Slug</th><th>Acciones</th></tr></thead><tbody>${ubicaciones.map(location=>`
-      <tr><td><input id="ubicacion-${escapeHtml(location.slug)}" maxlength="50" minlength="2" value="${escapeHtml(location.nombre)}" aria-label="Nombre de ${escapeHtml(location.nombre)}"></td>
+    ? `<div class="inventory-table-scroll"><table class="inventory-table inventory-table-locations"><thead><tr><th>Ubicación</th><th>Slug</th><th>Acciones</th></tr></thead><tbody>${ubicaciones.map(location=>`
+      <tr><td><input class="inventory-input" id="ubicacion-${escapeHtml(location.slug)}" maxlength="50" minlength="2" value="${escapeHtml(location.nombre)}" aria-label="Nombre de ${escapeHtml(location.nombre)}"></td>
       <td class="mono">${escapeHtml(location.slug)}</td>
-      <td><button class="btn btn-sm" onclick="renombrarUbicacion(${escapeHtml(JSON.stringify(location.slug))})">Guardar</button>
-      <button class="btn btn-sm btn-danger-outline" onclick="eliminarUbicacion(${escapeHtml(JSON.stringify(location.slug))})">Eliminar</button></td></tr>`).join('')}</tbody></table>`
-    : '<p class="hint">No hay ubicaciones registradas.</p>';
+      <td><div class="inventory-actions"><button class="btn btn-sm" onclick="renombrarUbicacion(${escapeHtml(JSON.stringify(location.slug))})">Guardar</button>
+      <button class="btn btn-sm btn-danger-outline" onclick="eliminarUbicacion(${escapeHtml(JSON.stringify(location.slug))})">Eliminar</button></div></td></tr>`).join('')}</tbody></table></div>`
+    : '<p class="empty-state">Todavía no hay ubicaciones.</p>';
+}
+
+function actualizarContadorUbicacion(){
+  const input = document.getElementById('ubicacionNombre');
+  const counter = document.getElementById('ubicacionNombreCounter');
+  if(input && counter) counter.textContent = `${input.value.length}/50`;
 }
 
 async function crearUbicacion(event){
@@ -984,6 +992,7 @@ async function crearUbicacion(event){
       method:'POST', body:JSON.stringify({nombre:input.value})
     });
     input.value = '';
+    actualizarContadorUbicacion();
     await cargarEstadoAPI();
     renderAll();
     showToast('Ubicación creada.', 'success');
@@ -1306,7 +1315,7 @@ function filterNotebooks(){
 function renderAdminInventario(){
   const tbody = document.getElementById('adminInventoryTable');
   if(!tbody) return;
-  tbody.innerHTML = notebooks.map(nb=>`
+  tbody.innerHTML = notebooks.length ? notebooks.map(nb=>`
     <tr>
       <td class="mono">${escapeHtml(nb.id)}</td>
       <td><span class="badge ${escapeHtml(badgeClass[nb.estado])}">${escapeHtml(badgeLabel[nb.estado])}</span></td>
@@ -1317,12 +1326,13 @@ function renderAdminInventario(){
         ${renderAdminStateSelect(`Cambiar estado de ${escapeHtml(nb.id)}`, nb.estado, estadosNotebookManuales, 'notebook', nb.id)}
       </td>
       <td>${renderNotebookCarroSelect(nb)}</td>
-    </tr>`).join('');
+    </tr>`).join('')
+  : '<tr><td colspan="7"><p class="empty-state">Todavía no hay notebooks en el inventario.</p></td></tr>';
 }
 
 function renderNotebookCarroSelect(notebook){
   const options = carros.map(carro=>`<option value="${escapeHtml(carro.numero)}" ${Number(notebook.carro_id)===Number(carro.numero)?'selected':''}>Carro ${escapeHtml(carro.numero)}</option>`).join('');
-  return `<select class="btn btn-sm" aria-label="Cambiar carro de ${escapeHtml(notebook.id)}"
+  return `<select class="inventory-select" aria-label="Cambiar carro de ${escapeHtml(notebook.id)}"
     data-current-carro="${escapeHtml(notebook.carro_id ?? '')}"
     ${carros.length?'':'disabled'}
     onchange="cambiarCarroNotebook('${escapeHtml(notebook.id)}', this)">
@@ -1354,7 +1364,8 @@ function renderAdminStateSelect(label, current, states, kind, id){
     const stateLabel = kind==='ticket' ? ticketBadgeLabel[state] : badgeLabel[state];
     return `<option value="${escapeHtml(state)}" ${current===state?'selected':''}>${escapeHtml(stateLabel)}</option>`;
   }).join('');
-  return `<select class="btn btn-sm" aria-label="${escapeHtml(label)}" data-state-kind="${escapeHtml(kind)}"
+  const selectClass = kind==='notebook' ? 'inventory-select' : 'btn btn-sm';
+  return `<select class="${selectClass}" aria-label="${escapeHtml(label)}" data-state-kind="${escapeHtml(kind)}"
     data-state-id="${escapeHtml(id)}" data-current-state="${escapeHtml(current)}" onchange="adminChangeState(this)">
     ${states.includes(current) ? '' : '<option value="" selected disabled>—</option>'}${choices}
   </select>`;
@@ -1524,7 +1535,7 @@ async function confirmarRecepcionPrestamo(index){
     await cargarEstadoAPI();
     renderAll();
     showToast(`Recepción de ${loan.notebook} confirmada.`, 'success');
-  }catch(error){ showToast(error.message, 'warn'); }
+  }catch(error){ showToast(mensajeErrorDevolucion(error), 'warn'); }
 }
 
 async function confirmarRecepcion(idx){
@@ -1535,7 +1546,13 @@ async function confirmarRecepcion(idx){
     await cargarEstadoAPI();
     renderAll();
     showToast(`Recepción de ${n.notebookId} confirmada.`, 'success');
-  }catch(error){ showToast(error.message, 'warn'); }
+  }catch(error){ showToast(mensajeErrorDevolucion(error), 'warn'); }
+}
+
+function mensajeErrorDevolucion(error){
+  return error?.status >= 500
+    ? 'No se pudo registrar la devolución. Revisá el estado del préstamo e intentá de nuevo'
+    : error.message;
 }
 
 /* ======================================================================
@@ -1877,7 +1894,7 @@ async function registrarDevolucionAdmin(id, notebook){
     await apiRequest(`/api/admin/loans/${id}/return`, {method:'POST'});
     showToast(`Devolución de ${notebook} registrada.`, 'success');
     await refreshAdminCirculationLoans();
-  }catch(error){ showToast(error.message, 'warn'); }
+  }catch(error){ showToast(mensajeErrorDevolucion(error), 'warn'); }
 }
 
 async function registrarTodasDevolucionesAdmin(ids){
@@ -1888,7 +1905,7 @@ async function registrarTodasDevolucionesAdmin(ids){
     });
     showToast(result.message, 'success');
     await refreshAdminCirculationLoans();
-  }catch(error){ showToast(error.message, 'warn'); }
+  }catch(error){ showToast(mensajeErrorDevolucion(error), 'warn'); }
 }
 
 async function refreshAdminCirculationLoans(){
@@ -1982,8 +1999,35 @@ function renderTicketsPropios(){
       <td>${escapeHtml(t.motivo)}</td>
       <td><span class="badge ${escapeHtml(ticketBadgeClass[t.estado])}">${escapeHtml(ticketBadgeLabel[t.estado])}</span></td>
       <td>${escapeHtml(t.fecha)}</td>
-      <td><button class="btn btn-sm" onclick="abrirRespuestasTicket(${escapeHtml(JSON.stringify(t.id))})">Ver / responder</button></td>
+      <td><button class="btn btn-sm" onclick="abrirRespuestasTicket(${escapeHtml(JSON.stringify(t.id))})">Ver respuestas</button>
+        ${ticketTieneRespuestaAdminSinLeer(t) ? '<span class="badge badge-progreso" aria-label="Respuesta nueva sin leer">Respuesta nueva</span>' : ''}</td>
     </tr>`).join('');
+}
+
+function ticketReplyReadKey(code){
+  return `netmo_ticket_reply_read:${currentUser?.dni || currentUser?.id || 'user'}:${code}`;
+}
+
+function ticketTieneRespuestaAdminSinLeer(ticket){
+  const latestReplyAt = Date.parse(ticket.latestAdminReplyAt);
+  if(!Number.isFinite(latestReplyAt)) return false;
+  const key = ticketReplyReadKey(ticket.id);
+  let lastReadAt = ticketRepliesLastRead[key] || 0;
+  try{
+    lastReadAt = Math.max(lastReadAt, Number(localStorage.getItem(key)) || 0);
+  }catch{}
+  return latestReplyAt > lastReadAt;
+}
+
+function marcarRespuestasAdminLeidas(code, replies){
+  const latestReplyAt = replies
+    .filter(reply=>reply.author_role==='admin')
+    .reduce((latest, reply)=>Math.max(latest, Date.parse(reply.created_at) || 0), 0);
+  if(!latestReplyAt) return;
+  const key = ticketReplyReadKey(code);
+  ticketRepliesLastRead[key] = latestReplyAt;
+  try{ localStorage.setItem(key, String(latestReplyAt)); }catch{}
+  renderTicketsPropios();
 }
 
 /* ---- ADMIN: Fallas / tickets reportados por todos los usuarios ---- */
@@ -2023,6 +2067,9 @@ async function abrirRespuestasTicket(code){
   document.getElementById('ticketRepliesTitle').textContent = `Respuestas · ${code}`;
   document.getElementById('ticketReplyMessage').value = '';
   actualizarContadorRespuesta();
+  const canReply = currentUser?.rol==='admin';
+  document.getElementById('ticketReplyForm').hidden = !canReply;
+  document.getElementById('ticketReplySubmit').hidden = !canReply;
   openModal('ticketRepliesModal');
   await cargarRespuestasTicket();
 }
@@ -2039,6 +2086,7 @@ async function cargarRespuestasTicket(){
             <p>${escapeHtml(formatBusinessDateTime(reply.created_at))}</p><p>${escapeHtml(reply.mensaje)}</p></div>
         </div>`).join('')
       : '<p class="hint">Todavía no hay respuestas.</p>';
+    if(currentUser?.rol!=='admin') marcarRespuestasAdminLeidas(activeTicketRepliesCode, data.replies);
   }catch(error){ thread.textContent = error.message; }
 }
 
@@ -2049,6 +2097,7 @@ function actualizarContadorRespuesta(){
 
 async function enviarRespuestaTicket(event){
   event.preventDefault();
+  if(currentUser?.rol!=='admin') return;
   const input = document.getElementById('ticketReplyMessage');
   const mensaje = input.value.trim();
   if(!mensaje || mensaje.length>500){
@@ -2062,7 +2111,6 @@ async function enviarRespuestaTicket(event){
     input.value = '';
     actualizarContadorRespuesta();
     await cargarRespuestasTicket();
-    if(currentUser.rol!=='admin') await refreshOwnTickets();
     showToast('Respuesta enviada.', 'success');
   }catch(error){ showToast(error.message, 'warn'); }
 }
@@ -2073,6 +2121,7 @@ async function refreshOwnTickets(){
     tickets = data.tickets.map(ticket=>({
       id:ticket.id, notebook:ticket.notebook || 'otro', motivo:ticket.motivo, motivoCompleto:ticket.descripcion,
       estado:ticket.estado, fecha:formatBusinessDateTime(ticket.created_at, {dateStyle:'short'}),
+      latestAdminReplyAt:ticket.latest_admin_reply_at,
       ownerDni:currentUser.dni, ownerNombre:currentUser.nombre, ownerRol:currentUser.rol
     }));
     renderTicketsPropios();
@@ -2262,15 +2311,17 @@ function initializeTextLimits(){
   document.querySelectorAll(selector).forEach(input=>{
     if(['loginEmail', 'loginPassword'].includes(input.id)) return;
     const currentLimit = Number(input.getAttribute('maxlength'));
-    if(!currentLimit || currentLimit>50) input.setAttribute('maxlength', '50');
+    const hasCustomLimit = input.hasAttribute('data-no-counter');
+    const maximum = hasCustomLimit ? currentLimit || 50 : 50;
+    if(!currentLimit || currentLimit>maximum) input.setAttribute('maxlength', String(maximum));
     const isFreeText = input.tagName==='TEXTAREA'
       || ['text', 'search', 'email', 'url', 'tel'].includes(input.type);
-    if(!isFreeText || input.inputMode==='numeric' || input.pattern?.startsWith('[0-9]')) return;
+    if(!isFreeText || hasCustomLimit || input.inputMode==='numeric' || input.pattern?.startsWith('[0-9]')) return;
     const counter = document.createElement('span');
     counter.className = 'hint char-counter';
     counter.setAttribute('aria-live', 'polite');
-    const maximum = Number(input.getAttribute('maxlength')) || 50;
-    const update = ()=>{ counter.textContent = `${input.value.length}/${maximum}`; };
+    const counterMaximum = Number(input.getAttribute('maxlength')) || 50;
+    const update = ()=>{ counter.textContent = `${input.value.length}/${counterMaximum}`; };
     input.insertAdjacentElement('afterend', counter);
     input.addEventListener('input', update);
     input.form?.addEventListener('reset', ()=>setTimeout(update));
@@ -2287,6 +2338,8 @@ document.getElementById('reservaForm').addEventListener('reset', ()=>{
   setTimeout(updateReservationMinima);
 });
 initializeTextLimits();
+document.getElementById('ubicacionNombre').addEventListener('input', actualizarContadorUbicacion);
+actualizarContadorUbicacion();
 ['resCursoAnio', 'resCursoDivision'].forEach(id=>{
   document.getElementById(id).addEventListener('input', ()=>{
     const anio = document.getElementById('resCursoAnio').value;

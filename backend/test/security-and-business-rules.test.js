@@ -175,9 +175,12 @@ test('cinco fallos de login bloquean por 2 minutos y el 429 indica el tiempo res
 
 test('LOGIN_LOCK_MINUTES usa 2 por defecto y limita el mínimo a 1 minuto', () => {
   const root = path.resolve(__dirname, '..', '..');
-  for (const [value, expected] of [['', 120000], ['0', 60000], ['-5', 60000], ['4', 240000], ['invalid', 120000]]) {
-    const script = `process.env.LOGIN_LOCK_MINUTES=${JSON.stringify(value)}; console.log(require('./backend/services/login-rate-limiter').WINDOW_MS)`;
-    const result = spawnSync(process.execPath, ['-e', script], { cwd: root, encoding: 'utf8' });
+  for (const [value, expected] of [['', 120000], ['  ', 120000], ['0', 60000], ['-5', 60000], ['4', 240000], ['invalid', 120000]]) {
+    const script = `console.log(require('./backend/services/login-rate-limiter').WINDOW_MS)`;
+    const env = { ...process.env };
+    if (value) env.LOGIN_LOCK_MINUTES = value;
+    else delete env.LOGIN_LOCK_MINUTES;
+    const result = spawnSync(process.execPath, ['-e', script], { cwd: root, encoding: 'utf8', env });
     assert.equal(result.status, 0, result.stderr);
     assert.equal(Number(result.stdout.trim()), expected);
   }
@@ -1168,6 +1171,7 @@ test('la interfaz muestra selector reabrible, contador de texto, carro y curso e
   const root = path.resolve(__dirname, '..', '..');
   const html = fs.readFileSync(path.join(root, 'frontend', 'index.html'), 'utf8');
   const app = fs.readFileSync(path.join(root, 'frontend', 'app.js'), 'utf8');
+  const styles = fs.readFileSync(path.join(root, 'frontend', 'styles.css'), 'utf8');
   const api = fs.readFileSync(path.join(root, 'backend', 'services', 'api-service.js'), 'utf8');
   assert.match(html, /id="resCarro"/);
   assert.match(html, /id="resUbicacion"/);
@@ -1215,6 +1219,25 @@ test('la interfaz muestra selector reabrible, contador de texto, carro y curso e
   assert.match(app, /function adminChangeState\(select\)/);
   assert.match(app, /function filterAdminNotebooks\(\)/);
   assert.match(app, /nb\.estado===est/);
+  assert.match(html, /id="ticketReplyMessage" maxlength="500" data-no-counter/);
+  assert.equal((html.match(/id="ticketReplyCounter"/g) || []).length, 1);
+  assert.match(app, /if\(!isFreeText \|\| hasCustomLimit/);
+  assert.match(app, /function ticketTieneRespuestaAdminSinLeer/);
+  assert.match(app, /Respuesta nueva/);
+  assert.match(app, /Ver respuestas/);
+  assert.match(app, /ticketReplyForm'\)\.hidden = !canReply/);
+  assert.match(api, /requireAdmin\(user, 'Solo admin puede responder tickets'\)/);
+  assert.doesNotMatch(api, /UPDATE tickets SET estado = 'abierto', resolved_at = NULL/);
+  assert.match(html, /id="ubicacionNombreCounter"[^>]*>0\/50/);
+  assert.match(app, /function actualizarContadorUbicacion/);
+  assert.match(app, /input\.value = '';\s*actualizarContadorUbicacion\(\)/);
+  assert.match(html, /class="inventory-table-scroll"/);
+  assert.match(html, /class="inventory-select" id="adminFilterEstado"/);
+  assert.match(app, /Todavía no hay carros/);
+  assert.ok(styles.includes('grid-template-columns:repeat(2,minmax(0,1fr))'));
+  assert.ok(styles.includes('@media (max-width:680px){.inventory-forms{grid-template-columns:minmax(0,1fr);'));
+  assert.match(styles, /\.inventory-table-scroll\{[^}]*overflow-x:auto/);
+  assert.match(app, /No se pudo registrar la devolución\. Revisá el estado del préstamo e intentá de nuevo/);
   assert.match(app, /horaPrevista/);
   assert.match(app, /validarHoraDevolucionReserva\(hora, horaDevolucion\)/);
   assert.match(app, /horaDevolucion, motivo/);
@@ -1625,17 +1648,19 @@ test('los recordatorios marcan solo tras enviar y respetan vencimiento, preferen
   }
 });
 
-test('los tickets solo aceptan notebooks existentes del historial y los dueños pueden reabrir al responder', async () => {
+test('los tickets solo aceptan notebooks del historial y solo admin puede responder sin reabrir', async () => {
   const originalQuery = db.query;
   const originalTransaction = db.transaction;
   let exists = true;
   let inHistory = false;
-  let ticketState = 'resuelto';
   const calls = [];
   db.query = async (sql, params) => {
     calls.push({ sql, params });
     if (sql.includes('MAX(l.retirada_at)')) {
       return { rowCount: 1, rows: [{ codigo: 'NB-011', ultimo_uso: new Date('2026-10-25T10:00:00Z') }] };
+    }
+    if (sql.includes('latest_admin_reply_at')) {
+      return { rowCount: 1, rows: [{ id: 'TCK-1', latest_admin_reply_at: new Date('2026-11-09T10:00:00Z') }] };
     }
     if (sql.includes('SELECT id, owner_id FROM tickets')) return { rowCount: 1, rows: [{ id: '9', owner_id: '7' }] };
     if (sql.includes('FROM ticket_replies')) return { rowCount: 0, rows: [] };
@@ -1649,16 +1674,12 @@ test('los tickets solo aceptan notebooks existentes del historial y los dueños 
       }
       if (sql.includes('INSERT INTO tickets')) return { rowCount: 1, rows: [{ id: 'TCK-1', estado: 'abierto' }] };
       if (sql.includes('UPDATE notebooks SET')) return { rowCount: 1, rows: [] };
-      if (sql.includes('SELECT id, owner_id, estado, notebook_id FROM tickets')) {
-        return { rowCount: 1, rows: [{ id: '9', owner_id: '7', estado: ticketState, notebook_id: '11' }] };
+      if (sql.includes('SELECT id, owner_id FROM tickets')) {
+        return { rowCount: 1, rows: [{ id: '9', owner_id: '7' }] };
       }
       if (sql.includes('INSERT INTO ticket_replies')) return {
         rowCount: 1, rows: [{ id: '3', mensaje: params[2], created_at: new Date() }]
       };
-      if (sql.includes("UPDATE tickets SET estado = 'abierto'")) {
-        ticketState = 'abierto';
-        return { rowCount: 1, rows: [] };
-      }
       throw new Error(`Consulta no prevista: ${sql}`);
     }
   });
@@ -1685,26 +1706,38 @@ test('los tickets solo aceptan notebooks existentes del historial y los dueños 
 
     await assert.rejects(
       apiService.createTicketReply({ mensaje: '   ' }, { id: 7, rol: 'alumno' }, { code: 'TCK-1' }),
-      (error) => error.status === 400
+      (error) => error.status === 403
     );
     await assert.rejects(
       apiService.createTicketReply({ mensaje: 'x'.repeat(501) }, { id: 7, rol: 'alumno' }, { code: 'TCK-1' }),
-      (error) => error.status === 400
+      (error) => error.status === 403
     );
     await assert.rejects(
       apiService.createTicketReply({ mensaje: 'respuesta' }, { id: 8, rol: 'alumno' }, { code: 'TCK-1' }),
       (error) => error.status === 403
     );
-    await apiService.createTicketReply({ mensaje: ' respuesta válida ' }, { id: 7, rol: 'alumno' }, { code: 'TCK-1' });
-    assert.equal(ticketState, 'abierto');
+    const replyInsertCount = calls.filter(({ sql }) => sql.includes('INSERT INTO ticket_replies')).length;
+    await assert.rejects(
+      apiService.createTicketReply({ mensaje: ' respuesta válida ' }, { id: 7, rol: 'alumno' }, { code: 'TCK-1' }),
+      (error) => error.status === 403
+    );
+    assert.equal(calls.filter(({ sql }) => sql.includes('INSERT INTO ticket_replies')).length, replyInsertCount);
+    await assert.rejects(
+      apiService.createTicketReply({ mensaje: 'x'.repeat(501) }, { id: 1, rol: 'admin' }, { code: 'TCK-1' }),
+      (error) => error.status === 400
+    );
+    await apiService.createTicketReply({ mensaje: ' respuesta válida ' }, { id: 1, rol: 'admin' }, { code: 'TCK-1' });
     assert.equal(calls.find(({ sql }) => sql.includes('INSERT INTO ticket_replies')).params[2], 'respuesta válida');
-    assert.ok(calls.some(({ sql }) => sql.includes("UPDATE notebooks SET estado = 'mantenimiento'")
-      && sql.includes("AND estado = 'disponible'")));
+    assert.ok(!calls.some(({ sql }) => sql.includes("UPDATE tickets SET estado = 'abierto'")));
     await assert.rejects(
       apiService.ticketReplies({}, { id: 8, rol: 'alumno' }, { code: 'TCK-1' }),
       (error) => error.status === 403
     );
     assert.deepEqual(await apiService.ticketReplies({}, { id: 7, rol: 'alumno' }, { code: 'TCK-1' }), { replies: [] });
+    assert.deepEqual(await apiService.ticketReplies({}, { id: 1, rol: 'admin' }, { code: 'TCK-1' }), { replies: [] });
+    const ownTickets = await apiService.tickets({}, { id: 7, rol: 'alumno' });
+    assert.ok(ownTickets.tickets[0].latest_admin_reply_at);
+    assert.match(calls.find(({ sql }) => sql.includes('latest_admin_reply_at')).sql, /author\.rol = 'admin'/);
   } finally {
     db.query = originalQuery;
     db.transaction = originalTransaction;

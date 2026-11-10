@@ -240,6 +240,30 @@
     padding:.65rem .8rem;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:.88rem;
     background:var(--surface-2);color:var(--text);outline:none;font-family:var(--font-body);width:100%;
   }
+  .inventory-input,.inventory-select{
+    min-width:10rem;padding:.65rem .8rem;border:1px solid var(--border);border-radius:var(--radius-sm);
+    background:var(--surface-2);color:var(--text);font:500 .88rem var(--font-body);width:100%;
+  }
+  .inventory-select{appearance:auto;max-width:100%;}
+  .inventory-input:focus,.inventory-select:focus{border-color:var(--brand);background:var(--surface);outline:2px solid var(--brand);outline-offset:2px;}
+  .inventory-forms{
+    display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1.75rem;align-items:start;
+  }
+  .inventory-forms>.card,.inventory-section{min-width:0;}
+  .inventory-card-form{align-items:end;}
+  .field-full{grid-column:1/-1;}
+  .inventory-section{margin-top:1.5rem;}
+  .inventory-table-scroll{width:100%;max-width:100%;min-width:0;overflow-x:auto;overscroll-behavior-x:contain;}
+  .inventory-table{min-width:42rem;table-layout:auto;}
+  .inventory-table th,.inventory-table td{vertical-align:middle;}
+  .inventory-table-notebooks{min-width:72rem;}
+  .inventory-table-locations{min-width:42rem;}
+  .inventory-table-carros{min-width:58rem;}
+  .inventory-table .inventory-input,.inventory-table .inventory-select{min-width:10rem;}
+  .inventory-actions{display:flex;flex-flow:row nowrap;align-items:center;gap:.45rem;min-width:max-content;}
+  .inventory-filters{flex-wrap:wrap;justify-content:flex-end;min-width:min(100%,18rem);}
+  .inventory-filters .search-bar{min-width:min(100%,14rem);}
+  .inventory-filters .inventory-select{width:auto;min-width:12rem;}
   select option{background:var(--surface);color:var(--text);}
   input[type=checkbox]{accent-color:var(--brand);}
   select:focus,input:focus,textarea:focus{border-color:var(--brand);background:var(--surface);}
@@ -264,6 +288,7 @@
   /* ---------- Two column view layout ---------- */
   .view-grid{display:grid;grid-template-columns:1.1fr 1fr;gap:1.75rem;align-items:start;}
   @media (max-width:1050px){.view-grid,.content-grid{grid-template-columns:1fr;}}
+  @media (max-width:680px){.inventory-forms{grid-template-columns:minmax(0,1fr);}.inventory-filters{justify-content:stretch;}.inventory-filters>*{flex:1 1 100%;}}
 
   /* ---------- Profile ---------- */
   .profile-hero{display:flex;align-items:center;gap:1.3rem;padding-bottom:1.3rem;margin-bottom:1.3rem;border-bottom:1px solid var(--border);}

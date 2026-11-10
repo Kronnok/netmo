@@ -532,26 +532,26 @@
 
   <!-- ============ VIEW: ADMIN · INVENTARIO ============ -->
   <section class="view" id="view-admin-inventario">
-    <div class="view-grid" style="margin-bottom:1.5rem;">
+    <div class="inventory-forms">
       <div class="card">
         <div class="card-header"><div><h3>Alta de carros</h3><p>Ingresá un número único entre 1 y 999.</p></div></div>
-        <form id="carroForm" onsubmit="crearCarro(event)">
+        <form id="carroForm" onsubmit="crearCarro(event)" class="form-grid inventory-card-form">
           <div class="field"><label for="carroNumero">Número de carro</label><input id="carroNumero" type="text" inputmode="numeric" pattern="[0-9]{1,3}" maxlength="3" required></div>
-          <div id="carroError" class="field-error"></div>
-          <button class="btn btn-primary" type="submit">Agregar carro</button>
+          <div class="field"><label>&nbsp;</label><button class="btn btn-primary" type="submit">Agregar carro</button></div>
+          <div id="carroError" class="field-error field-full"></div>
         </form>
       </div>
-      <div class="card" style="margin-bottom:1.5rem;">
+      <div class="card">
         <div class="card-header"><div><h3>Ubicaciones</h3><p>Administrá las ubicaciones disponibles para los carros.</p></div></div>
-        <form id="ubicacionForm" onsubmit="crearUbicacion(event)" class="form-grid">
-          <div class="field"><label for="ubicacionNombre">Nueva ubicación</label><input id="ubicacionNombre" maxlength="50" minlength="2" required></div>
+        <form id="ubicacionForm" onsubmit="crearUbicacion(event)" class="form-grid inventory-card-form">
+          <div class="field"><label for="ubicacionNombre">Nueva ubicación</label><input id="ubicacionNombre" maxlength="50" minlength="2" data-no-counter required><span id="ubicacionNombreCounter" class="hint char-counter" aria-live="polite">0/50</span></div>
           <div class="field"><label>&nbsp;</label><button class="btn btn-primary" type="submit">Crear ubicación</button></div>
         </form>
         <div id="ubicacionesList"></div>
       </div>
       <div class="card">
         <div class="card-header"><div><h3>Alta de notebooks</h3><p>Asigná los equipos nuevos a un carro existente.</p></div></div>
-        <form id="notebookForm" onsubmit="crearNotebooks(event)">
+        <form id="notebookForm" onsubmit="crearNotebooks(event)" class="inventory-card-form">
           <div class="form-grid">
             <div class="field"><label for="notebookNumero">Número inicial (1–999)</label><input id="notebookNumero" type="text" inputmode="numeric" pattern="[0-9]{1,3}" maxlength="3" required></div>
             <div class="field"><label for="notebookCarro">Carro</label><select id="notebookCarro" required></select></div>
@@ -562,16 +562,16 @@
         </form>
       </div>
     </div>
-    <div class="card" style="margin-bottom:1.5rem;">
+    <div class="card inventory-section">
       <div class="card-header"><div><h3>Carros</h3></div></div>
       <div id="carrosList"></div>
     </div>
-    <div class="card">
+    <div class="card inventory-section">
       <div class="card-header">
         <div><h3>Inventario completo</h3><p>Consultá y actualizá el estado operativo de cada notebook. Las acciones de reservas, préstamos, devoluciones y fallas también actualizan este inventario.</p></div>
-        <div class="search-bar-wrap">
+        <div class="search-bar-wrap inventory-filters">
           <input type="text" id="adminSearchInput" class="search-bar" maxlength="50" placeholder="Buscar por número o estado" oninput="filterAdminNotebooks()">
-          <select class="btn btn-sm" id="adminFilterEstado" onchange="filterAdminNotebooks()" style="font-weight:500;">
+          <select class="inventory-select" id="adminFilterEstado" onchange="filterAdminNotebooks()">
             <option value="">Todos</option>
             <option value="disponible">Disponible</option>
             <option value="prestada">Prestada</option>
@@ -581,10 +581,12 @@
           </select>
         </div>
       </div>
-      <table>
-        <thead><tr><th>N° de notebook</th><th>Estado</th><th>Ubicación</th><th>En poder de</th><th>Última actualización</th><th>Cambiar estado</th><th>Cambiar carro</th></tr></thead>
-        <tbody id="adminInventoryTable"></tbody>
-      </table>
+      <div class="inventory-table-scroll">
+        <table class="inventory-table inventory-table-notebooks">
+          <thead><tr><th>N° de notebook</th><th>Estado</th><th>Ubicación</th><th>En poder de</th><th>Última actualización</th><th>Cambiar estado</th><th>Cambiar carro</th></tr></thead>
+          <tbody id="adminInventoryTable"></tbody>
+        </table>
+      </div>
     </div>
   </section>
 
@@ -750,13 +752,13 @@
     <div id="ticketRepliesThread" aria-live="polite"></div>
     <form id="ticketReplyForm" onsubmit="enviarRespuestaTicket(event)">
       <div class="field"><label for="ticketReplyMessage">Respuesta</label>
-        <textarea id="ticketReplyMessage" maxlength="500" required oninput="actualizarContadorRespuesta()"></textarea>
+        <textarea id="ticketReplyMessage" maxlength="500" data-no-counter required oninput="actualizarContadorRespuesta()"></textarea>
         <span id="ticketReplyCounter" class="hint">0/500</span></div>
-      <div class="modal-actions">
-        <button type="button" class="btn" onclick="closeModal('ticketRepliesModal')">Cerrar</button>
-        <button type="submit" class="btn btn-primary">Enviar respuesta</button>
-      </div>
     </form>
+    <div class="modal-actions">
+      <button type="button" class="btn" onclick="closeModal('ticketRepliesModal')">Cerrar</button>
+      <button type="submit" form="ticketReplyForm" id="ticketReplySubmit" class="btn btn-primary">Enviar respuesta</button>
+    </div>
   </div>
 </div>
 

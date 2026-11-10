@@ -808,7 +808,9 @@ const actions = {
     return { notebooks: result.rows };
   },
   async tickets(_body, user) {
-    const result = await db.query(`SELECT t.codigo AS id, n.codigo AS notebook, t.motivo, t.descripcion, t.estado, t.created_at
+    const result = await db.query(`SELECT t.codigo AS id, n.codigo AS notebook, t.motivo, t.descripcion, t.estado, t.created_at,
+      (SELECT MAX(r.created_at) FROM ticket_replies r JOIN users author ON author.id = r.author_id
+        WHERE r.ticket_id = t.id AND author.rol = 'admin') AS latest_admin_reply_at
       FROM tickets t LEFT JOIN notebooks n ON n.id = t.notebook_id WHERE t.owner_id = $1 ORDER BY t.created_at DESC`, [user.id]);
     return { tickets: result.rows };
   },
@@ -861,26 +863,15 @@ const actions = {
     return { replies: result.rows };
   },
   async createTicketReply(body, user, { code }) {
+    requireAdmin(user, 'Solo admin puede responder tickets');
     const message = requiredText(body.mensaje, 'El mensaje', 500);
     const result = await db.transaction(async (client) => {
-      const ticket = await client.query('SELECT id, owner_id, estado, notebook_id FROM tickets WHERE codigo = $1 FOR UPDATE', [code]);
+      const ticket = await client.query('SELECT id, owner_id FROM tickets WHERE codigo = $1 FOR UPDATE', [code]);
       if (!ticket.rowCount) throw new AppError('Ticket no encontrado', 404);
       const record = ticket.rows[0];
-      if (user.rol !== 'admin' && String(record.owner_id) !== String(user.id)) {
-        throw new AppError('No podés responder este ticket', 403);
-      }
       const inserted = await client.query(`INSERT INTO ticket_replies (ticket_id, author_id, mensaje)
         VALUES ($1, $2, $3) RETURNING id, mensaje, created_at`,
       [record.id, user.id, message]);
-      if (user.rol !== 'admin' && record.estado === 'resuelto') {
-        await client.query(`UPDATE tickets SET estado = 'abierto', resolved_at = NULL, resolved_by = NULL
-          WHERE id = $1`, [record.id]);
-        if (record.notebook_id) {
-          await client.query(`UPDATE notebooks SET estado = 'mantenimiento',
-            ubicacion = 'Taller', updated_at = now()
-            WHERE id = $1::bigint AND estado = 'disponible'`, [record.notebook_id]);
-        }
-      }
       return { reply: inserted.rows[0], ownerId: record.owner_id };
     });
     if (user.rol === 'admin') {
