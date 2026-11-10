@@ -247,7 +247,7 @@
   .inventory-select{appearance:auto;max-width:100%;}
   .inventory-input:focus,.inventory-select:focus{border-color:var(--brand);background:var(--surface);outline:2px solid var(--brand);outline-offset:2px;}
   .inventory-forms{
-    display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1.25rem;align-items:stretch;
+    display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1.25rem;align-items:start;
   }
   .inventory-forms>.card,.inventory-section,.inventory-notebook-section{min-width:0;}
   .inventory-forms>.card{padding:1.25rem;}
@@ -261,9 +261,9 @@
   .inventory-table th,.inventory-table td{vertical-align:middle;}
   .inventory-table-notebooks{min-width:72rem;}
   .inventory-table-locations{width:100%;min-width:100%;table-layout:fixed;}
-  .inventory-table-locations th:nth-child(1){width:38%;}
-  .inventory-table-locations th:nth-child(2){width:24%;}
-  .inventory-table-locations th:nth-child(3){width:38%;}
+  .inventory-table-locations th:nth-child(1){width:36%;}
+  .inventory-table-locations th:nth-child(2){width:29%;}
+  .inventory-table-locations th:nth-child(3){width:35%;}
   .inventory-table-locations td:nth-child(2){overflow-wrap:anywhere;}
   .inventory-table-carros{min-width:58rem;}
   .inventory-table .inventory-input,.inventory-table .inventory-select{min-width:10rem;}

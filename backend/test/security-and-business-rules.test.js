@@ -1234,6 +1234,7 @@ test('la interfaz muestra selector reabrible, contador de texto, carro y curso e
   assert.match(html, /class="inventory-table-scroll"/);
   assert.match(html, /class="inventory-select" id="adminFilterEstado"/);
   assert.match(html, /<\/div>\s*<div class="card inventory-notebook-section">[\s\S]*?Alta de notebooks/);
+  assert.match(html, /id="ubicacionesList"[\s\S]*?<\/div>\s*<\/div>\s*<div class="card inventory-section">/);
   assert.match(html, /id="ubicacionNombre" type="text"/);
   assert.match(app, /Todavía no hay carros/);
   assert.ok(styles.includes('grid-template-columns:repeat(2,minmax(0,1fr))'));

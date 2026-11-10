@@ -547,7 +547,6 @@
           <div class="field"><label for="ubicacionNombre">Nueva ubicación</label><input class="inventory-input" id="ubicacionNombre" type="text" maxlength="50" minlength="2" data-no-counter required><span id="ubicacionNombreCounter" class="hint char-counter" aria-live="polite">0/50</span></div>
           <div class="field"><label>&nbsp;</label><button class="btn btn-primary" type="submit">Crear ubicación</button></div>
         </form>
-        <div id="ubicacionesList"></div>
       </div>
     </div>
     <div class="card inventory-notebook-section">
@@ -559,6 +558,10 @@
         <div id="notebookError" class="field-error field-full"></div>
         <button class="btn btn-primary inventory-submit" type="submit">Agregar notebooks</button>
       </form>
+    </div>
+    <div class="card inventory-section">
+      <div class="card-header"><div><h3>Ubicaciones registradas</h3><p>Consultá y editá los nombres disponibles para asignar a los carros.</p></div></div>
+      <div id="ubicacionesList"></div>
     </div>
     <div class="card inventory-section">
       <div class="card-header"><div><h3>Carros</h3></div></div>
