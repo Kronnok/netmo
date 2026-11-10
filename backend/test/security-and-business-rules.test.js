@@ -1233,10 +1233,14 @@ test('la interfaz muestra selector reabrible, contador de texto, carro y curso e
   assert.match(app, /input\.value = '';\s*actualizarContadorUbicacion\(\)/);
   assert.match(html, /class="inventory-table-scroll"/);
   assert.match(html, /class="inventory-select" id="adminFilterEstado"/);
+  assert.match(html, /<\/div>\s*<div class="card inventory-notebook-section">[\s\S]*?Alta de notebooks/);
+  assert.match(html, /id="ubicacionNombre" type="text"/);
   assert.match(app, /Todavía no hay carros/);
   assert.ok(styles.includes('grid-template-columns:repeat(2,minmax(0,1fr))'));
-  assert.ok(styles.includes('@media (max-width:680px){.inventory-forms{grid-template-columns:minmax(0,1fr);'));
+  assert.ok(styles.includes('@media (max-width:760px){.inventory-forms{grid-template-columns:minmax(0,1fr);'));
   assert.match(styles, /\.inventory-table-scroll\{[^}]*overflow-x:auto/);
+  assert.match(styles, /@media \(max-width:899px\)\{[\s\S]*?\.sidebar\{position:relative/);
+  assert.match(styles, /\.main-content\{flex:1 1 0;min-width:0/);
   assert.match(app, /No se pudo registrar la devolución\. Revisá el estado del préstamo e intentá de nuevo/);
   assert.match(app, /horaPrevista/);
   assert.match(app, /validarHoraDevolucionReserva\(hora, horaDevolucion\)/);

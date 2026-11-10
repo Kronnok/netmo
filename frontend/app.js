@@ -971,7 +971,7 @@ function renderUbicacionesManager(){
   if(!list) return;
   list.innerHTML = ubicaciones.length
     ? `<div class="inventory-table-scroll"><table class="inventory-table inventory-table-locations"><thead><tr><th>Ubicación</th><th>Slug</th><th>Acciones</th></tr></thead><tbody>${ubicaciones.map(location=>`
-      <tr><td><input class="inventory-input" id="ubicacion-${escapeHtml(location.slug)}" maxlength="50" minlength="2" value="${escapeHtml(location.nombre)}" aria-label="Nombre de ${escapeHtml(location.nombre)}"></td>
+      <tr><td><input class="inventory-input" id="ubicacion-${escapeHtml(location.slug)}" type="text" maxlength="50" minlength="2" value="${escapeHtml(location.nombre)}" aria-label="Nombre de ${escapeHtml(location.nombre)}"></td>
       <td class="mono">${escapeHtml(location.slug)}</td>
       <td><div class="inventory-actions"><button class="btn btn-sm" onclick="renombrarUbicacion(${escapeHtml(JSON.stringify(location.slug))})">Guardar</button>
       <button class="btn btn-sm btn-danger-outline" onclick="eliminarUbicacion(${escapeHtml(JSON.stringify(location.slug))})">Eliminar</button></div></td></tr>`).join('')}</tbody></table></div>`
