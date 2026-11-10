@@ -301,6 +301,9 @@ const actions = {
     const email = accountEmail(body.email);
     const dni = dniIdentifier(body.dni);
     const password = accountPassword(body.password);
+    if (typeof body.passwordConfirmation !== 'string' || password !== body.passwordConfirmation) {
+      throw new AppError('Las contraseñas no coinciden', 400);
+    }
     if (!['alumno', 'profesor'].includes(body.rol)) throw new AppError('Rol inválido', 400);
     try {
       return await db.transaction(async (client) => {

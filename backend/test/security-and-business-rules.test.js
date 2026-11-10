@@ -264,7 +264,8 @@ test('el alta y el login preservan la clave, y solo los fallos cuentan para el l
       email: createdUser.email,
       dni: createdUser.dni,
       rol: 'alumno',
-      password
+      password,
+      passwordConfirmation: password
     }, { id: '1', rol: 'admin' });
     assert.equal(savedPassword, password);
 
@@ -467,15 +468,27 @@ test('las altas administrativas validan cuenta, almacenan hashes y crean prefere
       (error) => error.status === 400 && /DNI.*7 a 10 dígitos/.test(error.message)
     );
     const result = await apiService.createUser({
-      nombre: 'Ana', apellido: 'Pérez', email: 'USER@example.test', dni: '1234567', rol: 'alumno', password: 'long-enough'
+      nombre: 'Ana', apellido: 'Pérez', email: 'USER@example.test', dni: '1234567', rol: 'alumno', password: 'long-enough', passwordConfirmation: 'long-enough'
     }, { id: 1, rol: 'admin' });
     assert.equal(result.user.email, 'user@example.test');
     assert.equal(result.user.rol, 'alumno');
+    assert.equal('password' in result.user, false);
+    assert.equal('passwordConfirmation' in result.user, false);
     assert.equal(calls.length, 2);
     assert.match(calls[0].sql, /crypt\(\$5, gen_salt\('bf'\)\)/);
     assert.deepEqual(calls[0].params.slice(0, 4), ['1234567', 'Ana Pérez', 'user@example.test', 'alumno']);
     assert.match(calls[1].sql, /INSERT INTO user_preferences/);
     assert.deepEqual(calls[1].params, ['5']);
+    const callsBeforeMismatchedPassword = calls.length;
+    await assert.rejects(
+      apiService.createUser({ nombre: 'Ana', apellido: 'Pérez', email: 'different@example.test', dni: '1234568', rol: 'alumno', password: 'long-enough', passwordConfirmation: 'not-the-same' }, { id: 1, rol: 'admin' }),
+      (error) => error.status === 400 && /Las contraseñas no coinciden/.test(error.message)
+    );
+    await assert.rejects(
+      apiService.createUser({ nombre: 'Ana', apellido: 'Pérez', email: 'missing@example.test', dni: '1234569', rol: 'alumno', password: 'long-enough' }, { id: 1, rol: 'admin' }),
+      (error) => error.status === 400 && /Las contraseñas no coinciden/.test(error.message)
+    );
+    assert.equal(calls.length, callsBeforeMismatchedPassword);
     await assert.rejects(
       apiService.createUser({ nombre: 'Ana', apellido: 'Pérez', email: 'bad email@example.test', dni: '1234567', rol: 'alumno', password: 'long-enough' }, { id: 1, rol: 'admin' }),
       (error) => error.status === 400
@@ -490,10 +503,49 @@ test('las altas administrativas validan cuenta, almacenan hashes y crean prefere
     );
     duplicateAccount = true;
     await assert.rejects(
-      apiService.createUser({ nombre: 'Ana', apellido: 'Pérez', email: 'ana@example.test', dni: '1234567', rol: 'alumno', password: 'long-enough' }, { id: 1, rol: 'admin' }),
+      apiService.createUser({ nombre: 'Ana', apellido: 'Pérez', email: 'ana@example.test', dni: '1234567', rol: 'alumno', password: 'long-enough', passwordConfirmation: 'long-enough' }, { id: 1, rol: 'admin' }),
       (error) => error.status === 409
     );
   } finally {
+    db.transaction = originalTransaction;
+  }
+});
+
+test('POST /api/admin/users rechaza contraseñas distintas sin iniciar la creación', async () => {
+  const originalAuthenticate = authService.authenticate;
+  const originalTransaction = db.transaction;
+  let transactionStarted = false;
+  authService.authenticate = async () => ({ id: '1', rol: 'admin' });
+  db.transaction = async () => {
+    transactionStarted = true;
+    throw new Error('No debe iniciar la transacción');
+  };
+  const request = Readable.from([JSON.stringify({
+    nombre: 'Ana',
+    apellido: 'Pérez',
+    email: 'ana@example.test',
+    dni: '1234567',
+    rol: 'alumno',
+    password: 'long-enough',
+    passwordConfirmation: 'not-the-same'
+  })]);
+  request.method = 'POST';
+  request.url = '/api/admin/users';
+  request.headers = {};
+  const response = {
+    status: null,
+    payload: '',
+    writeHead(status) { this.status = status; },
+    end(payload) { this.payload = payload; }
+  };
+
+  try {
+    await controller.handle(request, response, { action: 'createUser', params: {} }, {});
+    assert.equal(response.status, 400);
+    assert.match(JSON.parse(response.payload).error, /Las contraseñas no coinciden/);
+    assert.equal(transactionStarted, false);
+  } finally {
+    authService.authenticate = originalAuthenticate;
     db.transaction = originalTransaction;
   }
 });
@@ -1308,6 +1360,15 @@ test('la interfaz muestra selector reabrible, contador de texto, carro y curso e
   assert.match(app, /refreshOwnTickets\(\)/);
   assert.match(app, /initializeTextLimits\(\)/);
   assert.doesNotMatch(app, /adminSetTicketEstado/);
+  assert.match(html, /id="userPassword" type="password"[^>]+oninput="validarConfirmacionPasswordAdmin\(\)"/);
+  assert.match(html, /id="userPasswordConfirmation" type="password"[^>]+required/);
+  assert.equal((html.match(/onclick="toggleAdminUserPasswordVisibility\(/g) || []).length, 2);
+  assert.match(html, /id="userPasswordConfirmationError" class="field-error"[^>]*role="alert"/);
+  assert.match(app, /function toggleAdminUserPasswordVisibility\(/);
+  assert.match(app, /function validarConfirmacionPasswordAdmin\(\)[\s\S]*Las contraseñas no coinciden/);
+  assert.match(app, /if\(!passwordsMatch\) return/);
+  assert.match(app, /passwordConfirmation\}\)/);
+  assert.match(api, /typeof body\.passwordConfirmation !== 'string' \|\| password !== body\.passwordConfirmation/);
 });
 
 test('el catálogo de ubicaciones valida nombres, genera slugs únicos y no elimina ubicaciones en uso', async () => {

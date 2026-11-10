@@ -520,6 +520,24 @@ function toggleLoginPasswordVisibility(){
   button.setAttribute('aria-label', isVisible ? 'Ocultar contraseña' : 'Mostrar contraseña');
 }
 
+function toggleAdminUserPasswordVisibility(inputId, button){
+  const input = document.getElementById(inputId);
+  const isVisible = input.type === 'password';
+  input.type = isVisible ? 'text' : 'password';
+  button.setAttribute('aria-pressed', String(isVisible));
+  button.setAttribute('aria-label', isVisible ? 'Ocultar contraseña' : 'Mostrar contraseña');
+}
+
+function validarConfirmacionPasswordAdmin(){
+  const password = document.getElementById('userPassword').value;
+  const confirmation = document.getElementById('userPasswordConfirmation').value;
+  const hasInput = Boolean(password || confirmation);
+  const matches = password === confirmation;
+  const message = hasInput && !matches ? 'Las contraseñas no coinciden' : '';
+  document.getElementById('userPasswordConfirmationError').textContent = message;
+  return !message;
+}
+
 function validarNombreCuenta(value, label){
   const name = value.trim().normalize('NFC');
   if(!name) return `${label} no puede estar vacío`;
@@ -539,15 +557,19 @@ async function crearUsuarioAdmin(e){
   const dni = document.getElementById('userDni').value.trim();
   const rol = document.getElementById('userRol').value;
   const password = document.getElementById('userPassword').value;
+  const passwordConfirmation = document.getElementById('userPasswordConfirmation').value;
+  const passwordsMatch = validarConfirmacionPasswordAdmin();
   error.textContent = validarNombreCuenta(nombre, 'El nombre') || validarNombreCuenta(apellido, 'El apellido');
   if(!error.textContent && (!/^\d{7,10}$/.test(dni))) error.textContent = 'El DNI debe contener de 7 a 10 dígitos numéricos';
   if(!error.textContent && /\s/.test(email)) error.textContent = 'El email no puede contener espacios';
   if(!error.textContent && (email.length > 50 || !/^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$/.test(email))) error.textContent = 'Ingresá un email válido de hasta 50 caracteres';
   if(!error.textContent && (password.length < 8 || password.length > 50 || /\s/.test(password))) error.textContent = 'La contraseña debe tener entre 8 y 50 caracteres y no contener espacios';
   if(error.textContent){ showToast(error.textContent, 'warn'); return; }
+  if(!passwordsMatch) return;
   try{
-    await apiRequest('/api/admin/users', {method:'POST', body:JSON.stringify({nombre, apellido, email, dni, rol, password})});
+    await apiRequest('/api/admin/users', {method:'POST', body:JSON.stringify({nombre, apellido, email, dni, rol, password, passwordConfirmation})});
     document.getElementById('adminUserForm').reset();
+    validarConfirmacionPasswordAdmin();
     error.textContent = '';
     await cargarEstadoAPI();
     renderAll();
