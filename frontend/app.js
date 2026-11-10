@@ -511,6 +511,15 @@ function togglePasswordVisibility(inputId, button){
   button.textContent = input.type === 'password' ? 'Mostrar' : 'Ocultar';
 }
 
+function toggleLoginPasswordVisibility(){
+  const input = document.getElementById('loginPassword');
+  const button = document.getElementById('loginPasswordToggle');
+  const isVisible = input.type === 'password';
+  input.type = isVisible ? 'text' : 'password';
+  button.setAttribute('aria-pressed', String(isVisible));
+  button.setAttribute('aria-label', isVisible ? 'Ocultar contraseña' : 'Mostrar contraseña');
+}
+
 function validarNombreCuenta(value, label){
   const name = value.trim().normalize('NFC');
   if(!name) return `${label} no puede estar vacío`;
