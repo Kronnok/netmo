@@ -29,7 +29,8 @@ número de carro válido. La migración 010 renombra `users.legajo` a `users.dni
 sin alterar sus valores, agrega ubicaciones a los carros y actualiza la relación
 de notebooks para permitir renumerarlos. La migración 011 crea el catálogo
 editable de ubicaciones, agrega el estado de envío del recordatorio de
-vencimiento y habilita respuestas en tickets.
+vencimiento y habilita respuestas en tickets. La migración 013 relaciona cada
+reporte de falla con el préstamo seleccionado sin alterar reportes anteriores.
 
 ## 2. API en Render
 
@@ -42,9 +43,8 @@ servicio completá:
 - `JWT_SECRET`: secreto de firma HMAC de los tokens, válidos durante 12 horas.
   `render.yaml` solicita que Render lo genere automáticamente; conservá ese
   valor como secreto y no lo copies al repositorio.
-- `MAIL_PROVIDER`: elegí `brevo` o `gas`; configurá también las variables
-  requeridas del proveedor y `MAIL_FROM_EMAIL`/`MAIL_FROM_NAME`. No uses
-  `console` en producción.
+- `MAIL_PROVIDER=gas`: configurá `MAIL_GAS_URL`, `MAIL_GAS_SECRET`,
+  `MAIL_FROM_EMAIL` y `MAIL_FROM_NAME`. No uses `console` en producción.
 - `LOGIN_LOCK_MINUTES`: ventana de bloqueo de login en minutos (mínimo 1,
   predeterminado 2; se mantienen cinco fallos).
 - `CRON_SECRET`: secreto generado para Render y usado por el cron externo de
@@ -62,10 +62,6 @@ Render a partir del manifiesto. Después de cambiar el esquema, volvé a ejecuta
 
 ### Configurar correo
 
-**Brevo:** verificá el remitente en Brevo, generá una API key y cargala como
-`MAIL_API_KEY` en Render. Usá `MAIL_PROVIDER=brevo` y configurá
-`MAIL_FROM_EMAIL` y `MAIL_FROM_NAME`.
-
 **Google Apps Script:** creá un proyecto con una función `doPost` que lea el
 JSON recibido (`secret`, `to`, `subject`, `html`), compare `secret` con un
 secreto guardado en las propiedades del script, envíe con `MailApp.sendEmail`
@@ -75,10 +71,10 @@ cuenta y accesible para recibir solicitudes; copiá su URL de implementación a
 `MAIL_PROVIDER=gas`. La API sigue redirecciones y espera como máximo 15
 segundos.
 
-Render gratuito bloquea el SMTP saliente; por eso NetMO usa las APIs HTTPS de
-Brevo o Apps Script en lugar de SMTP. No escribas claves ni secretos en el
-repositorio. En desarrollo podés usar `MAIL_PROVIDER=console`; el correo de
-prueba se envía con `npm run mail:test -- destino@correo.com`.
+Los códigos de recuperación se guardan hasheados y se validan en PostgreSQL.
+El envío usa Apps Script por HTTPS; SMTP/nodemailer no funciona en Render
+gratis. En desarrollo podés usar `MAIL_PROVIDER=console`; no agregues secretos
+al repositorio.
 
 ### Recordatorios de devolución
 

@@ -30,12 +30,12 @@
     <!-- ---- LOGIN ---- -->
     <section class="auth-view active" id="view-login">
       <h2>Iniciar sesión</h2>
-      <p class="sub">Ingresá con tu correo de Gmail para acceder al sistema de préstamos.</p>
+      <p class="sub">Ingresá con tu correo registrado para acceder al sistema de préstamos.</p>
       <form id="loginForm" onsubmit="login(event)">
         <div class="form-grid" style="grid-template-columns:1fr;gap:1rem;">
           <div class="field">
-            <label for="loginEmail">Correo (Gmail)</label>
-            <input type="email" id="loginEmail" placeholder="Ej: tunombre@gmail.com" required>
+            <label for="loginEmail">Correo electrónico</label>
+            <input type="email" id="loginEmail" placeholder="Correo institucional o @gmail.com" required>
           </div>
           <div class="field">
             <label for="loginPassword">Contraseña</label>
@@ -70,11 +70,13 @@
         <div id="forgotCodeFields" hidden>
           <div class="field">
             <label for="forgotCode">Código de 6 dígitos</label>
-            <input id="forgotCode" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code">
+            <input id="forgotCode" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" minlength="6" autocomplete="one-time-code" aria-describedby="forgotCodeHint">
+            <span id="forgotCodeHint" class="hint">Ingresá el código de 6 números que recibiste.</span>
           </div>
           <div class="field">
             <label for="forgotPassword">Nueva contraseña</label>
             <div class="password-input-wrap"><input type="password" id="forgotPassword" maxlength="50" minlength="8" autocomplete="new-password"><button type="button" class="btn btn-sm" onclick="togglePasswordVisibility('forgotPassword', this)">Mostrar</button></div>
+            <span class="hint">Usá entre 8 y 50 caracteres, sin espacios.</span>
           </div>
           <div class="field">
             <label for="forgotPasswordRepeat">Repetir nueva contraseña</label>
@@ -84,7 +86,8 @@
         <div id="forgotPasswordMessage" class="field-error" role="status"></div>
         <button type="button" id="forgotRequestButton" class="btn btn-primary btn-block" onclick="solicitarCodigoRecuperacion()">Enviar código</button>
         <button type="button" id="forgotSubmitButton" class="btn btn-primary btn-block" onclick="restablecerPassword()" hidden>Restablecer contraseña</button>
-        <button type="button" id="forgotResendButton" class="btn btn-sm" onclick="solicitarCodigoRecuperacion(true)" hidden>Reenviar código</button>
+        <button type="button" id="forgotResendButton" class="btn btn-sm" onclick="solicitarCodigoRecuperacion(true)" hidden disabled>Reenviar código</button>
+        <span id="forgotResendCountdown" class="hint" role="status" aria-live="polite"></span>
       </form>
       <button type="button" class="auth-switch" onclick="mostrarLogin()">Volver a iniciar sesión</button>
     </section>
@@ -105,7 +108,7 @@
   </div>
 
   <div class="role-pill-wrap">
-    <span class="role-pill" id="sidebarRolePill">Alumno</span>
+    <span class="role-pill" id="sidebarRolePill">Profesor</span>
   </div>
 
   <ul class="nav-menu">
@@ -149,7 +152,7 @@
       Devoluciones tardías <span class="nav-badge" id="tardanzasBadge" style="display:none;">0</span></button></li>
     <li data-roles="admin"><button class="nav-item" data-view="admin-backup" onclick="switchView('admin-backup')">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 19h14"/></svg>
-      Backup</button></li>
+      Copias de seguridad</button></li>
 
     <li data-roles="alumno,profesor,admin"><button class="nav-item" data-view="perfil" onclick="switchView('perfil')">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
@@ -211,7 +214,8 @@
             <p>Información actualizada en tiempo real.</p>
           </div>
           <div class="search-bar-wrap">
-            <input type="text" id="searchInput" class="search-bar" maxlength="50" placeholder="Buscar por número o estado" oninput="filterNotebooks()">
+            <input type="text" id="searchInput" class="search-bar" maxlength="50" placeholder="Buscar por equipo, estado, carro o ubicación" oninput="filterNotebooks()">
+            <button type="button" class="btn btn-sm" onclick="document.getElementById('searchInput').value='';filterNotebooks()">Limpiar</button>
             <select class="btn btn-sm" id="filterEstado" onchange="filterNotebooks()" style="font-weight:500;">
               <option value="">Todos</option>
               <option value="disponible">Disponible</option>
@@ -220,6 +224,7 @@
               <option value="pendiente_devolucion">Pendiente devolución</option>
               <option value="reservada">Reservada</option>
             </select>
+            <span id="notebookResultsCount" class="hint" aria-live="polite"></span>
           </div>
         </div>
         <table>
@@ -231,8 +236,8 @@
       <div class="card" id="cardMiActividad">
         <div class="card-header">
           <div>
-            <h3>Tu actividad</h3>
-            <p>Tus próximas reservas y tickets abiertos.</p>
+            <h3>Mi próximo préstamo / reserva</h3>
+            <p>Consultá el estado y horario de tu próximo equipo.</p>
           </div>
         </div>
         <div id="miActividadWrap"></div>
@@ -242,7 +247,7 @@
         <h3>Acciones rápidas</h3>
         <button class="action-card" data-roles="alumno,profesor" onclick="switchView('reservas')">
           <div class="action-icon">📅</div>
-          <div class="action-info"><h4>Reservar notebook</h4><p>Reservá una notebook o un lote</p></div>
+          <div class="action-info"><h4>Pedir notebooks</h4><p>Elegí carro, día y horario</p></div>
           <span class="action-arrow">›</span>
         </button>
         <button class="action-card" data-roles="alumno,profesor" onclick="switchView('prestamos')">
@@ -294,7 +299,10 @@
     </div>
 
     <div class="card" style="margin-top:1.5rem;">
-      <div class="card-header"><div><h3>Historial de préstamos</h3><p>Últimos movimientos registrados a tu nombre.</p></div></div>
+      <div class="card-header"><div><h3>Historial de préstamos</h3><p>Últimos movimientos registrados a tu nombre.</p></div>
+        <div class="search-bar-wrap"><input type="search" id="myLoansSearch" class="search-bar" maxlength="50" placeholder="Buscar equipo" oninput="filterMyLoans()">
+          <select id="myLoansState" class="btn btn-sm" onchange="filterMyLoans()"><option value="">Todos los estados</option><option value="activo">Activo</option><option value="devolucion_pendiente">Devolución pendiente</option><option value="devuelto">Devuelto</option></select>
+          <button type="button" class="btn btn-sm" onclick="limpiarBusqueda('myLoansSearch','myLoansState',filterMyLoans)">Limpiar</button><span id="myLoansResultsCount" class="hint" aria-live="polite"></span></div></div>
       <table>
         <thead><tr><th>Notebook</th><th>Retirada</th><th>Hora acordada</th><th>Hora registrada</th><th>Devuelta</th><th>Estado</th></tr></thead>
         <tbody id="historialPrestamosTable"></tbody>
@@ -314,6 +322,7 @@
         </div>
 
         <form id="reservaForm" onsubmit="crearReserva(event)">
+          <h4 class="form-step-heading">1. Carro y cantidad</h4>
           <div class="form-grid">
             <div class="field" id="resCantidadWrap">
               <label for="resCantidad">Cantidad de equipos</label>
@@ -337,6 +346,7 @@
               <span id="resCarroStatus" class="hint" role="status" hidden></span>
               <button type="button" id="resCarroRetry" class="btn btn-sm" onclick="cargarCarrosReserva()" hidden>Reintentar carga</button>
             </div>
+            <div class="field full"><h4 class="form-step-heading">2. Día y horario</h4><p class="hint">Elegí un día hábil y un horario disponible.</p></div>
             <div class="field">
               <label for="resFecha">Fecha</label>
               <input type="date" id="resFecha" required>
@@ -368,7 +378,10 @@
             <p class="hint" style="margin-top:.6rem;">La solicitud queda pendiente de aprobación del Administrador antes de confirmarse.</p>
           </div>
 
-          <div id="resFechaError" class="field-error"></div>
+          <div id="resFechaError" class="field-error" role="alert"></div>
+          <h4 class="form-step-heading">3. Confirmar</h4>
+          <div id="reservationSummary" class="reservation-summary" aria-live="polite"></div>
+          <p id="resSubmitReason" class="hint" role="status" aria-live="polite"></p>
           <div class="modal-actions" style="justify-content:flex-start;margin-top:1rem;">
             <button type="submit" class="btn btn-primary" id="resSubmitBtn">Confirmar reserva</button>
           </div>
@@ -402,7 +415,7 @@
             </div>
             <div class="field full">
               <label for="fallaDesc">Descripción</label>
-              <textarea id="fallaDesc" maxlength="50" placeholder="Ej: la pantalla parpadea y se apaga sola después de unos minutos." required></textarea>
+              <textarea id="fallaDesc" maxlength="4000" data-no-counter placeholder="Ej: la pantalla parpadea y se apaga sola después de unos minutos." required></textarea>
               <span class="hint">Cuantos más detalles des, más rápido podemos resolverlo.</span>
             </div>
           </div>
@@ -430,8 +443,11 @@
         <div><h3>Mis tickets</h3><p>Seguimiento de fallas y solicitudes que reportaste.</p></div>
         <button class="btn btn-primary btn-sm" onclick="switchView('falla')">+ Nuevo ticket</button>
       </div>
+      <div class="search-bar-wrap"><input type="search" id="myTicketsSearch" class="search-bar" maxlength="50" placeholder="Buscar ticket, equipo, motivo o estado" oninput="filterMyTickets()">
+        <select id="myTicketsState" class="btn btn-sm" onchange="filterMyTickets()"><option value="">Todos los estados</option><option value="abierto">Abierto</option><option value="progreso">En progreso</option><option value="resuelto">Resuelto</option></select>
+        <button type="button" class="btn btn-sm" onclick="limpiarBusqueda('myTicketsSearch','myTicketsState',filterMyTickets)">Limpiar</button><span id="myTicketsResultsCount" class="hint" aria-live="polite"></span></div>
       <table>
-        <thead><tr><th>Ticket</th><th>Notebook</th><th>Motivo</th><th>Estado</th><th>Fecha</th><th>Respuestas</th></tr></thead>
+        <thead><tr><th>Ticket</th><th>Equipo</th><th>Préstamo asociado</th><th>Motivo</th><th>Estado</th><th>Fecha</th><th>Respuestas</th></tr></thead>
         <tbody id="ticketsTable"></tbody>
       </table>
     </div>
@@ -449,7 +465,7 @@
           </div>
         </div>
         <div class="info-row"><span class="label">DNI</span><span class="value" id="profileDni">—</span></div>
-        <div class="info-row"><span class="label">Email institucional</span><span class="value" id="profileEmail">—</span></div>
+        <div class="info-row"><span class="label">Correo electrónico</span><span class="value" id="profileEmail">—</span></div>
         <p class="hint" style="margin-top:1.3rem;">Tus datos institucionales los administra el equipo de NetMO. Si hay un error, contactá a Preceptoría.</p>
       </div>
 
@@ -459,7 +475,7 @@
           <label class="label" for="preferenciasEmail">Notificaciones por email</label>
           <input type="checkbox" id="preferenciasEmail" onchange="actualizarPreferencias()">
         </div>
-        <p class="hint" id="preferenciasRecordatorioInfo" style="margin:.4rem 0 1rem;">Las preferencias se guardan, pero el envío de notificaciones no está disponible hasta integrar Gmail.</p>
+        <p class="hint" id="preferenciasRecordatorioInfo" style="margin:.4rem 0 1rem;">Las preferencias se guardan, pero los recordatorios automáticos aún no están disponibles.</p>
         <div class="info-row">
           <label class="label" for="preferenciasRecordatorio">Recordatorio de devolución</label>
           <select id="preferenciasRecordatorio" class="btn btn-sm" onchange="actualizarPreferencias()">
@@ -498,26 +514,25 @@
   <section class="view" id="view-admin-profesores">
     <div class="card">
       <div class="card-header">
-        <div><h3>Alta de usuarios</h3><p>Solo administración puede crear cuentas de alumnos y profesores.</p></div>
+        <div><h3>Alta de usuarios</h3><p>Las cuentas nuevas usan correo institucional o @gmail.com.</p></div>
       </div>
       <form id="adminUserForm" onsubmit="crearUsuarioAdmin(event)" novalidate>
         <div class="form-grid">
           <div class="field"><label for="userNombre">Nombre</label><input id="userNombre" type="text" maxlength="50" required></div>
           <div class="field"><label for="userApellido">Apellido</label><input id="userApellido" type="text" maxlength="50" required></div>
-          <div class="field"><label for="userEmail">Email</label><input id="userEmail" type="email" maxlength="50" required></div>
+          <div class="field"><label for="userEmail">Correo electrónico</label><input id="userEmail" type="email" maxlength="50" required oninput="actualizarRolPorCorreo()"></div>
           <div class="field"><label for="userDni">DNI (7 a 10 dígitos)</label><input id="userDni" type="text" inputmode="numeric" pattern="[0-9]{7,10}" maxlength="10" required></div>
-          <div class="field"><label for="userRol">Rol</label><select id="userRol" required><option value="alumno">Alumno</option><option value="profesor">Profesor</option></select></div>
+          <div class="field"><label for="userRol">Rol</label><select id="userRol" required><option value="profesor" selected>Profesor</option><option value="alumno">Alumno</option></select><span class="hint">Con @bue.edu.ar es profesor, con @alu.bue.edu.ar es alumno; con @gmail.com elegís vos.</span></div>
           <div class="field">
-            <div class="field">
-              <label for="userPassword">Contraseña (8 a 50 caracteres, sin espacios)</label>
+            <label for="userPassword">Contraseña (8 a 50 caracteres, sin espacios)</label>
               <div class="login-password-wrap">
                 <input id="userPassword" type="password" maxlength="50" minlength="8" required autocomplete="new-password" oninput="validarConfirmacionPasswordAdmin()">
                 <button type="button" class="login-password-toggle" aria-label="Mostrar contraseña" aria-pressed="false" onclick="toggleAdminUserPasswordVisibility('userPassword', this)">
                   <svg class="icon-eye-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7z"></path><circle cx="12" cy="12" r="3"></circle></svg>
                   <svg class="icon-eye-closed" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l18 18"></path><path d="M10.6 10.6a2 2 0 0 0 2.8 2.8"></path><path d="M9.9 5.2A10.9 10.9 0 0 1 12 5c6.4 0 10 7 10 7a14.8 14.8 0 0 1-3.1 3.9"></path><path d="M6.6 6.6C3.6 8.5 2 12 2 12s3.6 7 10 7a10.7 10.7 0 0 0 4-.8"></path></svg>
                 </button>
-              </div>
             </div>
+          </div>
             <div class="field">
               <label for="userPasswordConfirmation">Confirmar contraseña</label>
               <div class="login-password-wrap">
@@ -529,7 +544,6 @@
               </div>
               <div id="userPasswordConfirmationError" class="field-error" role="alert" aria-live="polite"></div>
             </div>
-          </div>
         </div>
         <div id="adminUserError" class="field-error"></div>
         <button class="btn btn-primary" type="submit">Crear usuario</button>
@@ -537,22 +551,36 @@
     </div>
     <div class="card" style="margin-top:1.5rem;">
       <div class="card-header">
-        <div><h3>Usuarios</h3><p>Alumnos, profesores y administradores registrados.</p></div>
-        <input type="search" id="profesoresSearchInput" class="search-bar" maxlength="50" placeholder="Buscar usuario" oninput="filterProfesores()" aria-label="Buscar usuario">
+        <div><h3>Usuarios</h3><p>Las cuentas desactivadas conservan el historial de préstamos.</p></div>
+        <div class="search-bar-wrap">
+          <input type="search" id="profesoresSearchInput" class="search-bar" maxlength="50" placeholder="Buscar por nombre, correo, DNI, rol o bloqueo" oninput="filterProfesores()" aria-label="Buscar usuario">
+          <button type="button" class="btn btn-sm" onclick="document.getElementById('profesoresSearchInput').value='';filterProfesores()">Limpiar</button>
+          <span id="profesoresSearchCount" class="hint" aria-live="polite"></span>
+        </div>
+      </div>
+      <div class="field">
+        <label for="usersEmailType">Filtrar por tipo de correo</label>
+        <select id="usersEmailType" class="btn btn-sm" onchange="filterProfesores()">
+          <option value="">Todos los correos</option>
+          <option value="profesor">Institucional de profesor (@bue.edu.ar)</option>
+          <option value="alumno">Institucional de alumno (@alu.bue.edu.ar)</option>
+          <option value="gmail">@gmail.com</option>
+          <option value="otro">Otros</option>
+        </select>
       </div>
       <h4>Alumnos</h4>
       <table>
-        <thead><tr><th>Nombre</th><th>Correo</th><th>DNI</th><th>Rol</th><th>Cambiar rol</th></tr></thead>
+        <thead><tr><th>Nombre</th><th>Correo</th><th>DNI</th><th>Rol</th><th>Tipo de correo</th><th>Cambiar rol</th><th>Cuenta</th><th>Acción</th></tr></thead>
         <tbody id="alumnosTable"></tbody>
       </table>
       <h4 style="margin-top:1rem;">Profesores</h4>
       <table>
-        <thead><tr><th>Nombre</th><th>Correo</th><th>DNI</th><th>Rol</th><th>Cambiar rol</th></tr></thead>
+        <thead><tr><th>Nombre</th><th>Correo</th><th>DNI</th><th>Rol</th><th>Tipo de correo</th><th>Cambiar rol</th><th>Cuenta</th><th>Acción</th></tr></thead>
         <tbody id="profesoresTable"></tbody>
       </table>
       <h4 style="margin-top:1rem;">Administradores</h4>
       <table>
-        <thead><tr><th>Nombre</th><th>Correo</th><th>DNI</th><th>Rol</th><th>Cambiar rol</th></tr></thead>
+        <thead><tr><th>Nombre</th><th>Correo</th><th>DNI</th><th>Rol</th><th>Tipo de correo</th><th>Cambiar rol</th><th>Cuenta</th><th>Acción</th></tr></thead>
         <tbody id="administradoresTable"></tbody>
       </table>
     </div>
@@ -599,7 +627,8 @@
       <div class="card-header">
         <div><h3>Inventario completo</h3><p>Consultá y actualizá el estado operativo de cada notebook. Las acciones de reservas, préstamos, devoluciones y fallas también actualizan este inventario.</p></div>
         <div class="search-bar-wrap inventory-filters">
-          <input type="text" id="adminSearchInput" class="search-bar" maxlength="50" placeholder="Buscar por número o estado" oninput="filterAdminNotebooks()">
+          <input type="text" id="adminSearchInput" class="search-bar" maxlength="50" placeholder="Buscar por equipo, estado, carro o ubicación" oninput="filterAdminNotebooks()">
+          <button type="button" class="btn btn-sm" onclick="document.getElementById('adminSearchInput').value='';filterAdminNotebooks()">Limpiar</button>
           <select class="inventory-select" id="adminFilterEstado" onchange="filterAdminNotebooks()">
             <option value="">Todos</option>
             <option value="disponible">Disponible</option>
@@ -608,6 +637,7 @@
             <option value="pendiente_devolucion">Pendiente devolución</option>
             <option value="reservada">Reservada</option>
           </select>
+          <span id="adminInventoryResultsCount" class="hint" aria-live="polite"></span>
         </div>
       </div>
       <div class="inventory-table-scroll">
@@ -626,7 +656,9 @@
         <div><h3>Historial de devoluciones</h3><p>Consultá quién devolvió cada equipo, quién confirmó la recepción y cuándo.</p></div>
       </div>
       <div class="field"><label for="returnsHistorySearch">Buscar por persona, DNI, notebook, préstamo o administrador receptor</label>
-        <input id="returnsHistorySearch" type="search" maxlength="50" oninput="programarBusquedaHistorialDevoluciones(this.value)" autocomplete="off"></div>
+        <div class="search-bar-wrap"><input id="returnsHistorySearch" type="search" maxlength="50" oninput="programarBusquedaHistorialDevoluciones(this.value)" autocomplete="off">
+          <button type="button" class="btn btn-sm" onclick="document.getElementById('returnsHistorySearch').value='';programarBusquedaHistorialDevoluciones('')">Limpiar</button>
+          <span id="returnsHistoryResultsCount" class="hint" aria-live="polite"></span></div></div>
       <div id="devolucionesWrap" aria-live="polite"></div>
       <p class="hint">Este historial es de consulta; no permite registrar devoluciones.</p>
     </div>
@@ -639,11 +671,48 @@
         <div><h3>Entregas y devoluciones</h3><p>Préstamos pendientes de devolución; podés registrar una recepción antes del vencimiento.</p></div>
         <button class="btn btn-primary" type="button" disabled aria-describedby="remindersUnavailableMessage">Enviar recordatorios</button>
       </div>
-      <p id="remindersUnavailableMessage" class="hint" role="status">El envío de recordatorios no está disponible hasta integrar Gmail.</p>
-      <div class="field"><label for="circulationSearch">Buscar por nombre, apellido, DNI, notebook o número de préstamo</label>
-        <input id="circulationSearch" type="search" maxlength="50" oninput="programarBusquedaPrestamos(this.value)" autocomplete="off"></div>
+      <p id="remindersUnavailableMessage" class="hint" role="status">El envío automático de recordatorios todavía no está habilitado.</p>
+      <div class="form-grid">
+        <div class="field"><label for="circulationSearch">Buscar</label>
+          <input id="circulationSearch" type="search" maxlength="50" placeholder="Persona, correo, DNI, equipo o préstamo" oninput="programarBusquedaPrestamos()" autocomplete="off"></div>
+        <div class="field"><label for="circulationState">Estado</label>
+          <select id="circulationState" class="btn btn-sm" onchange="programarBusquedaPrestamos()">
+            <option value="pendientes">Pendientes</option><option value="todos">Todos</option>
+            <option value="activo">Activo</option><option value="devolucion_pendiente">Devolución informada</option>
+            <option value="devuelto">Devuelto</option>
+          </select></div>
+        <div class="field"><label for="circulationOverdue">Vencimiento</label>
+          <select id="circulationOverdue" class="btn btn-sm" onchange="programarBusquedaPrestamos()">
+            <option value="">Todas las fechas</option><option value="si">Vencidas</option><option value="no">Sin vencer</option>
+          </select></div>
+        <div class="field"><label for="circulationDateFrom">Desde</label>
+          <input id="circulationDateFrom" type="date" onchange="programarBusquedaPrestamos()"></div>
+        <div class="field"><label for="circulationDateTo">Hasta</label>
+          <input id="circulationDateTo" type="date" onchange="programarBusquedaPrestamos()"></div>
+        <div class="field"><label for="circulationReason">Motivo</label>
+          <input id="circulationReason" type="search" maxlength="50" oninput="programarBusquedaPrestamos()" autocomplete="off"></div>
+        <div class="field"><label for="circulationUser">Usuario o profesor</label>
+          <input id="circulationUser" type="search" maxlength="50" oninput="programarBusquedaPrestamos()" autocomplete="off"></div>
+        <div class="field"><label for="circulationEquipment">Computadora o equipo</label>
+          <input id="circulationEquipment" type="search" maxlength="50" oninput="programarBusquedaPrestamos()" autocomplete="off"></div>
+        <div class="field"><label for="circulationCarro">Carro</label>
+          <select id="circulationCarro" onchange="programarBusquedaPrestamos()"><option value="">Todos los carros</option></select></div>
+        <div class="field"><label for="circulationLocation">Ubicación</label>
+          <select id="circulationLocation" onchange="programarBusquedaPrestamos()"><option value="">Todas las ubicaciones</option></select></div>
+      </div>
+      <div class="search-bar-wrap"><button type="button" class="btn btn-sm" onclick="limpiarFiltrosPrestamos()">Limpiar filtros</button><span id="circulationResultsCount" class="hint" aria-live="polite"></span></div>
+      <div class="loan-bulk-toolbar" aria-label="Selección de devoluciones">
+        <button type="button" class="btn btn-sm" onclick="seleccionarTodasDevoluciones()">Seleccionar todas</button>
+        <button type="button" class="btn btn-sm" onclick="seleccionarDevolucionesVencidas()">Seleccionar las vencidas</button>
+        <div class="field loan-number-select"><label for="returnByNumbers">Devolver por números</label>
+          <input id="returnByNumbers" type="text" maxlength="100" placeholder="3, 5, 10-14">
+          <button type="button" class="btn btn-sm" onclick="seleccionarDevolucionesPorNumeros()">Seleccionar</button>
+          <span id="returnByNumbersMessage" class="hint" role="status"></span>
+        </div>
+      </div>
       <div id="circulationResults" aria-live="polite"></div>
     </div>
+    <button type="button" id="returnSelectedFloating" class="btn btn-primary loan-return-floating" onclick="registrarDevolucionesSeleccionadas()" disabled>Devolver seleccionadas (0)</button>
   </section>
 
   <!-- ============ VIEW: ADMIN · LOTES DE PROFESORES ============ -->
@@ -664,8 +733,11 @@
       <div class="card-header">
         <div><h3>Fallas reportadas por alumnos y profesores</h3><p>Actualizá el estado del ticket y, si corresponde, el estado físico del equipo.</p></div>
       </div>
+      <div class="search-bar-wrap"><input type="search" id="adminTicketsSearch" class="search-bar" maxlength="50" placeholder="Buscar persona, equipo, motivo o estado" oninput="filterAdminTickets()">
+        <select id="adminTicketsState" class="btn btn-sm" onchange="filterAdminTickets()"><option value="">Todos los estados</option><option value="abierto">Abierto</option><option value="progreso">En progreso</option><option value="resuelto">Resuelto</option></select>
+        <button type="button" class="btn btn-sm" onclick="limpiarBusqueda('adminTicketsSearch','adminTicketsState',filterAdminTickets)">Limpiar</button><span id="adminTicketsResultsCount" class="hint" aria-live="polite"></span></div>
       <table>
-        <thead><tr><th>Ticket</th><th>Reportado por</th><th>Notebook</th><th>Motivo</th><th>Estado ticket</th><th>Estado equipo</th><th>Respuestas</th></tr></thead>
+        <thead><tr><th>Ticket</th><th>Reportado por</th><th>Equipo</th><th>Préstamo asociado</th><th>Motivo</th><th>Estado ticket</th><th>Estado equipo</th><th>Respuestas</th></tr></thead>
         <tbody id="adminTicketsTable"></tbody>
       </table>
     </div>
@@ -673,6 +745,8 @@
 
   <!-- ============ VIEW: ADMIN · DEVOLUCIONES TARDÍAS / SANCIONES ============ -->
   <section class="view" id="view-admin-tardanzas">
+    <div class="search-bar-wrap"><input type="search" id="lateReturnsSearch" class="search-bar" maxlength="50" placeholder="Buscar por usuario, DNI, equipo o rol" oninput="filterLateReturns()">
+      <button type="button" class="btn btn-sm" onclick="document.getElementById('lateReturnsSearch').value='';filterLateReturns()">Limpiar</button><span id="lateReturnsResultsCount" class="hint" aria-live="polite"></span></div>
     <div class="card" style="margin-bottom:1.5rem;">
       <div class="card-header">
         <div><h3>Usuarios con entregas tardías</h3><p>A partir de 3 demoras registradas, el sistema te avisa para que evalúes una sanción.</p></div>
@@ -701,21 +775,21 @@
   <section class="view" id="view-admin-backup">
     <div class="card">
       <div class="card-header">
-        <div><h3>Backup de datos</h3><p>Descargá una copia JSON de los datos actuales del sistema.</p></div>
-        <button type="button" class="btn btn-primary" onclick="descargarBackup()">Descargar backup</button>
+        <div><h3>Copia de respaldo</h3><p>Descargá una copia de los datos actuales del sistema.</p></div>
+        <button type="button" class="btn btn-primary" onclick="descargarBackup()">Descargar copia</button>
       </div>
-      <p class="hint">El archivo contiene hashes de contraseñas. Guardalo como dato sensible y no lo compartas.</p>
+      <p class="hint">La copia contiene datos privados. Guardala de forma segura y no la compartas.</p>
     </div>
     <div class="card" style="margin-top:1.5rem;">
-      <div class="card-header"><div><h3>Restaurar backup</h3><p>Seleccioná un backup JSON para revisar sus datos antes de confirmar.</p></div></div>
+      <div class="card-header"><div><h3>Restaurar una copia</h3><p>Seleccioná una copia de respaldo para revisar su contenido antes de confirmar.</p></div></div>
       <div class="field">
-        <label for="backupFile">Archivo JSON</label>
+        <label for="backupFile">Archivo de copia de respaldo</label>
         <input type="file" id="backupFile" accept=".json,application/json" onchange="previsualizarBackup(event)">
       </div>
       <div id="backupPreview" class="backup-preview" hidden></div>
       <form id="restoreBackupForm" onsubmit="restaurarBackup(event)" hidden>
-        <div class="backup-warning" role="alert">ATENCIÓN: esta acción reemplaza TODOS los datos actuales del sistema. Descargá un backup antes de continuar.</div>
-        <button type="button" class="btn" onclick="descargarBackup()">Descargar backup actual</button>
+        <div class="backup-warning" role="alert">ATENCIÓN: esta acción reemplaza TODOS los datos actuales del sistema. Descargá una copia antes de continuar.</div>
+        <button type="button" class="btn" onclick="descargarBackup()">Descargar copia actual</button>
         <div class="field">
           <label for="restoreAdminPassword">Contraseña actual de administrador</label>
           <input type="password" id="restoreAdminPassword" maxlength="50" autocomplete="current-password" required>

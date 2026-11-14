@@ -1,6 +1,8 @@
 const { AppError } = require('../errors');
 
 const MAX_TEXT_LENGTH = 50;
+// Reuse this allowlist when implementing public account registration.
+const ALLOWED_EMAIL_DOMAINS = Object.freeze(['bue.edu.ar', 'alu.bue.edu.ar', 'gmail.com']);
 
 function requiredText(value, label, maximum = MAX_TEXT_LENGTH, { minimum = 1 } = {}) {
   if (typeof value !== 'string') throw new AppError(`${label} es obligatorio`, 400);
@@ -49,6 +51,37 @@ function loginEmail(value) {
   return value.toLowerCase();
 }
 
+function emailType(value) {
+  const domain = String(value).trim().toLowerCase().slice(String(value).trim().lastIndexOf('@') + 1);
+  if (domain === 'bue.edu.ar') return 'profesor';
+  if (domain === 'alu.bue.edu.ar') return 'alumno';
+  if (domain === 'gmail.com') return 'gmail';
+  return 'otro';
+}
+
+function roleFromEmail(email) {
+  const domain = String(email).trim().toLowerCase().slice(String(email).trim().lastIndexOf('@') + 1);
+  if (!ALLOWED_EMAIL_DOMAINS.includes(domain)) {
+    throw new AppError('Usá un correo @bue.edu.ar, @alu.bue.edu.ar o @gmail.com', 400);
+  }
+  if (domain === 'alu.bue.edu.ar') return 'alumno';
+  return 'profesor';
+}
+
+function validateEmailRole(email, role) {
+  const defaultRole = roleFromEmail(email);
+  const domain = String(email).trim().toLowerCase().slice(String(email).trim().lastIndexOf('@') + 1);
+  if (domain === 'gmail.com') {
+    if (!['alumno', 'profesor'].includes(role)) throw new AppError('Rol inválido', 400);
+    return role;
+  }
+  if (role !== defaultRole) {
+    const domainLabel = domain === 'alu.bue.edu.ar' ? '@alu.bue.edu.ar' : '@bue.edu.ar';
+    throw new AppError(`Un correo ${domainLabel} solo puede ser ${defaultRole}`, 400);
+  }
+  return defaultRole;
+}
+
 function accountPassword(value) {
   if (typeof value !== 'string' || value.length < 8 || value.length > MAX_TEXT_LENGTH || /\s/.test(value)) {
     throw new AppError('La contraseña debe tener entre 8 y 50 caracteres y no contener espacios', 400);
@@ -75,9 +108,14 @@ function dniIdentifier(value) {
 
 module.exports = {
   MAX_TEXT_LENGTH,
+  ALLOWED_EMAIL_DOMAINS,
   requiredText,
   personName,
+  normalizedEmail,
   accountEmail,
+  emailType,
+  roleFromEmail,
+  validateEmailRole,
   loginEmail,
   accountPassword,
   courseDivision,

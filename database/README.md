@@ -34,9 +34,9 @@ La migración conserva las relaciones existentes al cambiar esas claves. La
 restauración de backups JSON también convierte las referencias antiguas por
 número/slug a las nuevas relaciones por ID.
 
-El envío de recordatorios de devolución permanece deshabilitado hasta integrar
-Gmail. `loans.reminder_sent_at` no se actualiza mientras ese envío no esté
-disponible; la configuración de otros correos no se altera.
+El envío automático de recordatorios de devolución aún no está implementado.
+`loans.reminder_sent_at` no se actualiza mientras ese flujo no esté disponible;
+esto no afecta la recuperación de contraseñas ni las notificaciones existentes.
 
 Antes de aplicar cambios en producción, guardá un backup. El script opcional
 [`scripts/backup-loop.sh`](scripts/backup-loop.sh) usa `DATABASE_URL` y requiere

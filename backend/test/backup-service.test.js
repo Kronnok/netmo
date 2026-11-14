@@ -134,6 +134,21 @@ test('el backup valida ubicaciones y referencias de respuestas a tickets', () =>
   assert.throws(() => backupService.validateRows(backup, backup.available, backup.columns), /Referencia inválida/);
 });
 
+test('el backup valida la relación opcional entre ticket y préstamo', () => {
+  const backup = createValidBackup();
+  backup.data.notebooks = [{ id: '10', codigo: 'NB-010', estado: 'disponible', ubicacion: 'Carro 1' }];
+  backup.data.loans = [{
+    id: '9', notebook_id: '10', user_id: '1', vence_at: '2026-10-25T17:30:00.000Z', estado: 'activo'
+  }];
+  backup.data.tickets = [{
+    id: '5', codigo: 'TCK-5', owner_id: '1', loan_id: '9', notebook_id: '10',
+    motivo: 'Falla', descripcion: 'No inicia', estado: 'abierto'
+  }];
+  assert.doesNotThrow(() => backupService.validateRows(backup, backup.available, backup.columns));
+  backup.data.tickets[0].loan_id = '404';
+  assert.throws(() => backupService.validateRows(backup, backup.available, backup.columns), /Referencia inválida/);
+});
+
 test('normaliza backups antiguos para conservar las relaciones por carro y ubicación', () => {
   const backup = {
     data: {

@@ -440,7 +440,7 @@ async function runFlows(users) {
     assert.equal((await request('POST', '/api/internal/reminders', {})).status, 401);
     const reminder = await request('POST', '/api/admin/reminders/run', {}, tokens.admin);
     assert.equal(reminder.status, 503);
-    assert.match(reminder.payload.error, /Gmail/);
+    assert.match(reminder.payload.error, /recordatorios/);
     const reminderMark = await pool.query('SELECT reminder_sent_at FROM loans WHERE id = $1', [loan.id]);
     assert.equal(reminderMark.rows[0].reminder_sent_at, null);
     const noDuplicate = await request('POST', '/api/admin/reminders/run', {}, tokens.admin);

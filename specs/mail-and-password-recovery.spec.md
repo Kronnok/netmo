@@ -2,16 +2,16 @@
 
 ## Objetivo y alcance
 
-Implementar en NetMO el envío de correo mediante Brevo, Google Apps Script o
+Implementar en NetMO el envío de correo mediante Google Apps Script o
 consola de desarrollo; notificaciones opcionales de reservas y devoluciones;
 recuperación y cambio de contraseña con código de un solo uso; interfaz de
 usuario correspondiente; y configuración/documentación de despliegue.
 
 ## Comportamiento esperado
 
-- El servicio de correo usa las variables `MAIL_PROVIDER`, `MAIL_API_KEY`,
+- El servicio de correo usa las variables `MAIL_PROVIDER`,
   `MAIL_GAS_URL`, `MAIL_GAS_SECRET`, `MAIL_FROM_EMAIL` y `MAIL_FROM_NAME`.
-  Soporta `brevo`, `gas` y `console`; el proveedor GAS sigue redirecciones,
+  Soporta `gas` y `console`; el proveedor GAS sigue redirecciones,
   corta a los 15 segundos y acepta solamente respuesta HTTP satisfactoria con
   cuerpo `ok`; consola solo en desarrollo. Faltantes de
   configuración en producción producen errores explícitos, sin exponer
@@ -40,8 +40,8 @@ usuario correspondiente; y configuración/documentación de despliegue.
   repetición, mostrar/ocultar y reenvío. Perfil ofrece cambio de contraseña.
   Los valores dinámicos en HTML se escapan.
 - `.env.example` lista únicamente nombres; `render.yaml` declara las nuevas
-  variables privadas con `sync: false`; `DEPLOY.md` documenta Brevo y Apps
-  Script sin publicar secretos.
+  variables privadas con `sync: false`; `DEPLOY.md` documenta Apps Script sin
+  publicar secretos.
 
 ## Criterios de aceptación
 

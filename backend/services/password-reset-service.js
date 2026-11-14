@@ -2,7 +2,7 @@ const crypto = require('node:crypto');
 const db = require('../data/database');
 const config = require('../config');
 const { AppError } = require('../errors');
-const { accountEmail, accountPassword } = require('./validation');
+const { normalizedEmail: normalizeEmail, accountPassword } = require('./validation');
 const { sendMail } = require('./mail-service');
 const rateLimiter = require('./login-rate-limiter');
 
@@ -52,7 +52,7 @@ async function requestForgot(body, request) {
   if (!recordRequest(request, email, 'password-forgot')) return GENERIC_FORGOT_RESPONSE;
   let normalizedEmail;
   try {
-    normalizedEmail = accountEmail(email);
+    normalizedEmail = normalizeEmail(email, 50);
   } catch {
     return GENERIC_FORGOT_RESPONSE;
   }
@@ -159,7 +159,7 @@ async function applyPasswordChange({ email, userId, purpose, code, password, req
 }
 
 async function resetPassword(body, request) {
-  const email = accountEmail(body.email);
+  const email = normalizeEmail(body.email, 50);
   return applyPasswordChange({ email, purpose: 'reset', code: body.code, password: body.password, request });
 }
 

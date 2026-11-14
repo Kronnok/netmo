@@ -29,17 +29,19 @@ let reservas = [];
 let tickets = [];
 let reservationSubmitting = false;
 let lateReturnsInterval = null;
-let returnHistorySearchTimer = null;
 let loanReminderInterval = null;
 let circulationInterval = null;
-let circulationSearchTimer = null;
 let reservationsSearchTimer = null;
 let circulationLoans = [];
 let activeTicketRepliesCode = null;
+let forgotResendTimeout = null;
+let forgotResendSeconds = 0;
+const searchDebounceTimers = Object.create(null);
 const ticketRepliesLastRead = Object.create(null);
 let pendingDeleteCarro = null;
 let pendingRestoreBackup = null;
 let rolePasswordResolver = null;
+let adminUserRoleLocked = false;
 
 const badgeClass = {disponible:'badge-disponible', prestada:'badge-prestada', reservada:'badge-pendiente_devolucion', mantenimiento:'badge-mantenimiento', pendiente_devolucion:'badge-pendiente_devolucion'};
 const badgeLabel = {disponible:'Disponible', prestada:'Prestada', reservada:'Reservada', mantenimiento:'En mantenimiento', pendiente_devolucion:'Pend. devolución'};
@@ -47,7 +49,39 @@ const estadosNotebookManuales = ['disponible','mantenimiento'];
 const ticketBadgeClass = {abierto:'badge-abierto', progreso:'badge-progreso', resuelto:'badge-resuelto'};
 const ticketBadgeLabel = {abierto:'Abierto', progreso:'En progreso', resuelto:'Resuelto'};
 const rolLabel = {alumno:'Alumno', profesor:'Profesor', admin:'Administrador'};
+const emailTypeLabel = {
+  alumno:'Correo institucional de alumno',
+  profesor:'Correo institucional de profesor',
+  gmail:'@gmail.com',
+  otro:'Otro correo'
+};
 const BUSINESS_TIME_ZONE = 'America/Argentina/Buenos_Aires';
+
+function normalizeSearchText(value){
+  return String(value ?? '').normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase().trim();
+}
+
+function debounceSearch(key, callback, delay=250){
+  clearTimeout(searchDebounceTimers[key]);
+  searchDebounceTimers[key] = setTimeout(callback, delay);
+}
+
+function ticketStateLabel(state){
+  return ticketBadgeLabel[state] || 'Estado desconocido';
+}
+
+function ticketStateClass(state){
+  return ticketBadgeClass[state] || 'badge-unknown';
+}
+
+function ticketDate(value){
+  if(!value || !Number.isFinite(Date.parse(value))) return '—';
+  return formatBusinessDateTime(value, {dateStyle:'short'});
+}
+
+function ticketDescriptionMarkup(ticket){
+  return `<details class="ticket-description"><summary>${escapeHtml(ticket.motivo || '—')}</summary><p>${escapeHtml(ticket.motivoCompleto || '—')}</p></details>`;
+}
 
 function escapeHtml(value){
   return String(value ?? '').replace(/[&<>"']/g, character=>({
@@ -150,7 +184,7 @@ const pageMeta = {
   'admin-lotes':        ['Préstamos', 'Aprobá y registrá el retiro de las solicitudes de préstamo (individuales o por lote).'],
   'admin-tickets':      ['Fallas reportadas', 'Tickets enviados por alumnos y profesores. Actualizá el estado del equipo según corresponda.'],
   'admin-tardanzas':    ['Devoluciones tardías', 'Historial de demoras y sanciones a alumnos y profesores.'],
-  'admin-backup':       ['Backup', 'Descargá una copia o restaurá los datos del sistema.'],
+  'admin-backup':       ['Copias de seguridad', 'Descargá una copia o restaurá los datos del sistema.'],
 };
 
 /* ======================================================================
@@ -344,10 +378,11 @@ async function cargarEstadoAPI(){
     };
   });
   tickets = ticketsData.tickets.map(ticket=>({
-    id:ticket.id, notebook:ticket.notebook || 'otro', motivo:ticket.motivo, motivoCompleto:ticket.descripcion,
-    estado:ticket.estado, fecha:formatBusinessDateTime(ticket.created_at, {dateStyle:'short'}), ownerDni:currentUser.dni,
-    latestAdminReplyAt:ticket.latest_admin_reply_at,
-    ownerNombre:ticket.owner_nombre || currentUser.nombre, ownerRol:ticket.owner_rol || currentUser.rol
+    id:ticket.id, notebook:ticket.notebook || 'Sin equipo', loanId:ticket.loanId,
+    loanRetiradaAt:ticket.loanRetiradaAt, motivo:ticket.motivo || '—', motivoCompleto:ticket.descripcion || '—',
+    estado:ticket.estado || 'desconocido', fecha:ticketDate(ticket.fecha), ownerDni:currentUser.dni,
+    latestAdminReplyAt:ticket.latestAdminReplyAt,
+    ownerNombre:ticket.ownerNombre || currentUser.nombre || '—', ownerRol:ticket.ownerRol || currentUser.rol || '—'
   }));
   if(esAdmin){
     usuariosRegistrados = loaded.users.users;
@@ -409,6 +444,9 @@ async function login(e){
 }
 
 function mostrarRecuperacion(){
+  if(forgotResendTimeout) clearInterval(forgotResendTimeout);
+  forgotResendTimeout = null;
+  forgotResendSeconds = 0;
   document.getElementById('view-login').classList.remove('active');
   document.getElementById('view-forgot-password').classList.add('active');
   document.getElementById('forgotEmail').value = document.getElementById('loginEmail').value.trim();
@@ -420,15 +458,35 @@ function mostrarLogin(){
   document.getElementById('view-login').classList.add('active');
 }
 
-async function solicitarCodigoRecuperacion(){
+function iniciarEsperaReenvio(){
+  if(forgotResendTimeout) clearInterval(forgotResendTimeout);
+  forgotResendSeconds = 60;
+  const button = document.getElementById('forgotResendButton');
+  const countdown = document.getElementById('forgotResendCountdown');
+  button.hidden = false;
+  button.disabled = true;
+  const update = ()=>{
+    countdown.textContent = forgotResendSeconds > 0 ? `Podés pedir otro código en ${forgotResendSeconds} s.` : '';
+    if(forgotResendSeconds <= 0){
+      button.disabled = false;
+      clearInterval(forgotResendTimeout);
+      forgotResendTimeout = null;
+    }else forgotResendSeconds -= 1;
+  };
+  update();
+  forgotResendTimeout = setInterval(update, 1000);
+}
+
+async function solicitarCodigoRecuperacion(resend=false){
   const message = document.getElementById('forgotPasswordMessage');
   const email = document.getElementById('forgotEmail').value.trim();
+  if(resend && forgotResendSeconds > 0) return;
   try{
     const result = await apiRequest('/api/auth/forgot', {method:'POST', body:JSON.stringify({email})});
     document.getElementById('forgotCodeFields').hidden = false;
     document.getElementById('forgotRequestButton').hidden = true;
     document.getElementById('forgotSubmitButton').hidden = false;
-    document.getElementById('forgotResendButton').hidden = false;
+    iniciarEsperaReenvio();
     message.textContent = result.message;
   }catch(error){
     message.textContent = error.message;
@@ -440,27 +498,37 @@ async function restablecerPassword(){
   const code = document.getElementById('forgotCode').value.trim();
   const password = document.getElementById('forgotPassword').value;
   const repeatedPassword = document.getElementById('forgotPasswordRepeat').value;
+  if(!/^\d{6}$/.test(code)){
+    message.textContent = 'Ingresá el código de 6 dígitos.';
+    return;
+  }
   if(password !== repeatedPassword){
     message.textContent = 'Las contraseñas no coinciden.';
     return;
   }
   if(password.length < 8 || /\s/.test(password)){
-    message.textContent = 'La contraseña debe tener al menos 8 caracteres y no contener espacios.';
+    message.textContent = 'La contraseña debe tener entre 8 y 50 caracteres y no contener espacios.';
     return;
   }
   try{
+    const email = document.getElementById('forgotEmail').value.trim();
     const result = await apiRequest('/api/auth/reset', {
       method:'POST',
-      body:JSON.stringify({email:document.getElementById('forgotEmail').value.trim(), code, password})
+      body:JSON.stringify({email, code, password})
     });
     message.textContent = result.message;
     document.getElementById('forgotCodeFields').hidden = true;
     document.getElementById('forgotSubmitButton').hidden = true;
     document.getElementById('forgotResendButton').hidden = true;
+    document.getElementById('forgotResendCountdown').textContent = '';
+    if(forgotResendTimeout) clearInterval(forgotResendTimeout);
+    forgotResendTimeout = null;
+    forgotResendSeconds = 0;
     document.getElementById('forgotRequestButton').hidden = false;
     document.getElementById('forgotPasswordForm')?.reset();
+    document.getElementById('loginEmail').value = email;
     mostrarLogin();
-    document.getElementById('loginError').textContent = '';
+    document.getElementById('loginError').textContent = 'Contraseña actualizada. Ya podés iniciar sesión.';
     showToast(result.message, 'success');
   }catch(error){
     message.textContent = error.message;
@@ -569,6 +637,7 @@ async function crearUsuarioAdmin(e){
   try{
     await apiRequest('/api/admin/users', {method:'POST', body:JSON.stringify({nombre, apellido, email, dni, rol, password, passwordConfirmation})});
     document.getElementById('adminUserForm').reset();
+    actualizarRolPorCorreo();
     validarConfirmacionPasswordAdmin();
     error.textContent = '';
     await cargarEstadoAPI();
@@ -581,10 +650,16 @@ async function crearUsuarioAdmin(e){
 }
 
 function renderProfesoresTable(){
-  const query = (document.getElementById('profesoresSearchInput')?.value || '').trim().toLowerCase();
+  const query = normalizeSearchText(document.getElementById('profesoresSearchInput')?.value || '');
+  const selectedEmailType = document.getElementById('usersEmailType')?.value || '';
   const filtered = usuariosRegistrados.filter(usuario=>
-    [usuario.nombre, usuario.email, usuario.dni, usuario.rol].some(value=>String(value || '').toLowerCase().includes(query))
+    (!selectedEmailType || (usuario.tipo_correo || clasificarCorreo(usuario.email))===selectedEmailType)
+    && [usuario.nombre, usuario.email, usuario.dni, rolLabel[usuario.rol], usuario.rol,
+      usuario.baneado ? 'bloqueada desactivada' : 'activa']
+      .some(value=>normalizeSearchText(value).includes(query))
   );
+  const count = document.getElementById('profesoresSearchCount');
+  if(count) count.textContent = `${filtered.length} resultados`;
   for(const [rol, tbodyId] of [
     ['alumno', 'alumnosTable'], ['profesor', 'profesoresTable'], ['admin', 'administradoresTable']
   ]){
@@ -592,28 +667,63 @@ function renderProfesoresTable(){
     if(!tbody) continue;
     const users = filtered.filter(usuario=>usuario.rol===rol);
     if(!users.length){
-      tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state"><p>No hay ${rol==='alumno'?'alumnos':'profesores'} que coincidan.</p></div></td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="8"><div class="empty-state"><p>No hay ${rol==='alumno'?'alumnos':'profesores'} que coincidan.</p></div></td></tr>`;
       continue;
     }
     tbody.innerHTML = users.map(usuario=>`
     <tr>
       <td>${escapeHtml(usuario.nombre)}</td>
-      <td>${escapeHtml(usuario.email)}</td>
+      <td><div class="user-email-edit"><input type="email" id="user-email-${escapeHtml(usuario.dni)}" maxlength="50" value="${escapeHtml(usuario.email)}" aria-label="Correo de ${escapeHtml(usuario.nombre)}">
+        <button type="button" class="btn btn-sm" onclick="cambiarCorreoUsuario(${escapeHtml(JSON.stringify(usuario.dni))})">Guardar</button></div></td>
       <td class="mono">${escapeHtml(usuario.dni)}</td>
       <td>${escapeHtml(rolLabel[usuario.rol] || usuario.rol)}</td>
+      <td>${escapeHtml(emailTypeLabel[usuario.tipo_correo || clasificarCorreo(usuario.email)] || 'Otro correo')}</td>
       <td><select class="btn btn-sm" aria-label="Cambiar rol de ${escapeHtml(usuario.nombre)}"
         ${usuario.dni===currentUser.dni?'disabled':''}
         onchange="cambiarRol(${escapeHtml(JSON.stringify(usuario.dni))}, this.value, this)">
-        <option value="alumno" ${usuario.rol==='alumno'?'selected':''}>Alumno</option>
-        <option value="profesor" ${usuario.rol==='profesor'?'selected':''}>Profesor</option>
+        ${roleOptionsForUser(usuario).map(role=>`<option value="${role}" ${usuario.rol===role?'selected':''}>${escapeHtml(rolLabel[role])}</option>`).join('')}
         <option value="admin" ${usuario.rol==='admin'?'selected':''}>Administrador</option>
       </select></td>
+      <td>${usuario.rol==='admin'?'—':usuario.baneado?'Desactivada':'Activa'}</td>
+      <td>${usuario.rol==='admin'?'—':`<button class="btn btn-sm ${usuario.baneado?'btn-success-outline':'btn-danger-outline'}"
+        onclick="cambiarEstadoCuenta(${escapeHtml(JSON.stringify(usuario.dni))}, ${!usuario.baneado})">${usuario.baneado?'Reactivar':'Desactivar'}</button>`}</td>
     </tr>`).join('');
   }
 }
 
+function clasificarCorreo(email){
+  const normalized = String(email || '').trim().toLowerCase();
+  const domain = normalized.slice(normalized.lastIndexOf('@') + 1);
+  if(domain==='bue.edu.ar') return 'profesor';
+  if(domain==='alu.bue.edu.ar') return 'alumno';
+  if(domain==='gmail.com') return 'gmail';
+  return 'otro';
+}
+
+function roleOptionsForUser(usuario){
+  if(usuario.rol==='admin') return [];
+  const type = usuario.tipo_correo || clasificarCorreo(usuario.email);
+  if(type==='alumno') return ['alumno'];
+  if(type==='profesor') return ['profesor'];
+  if(type==='gmail') return ['profesor', 'alumno'];
+  return usuario.rol==='admin' ? ['admin'] : [usuario.rol];
+}
+
+function actualizarRolPorCorreo(){
+  const email = document.getElementById('userEmail')?.value || '';
+  const type = clasificarCorreo(email);
+  const selector = document.getElementById('userRol');
+  if(!selector) return;
+  const role = type==='alumno' ? 'alumno' : 'profesor';
+  const isLocked = type==='alumno' || type==='profesor';
+  if(isLocked) selector.value = role;
+  else if(adminUserRoleLocked) selector.value = 'profesor';
+  selector.disabled = isLocked;
+  adminUserRoleLocked = isLocked;
+}
+
 function filterProfesores(){
-  renderProfesoresTable();
+  debounceSearch('users', renderProfesoresTable);
 }
 
 async function cambiarRol(dni, rol, select){
@@ -640,6 +750,49 @@ async function cambiarRol(dni, rol, select){
     showToast(error.message, 'warn');
   }finally{
     password = undefined;
+  }
+}
+
+async function cambiarEstadoCuenta(dni, baneado){
+  const usuario = usuariosRegistrados.find(item=>item.dni===dni);
+  if(!usuario || usuario.rol==='admin') return;
+  const action = baneado ? 'desactivar' : 'reactivar';
+  if(!window.confirm(`¿${action[0].toUpperCase()+action.slice(1)} la cuenta de ${usuario.nombre}? El historial de préstamos se conservará.`)) return;
+  try{
+    await apiRequest(`/api/admin/users/${encodeURIComponent(dni)}`, {
+      method:'PATCH', body:JSON.stringify({baneado})
+    });
+    await cargarEstadoAPI();
+    renderAll();
+    showToast(`Cuenta de ${usuario.nombre} ${baneado?'desactivada':'reactivada'}.`, 'success');
+  }catch(error){
+    showToast(error.message, 'warn');
+  }
+}
+
+async function cambiarCorreoUsuario(dni){
+  const input = document.getElementById(`user-email-${dni}`);
+  if(!input) return;
+  try{
+    const result = await apiRequest(`/api/admin/users/${encodeURIComponent(dni)}`, {
+      method:'PATCH', body:JSON.stringify({email:input.value.trim()})
+    });
+    const target = usuariosRegistrados.find(item=>item.dni===dni);
+    if(target){
+      target.email = result.user.email;
+      target.rol = result.user.rol;
+    }
+    if(currentUser?.dni===dni){
+      currentUser.email = result.user.email;
+      currentUser.rol = result.user.rol;
+      rolActivo = result.user.rol;
+      applyRoleVisibility();
+    }
+    await cargarEstadoAPI();
+    renderAll();
+    showToast('Correo actualizado y rol ajustado según el dominio.', 'success');
+  }catch(error){
+    showToast(error.message, 'warn');
   }
 }
 
@@ -731,6 +884,8 @@ function actualizarControlesReserva(){
   if(!cantidadInput || !loteCantidadInput || !submitButton || !currentUser) return;
 
   const esProfesor = rolActivo==='profesor';
+  document.getElementById('resCantidadWrap').style.display =
+    esProfesor && !document.getElementById('loteToggle').checked ? 'flex' : 'none';
   const ubicacion = document.getElementById('resUbicacion')?.value || 'todas';
   const selectedCarro = document.getElementById('resCarro')?.value || '';
   const allowedCarros = carros.filter(carro=>
@@ -756,7 +911,41 @@ function actualizarControlesReserva(){
   document.getElementById('resCursoDivision').disabled = false;
   const cantidadSolicitada = document.getElementById('loteToggle').checked
     ? Number(loteCantidadInput.value) : Number(cantidadInput.value);
-  submitButton.disabled = reservationSubmitting || bloqueado || equiposDisponibles < cantidadSolicitada;
+  const noDisponibles = equiposDisponibles < cantidadSolicitada;
+  submitButton.disabled = reservationSubmitting || bloqueado || noDisponibles;
+  const reason = document.getElementById('resSubmitReason');
+  if(reason){
+    reason.textContent = bloqueado
+      ? 'Ya tenés un préstamo abierto o una solicitud pendiente.'
+      : noDisponibles ? `No hay suficientes notebooks disponibles${selectedCarro ? ` en el carro ${selectedCarro}` : ''}.` : '';
+  }
+  actualizarResumenReserva();
+}
+
+function actualizarResumenReserva(){
+  const summary = document.getElementById('reservationSummary');
+  if(!summary) return;
+  const fecha = document.getElementById('resFecha').value;
+  const hora = document.getElementById('resHora').value;
+  const horaDevolucion = document.getElementById('resHoraDevolucion').value;
+  const esLote = rolActivo==='profesor' && document.getElementById('loteToggle').checked;
+  const cantidad = esLote ? document.getElementById('loteCantidad').value
+    : rolActivo==='profesor' ? document.getElementById('resCantidad').value : '1';
+  const carro = document.getElementById('resCarro').value;
+  const curso = document.getElementById('resCursoPreview').textContent;
+  const error = document.getElementById('resFechaError');
+  if(fecha && hora){
+    const timeCheck = validarFechaHora(fecha, hora);
+    const returnError = horaDevolucion ? validarHoraDevolucionReserva(hora, horaDevolucion) : '';
+    error.textContent = !timeCheck.valid ? timeCheck.msg : returnError;
+  }else error.textContent = '';
+  summary.textContent = [
+    carro ? `Carro ${carro}` : 'Elegí un carro',
+    `${cantidad} ${Number(cantidad)===1?'notebook':'notebooks'}`,
+    fecha ? `${formatFecha(fecha)}${hora ? ` · ${hora}` : ''}` : 'Elegí el día y horario',
+    horaDevolucion ? `Devolución ${horaDevolucion}` : '',
+    esLote ? curso : ''
+  ].filter(Boolean).join(' · ');
 }
 
 /* ======================================================================
@@ -819,11 +1008,9 @@ function switchView(name){
     }
   }
   if(name==='admin-circulation' && authToken && rolActivo==='admin'){
-    const search = document.getElementById('circulationSearch').value.trim();
-    void buscarPrestamosAdmin(search);
+    void buscarPrestamosAdmin();
     circulationInterval = setInterval(()=>{
-      const currentSearch = document.getElementById('circulationSearch').value.trim();
-      void buscarPrestamosAdmin(currentSearch);
+      void buscarPrestamosAdmin();
     }, 30000);
   }
   if(authToken && ['prestamos', 'admin-lotes'].includes(name)){
@@ -852,13 +1039,13 @@ async function descargarBackup(){
     });
     if(!response.ok){
       const payload = await response.json().catch(()=>({}));
-      throw new Error(payload.error || 'No se pudo descargar el backup.');
+      throw new Error(payload.error || 'No se pudo descargar la copia de respaldo.');
     }
     const blob = await response.blob();
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = response.headers.get('content-disposition')?.match(/filename="([^"]+)"/)?.[1] || 'netmo-backup.json';
+    link.download = response.headers.get('content-disposition')?.match(/filename="([^"]+)"/)?.[1] || 'netmo-copia-de-respaldo.json';
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -889,22 +1076,28 @@ async function previsualizarBackup(event){
     const backup = JSON.parse(await file.text());
     if(!backup || typeof backup !== 'object' || !backup.metadata || typeof backup.metadata !== 'object' ||
       !backup.metadata.conteos || typeof backup.metadata.conteos !== 'object'){
-      throw new Error('El archivo no tiene metadatos de backup válidos.');
+      throw new Error('El archivo no contiene información de respaldo válida.');
     }
     pendingRestoreBackup = backup;
     const fecha = backup.metadata.fecha && Number.isFinite(Date.parse(backup.metadata.fecha))
       ? new Date(backup.metadata.fecha).toLocaleString('es-AR')
       : backup.metadata.fecha || 'No disponible';
+    const labels = {
+      users:'Usuarios', user_preferences:'Preferencias', ubicaciones:'Ubicaciones',
+      carros:'Carros', notebooks:'Equipos', reservations:'Reservas',
+      reservation_notebooks:'Equipos reservados', loans:'Préstamos',
+      returns:'Devoluciones', tickets:'Reportes', ticket_replies:'Respuestas',
+      late_returns:'Demoras'
+    };
     const counts = Object.entries(backup.metadata.conteos)
-      .map(([table, count])=>`<li><span>${escapeHtml(table)}</span>: ${escapeHtml(count)}</li>`).join('');
+      .map(([table, count])=>`<li><span>${escapeHtml(labels[table] || table)}</span>: ${escapeHtml(count)}</li>`).join('');
     preview.innerHTML = `<h4>Vista previa</h4>
       <p>Fecha: ${escapeHtml(fecha)}</p>
-      <p>Versión del esquema: ${escapeHtml(backup.metadata.version_esquema || 'No disponible')}</p>
       <ul>${counts}</ul>`;
     preview.hidden = false;
     form.hidden = false;
   }catch(parseError){
-    preview.textContent = parseError instanceof SyntaxError ? 'El archivo no contiene JSON válido.' : parseError.message;
+    preview.textContent = parseError instanceof SyntaxError ? 'El archivo no es una copia de respaldo válida.' : parseError.message;
     preview.hidden = false;
   }
 }
@@ -913,7 +1106,7 @@ async function restaurarBackup(event){
   event.preventDefault();
   const error = document.getElementById('restoreBackupError');
   if(!pendingRestoreBackup){
-    error.textContent = 'Seleccioná un archivo de backup válido.';
+    error.textContent = 'Seleccioná un archivo de respaldo válido.';
     return;
   }
   if(document.getElementById('restoreConfirmation').value !== 'RESTAURAR'){
@@ -933,7 +1126,7 @@ async function restaurarBackup(event){
       })
     });
     const payload = await response.json().catch(()=>({}));
-    if(!response.ok) throw new Error(payload.error || 'No se pudo restaurar el backup.');
+    if(!response.ok) throw new Error(payload.error || 'No se pudo restaurar la copia.');
     window.location.reload();
   }catch(restoreError){
     error.textContent = restoreError.message;
@@ -957,6 +1150,7 @@ function renderAll(){
   renderInventarioForms();
   renderFallaNotebookOptions();
   renderCirculationLoans();
+  renderCirculationFilters();
   renderLoanReminders();
 }
 
@@ -1109,7 +1303,7 @@ function renderFallaNotebookOptions(){
   if(!select) return;
   const selected = select.value;
   select.innerHTML = '<option value="">Seleccioná una notebook</option>'
-    + ticketNotebookHistory.map(notebook=>`<option value="${escapeHtml(notebook.codigo)}">${escapeHtml(notebook.codigo)} · último uso ${escapeHtml(formatBusinessDateTime(notebook.ultimo_uso, {dateStyle:'short'}))}</option>`).join('')
+    + ticketNotebookHistory.map(loan=>`<option value="${escapeHtml(loan.loan_id)}" data-notebook="${escapeHtml(loan.codigo)}">${escapeHtml(loan.codigo)} · préstamo #${escapeHtml(loan.loan_id)} · ${escapeHtml(formatBusinessDateTime(loan.retirada_at, {dateStyle:'short'}))}</option>`).join('')
     + '<option value="otro">Otra / no sé</option>';
   if([...select.options].some(option=>option.value===selected)) select.value = selected;
 }
@@ -1244,6 +1438,7 @@ function renderNotebooks(){
   document.getElementById('statMantenimiento').textContent = stats.mantenimiento;
   document.getElementById('statTotal').textContent = stats.total;
   document.getElementById('statDisponiblesUsuario').textContent = stats.disponibles;
+  applyNotebookFilters();
 }
 
 function actualizarStats(){
@@ -1285,7 +1480,7 @@ function renderMiActividad(){
     html += `
       <div class="action-card" style="cursor:default;margin-bottom:.8rem;">
         <div class="action-icon" style="background:var(--blue-bg);color:var(--blue-text);">💻</div>
-        <div class="action-info"><h4>${prestamos.length>1?`Tenés ${prestamos.length} notebooks en tu poder`:`Tenés ${escapeHtml(prestamo.id)} en tu poder`}</h4><p>Vence ${escapeHtml(prestamo.vence)}</p></div>
+        <div class="action-info"><h4>Préstamo activo: ${prestamos.length>1?`${prestamos.length} notebooks`:`${escapeHtml(prestamo.id)}`}</h4><p>Vence ${escapeHtml(prestamo.vence)}</p></div>
       </div>`;
   } else if(prestamo && prestamo.pendiente){
     html += `
@@ -1300,7 +1495,7 @@ function renderMiActividad(){
     html += `
       <div class="action-card" style="cursor:default;margin-bottom:.8rem;">
         <div class="action-icon">📅</div>
-        <div class="action-info"><h4>${escapeHtml(detalle)}</h4><p>${escapeHtml(formatFecha(proximaReserva.fecha))} · ${escapeHtml(proximaReserva.hora)}</p></div>
+        <div class="action-info"><h4>${escapeHtml(detalle)}</h4><p>${escapeHtml(proximaReserva.estado)} · ${escapeHtml(formatFecha(proximaReserva.fecha))} · ${escapeHtml(proximaReserva.hora)}</p></div>
       </div>`;
   } else if(!prestamo){
     html += `<div class="empty-state">
@@ -1322,15 +1517,24 @@ function renderMiActividad(){
   wrap.innerHTML = html;
 }
 
-function filterNotebooks(){
-  const q = document.getElementById('searchInput').value.toLowerCase();
+function applyNotebookFilters(){
+  const q = normalizeSearchText(document.getElementById('searchInput')?.value);
   const est = document.getElementById('filterEstado').value;
+  let count = 0;
   document.querySelectorAll('#notebookTable tr').forEach((tr,i)=>{
     const nb = notebooks[i];
-    const matchesText = tr.innerText.toLowerCase().includes(q);
+    if(!nb){ tr.style.display = ''; return; }
+    const matchesText = normalizeSearchText(tr.innerText).includes(q);
     const matchesEstado = !est || nb.estado===est;
     tr.style.display = (matchesText && matchesEstado) ? '' : 'none';
+    if(matchesText && matchesEstado) count+=1;
   });
+  const counter = document.getElementById('notebookResultsCount');
+  if(counter) counter.textContent = `${count} resultados`;
+}
+
+function filterNotebooks(){
+  debounceSearch('notebooks', applyNotebookFilters);
 }
 
 function renderAdminInventario(){
@@ -1349,6 +1553,7 @@ function renderAdminInventario(){
       <td>${renderNotebookCarroSelect(nb)}</td>
     </tr>`).join('')
   : '<tr><td colspan="7"><p class="empty-state">Todavía no hay notebooks en el inventario.</p></td></tr>';
+    applyAdminNotebookFilters();
 }
 
 function renderNotebookCarroSelect(notebook){
@@ -1414,15 +1619,24 @@ async function adminChangeState(select){
   }
 }
 
-function filterAdminNotebooks(){
-  const q = document.getElementById('adminSearchInput').value.toLowerCase();
+function applyAdminNotebookFilters(){
+  const q = normalizeSearchText(document.getElementById('adminSearchInput')?.value);
   const est = document.getElementById('adminFilterEstado').value;
+  let count = 0;
   document.querySelectorAll('#adminInventoryTable tr').forEach((tr,i)=>{
     const nb = notebooks[i];
-    const matchesText = tr.innerText.toLowerCase().includes(q);
+    if(!nb){ tr.style.display = ''; return; }
+    const matchesText = normalizeSearchText(tr.innerText).includes(q);
     const matchesEstado = !est || nb.estado===est;
     tr.style.display = (matchesText && matchesEstado) ? '' : 'none';
+    if(matchesText && matchesEstado) count+=1;
   });
+  const counter = document.getElementById('adminInventoryResultsCount');
+  if(counter) counter.textContent = `${count} resultados`;
+}
+
+function filterAdminNotebooks(){
+  debounceSearch('admin-inventory', applyAdminNotebookFilters);
 }
 
 /* ======================================================================
@@ -1475,13 +1689,21 @@ function renderLoanReminders(){
 function renderHistorialPrestamos(){
   const tbody = document.getElementById('historialPrestamosTable');
   if(!tbody) return;
-  if(historialPrestamos.length===0){
+  const query = normalizeSearchText(document.getElementById('myLoansSearch')?.value);
+  const state = document.getElementById('myLoansState')?.value || '';
+  const filtered = historialPrestamos.filter(loan=>normalizeSearchText([
+    loan.notebook, loan.estado, loan.estado==='devuelto'?'devuelta':loan.estado==='devolucion_pendiente'?'devolución pendiente':'activo'
+  ].join(' ')).includes(query) && (!state || loan.estado===state));
+  const counter = document.getElementById('myLoansResultsCount');
+  if(counter) counter.textContent = `${filtered.length} resultados`;
+  if(filtered.length===0){
     tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state">
-      <div class="glyph">📋</div><h4>No tenés historial de préstamos</h4><p>Los préstamos que retires aparecerán acá.</p>
+      <div class="glyph">📋</div><h4>${historialPrestamos.length ? 'No hay préstamos que coincidan' : 'Todavía no tenés préstamos'}</h4><p>${historialPrestamos.length ? 'Probá otra búsqueda o limpiá el filtro.' : 'Pedí una notebook para verla acá.'}</p>
+      ${historialPrestamos.length ? '' : '<button type="button" class="btn btn-primary" onclick="switchView(\'reservas\')">Pedir notebooks</button>'}
     </div></td></tr>`;
     return;
   }
-  tbody.innerHTML = historialPrestamos.map(loan=>{
+  tbody.innerHTML = filtered.map(loan=>{
     const retirada = formatBusinessDateTime(loan.retirada_at);
     const devuelta = loan.devuelta_at ? formatBusinessDateTime(loan.devuelta_at) : '—';
     const demorada = loan.devuelta_at && new Date(loan.devuelta_at) > new Date(loan.vence_at);
@@ -1492,6 +1714,16 @@ function renderHistorialPrestamos(){
     const overdueLabel = loan.estado==='activo' && loan.vencido ? ' · Plazo vencido' : '';
     return `<tr><td class="mono">${escapeHtml(loan.notebook)}</td><td>${escapeHtml(retirada)}</td><td>${escapeHtml(horaDevolucion)}</td><td>${escapeHtml(horaPrevista)}</td><td>${escapeHtml(devuelta)}</td><td><span class="badge ${escapeHtml(badge)}">${escapeHtml(label+overdueLabel)}</span></td></tr>`;
   }).join('');
+}
+
+function filterMyLoans(){
+  debounceSearch('my-loans', renderHistorialPrestamos);
+}
+
+function limpiarBusqueda(searchId, stateId, callback){
+  document.getElementById(searchId).value = '';
+  if(stateId) document.getElementById(stateId).value = '';
+  callback();
 }
 
 /* ======================================================================
@@ -1505,6 +1737,8 @@ function renderDevoluciones(message=''){
     return;
   }
   if(!historialDevoluciones.length){
+    const counter = document.getElementById('returnsHistoryResultsCount');
+    if(counter) counter.textContent = '0 resultados';
     wrap.innerHTML = `<div class="empty-state">
       <div class="glyph">📚</div>
       <h4>No hay devoluciones registradas</h4>
@@ -1512,6 +1746,8 @@ function renderDevoluciones(message=''){
     </div>`;
     return;
   }
+  const counter = document.getElementById('returnsHistoryResultsCount');
+  if(counter) counter.textContent = `${historialDevoluciones.length} resultados`;
   wrap.innerHTML = `<div class="inventory-table-scroll"><table class="inventory-table">
     <thead><tr><th>Notebook</th><th>Devolvió</th><th>DNI</th><th>Préstamo</th><th>Recibió</th><th>Fecha y hora</th><th>Estado</th></tr></thead>
     <tbody>${historialDevoluciones.map(item=>{
@@ -1541,8 +1777,7 @@ async function buscarHistorialDevoluciones(query=''){
 }
 
 function programarBusquedaHistorialDevoluciones(value){
-  if(returnHistorySearchTimer) clearTimeout(returnHistorySearchTimer);
-  returnHistorySearchTimer = setTimeout(()=>void buscarHistorialDevoluciones(value),300);
+  debounceSearch('return-history', ()=>void buscarHistorialDevoluciones(value), 250);
 }
 
 function mensajeErrorDevolucion(error){
@@ -1828,22 +2063,65 @@ function buscarReservasAdmin(value){
   },300);
 }
 
-function programarBusquedaPrestamos(value){
-  if(circulationSearchTimer) clearTimeout(circulationSearchTimer);
-  const query = value.trim();
-  circulationSearchTimer = setTimeout(()=>void buscarPrestamosAdmin(query),300);
+function programarBusquedaPrestamos(){
+  debounceSearch('circulation', ()=>void buscarPrestamosAdmin(), 250);
 }
 
-async function buscarPrestamosAdmin(query=''){
+async function buscarPrestamosAdmin(){
   if(!authToken || rolActivo!=='admin') return;
   try{
-    const search = query.trim();
-    const suffix = search ? `&q=${encodeURIComponent(search)}` : '';
-    const data = await apiRequest(`/api/admin/loans?estado=pendientes${suffix}`);
+    const filters = new URLSearchParams();
+    for(const [key, id] of [
+      ['estado', 'circulationState'],
+      ['vencidas', 'circulationOverdue'],
+      ['desde', 'circulationDateFrom'],
+      ['hasta', 'circulationDateTo'],
+      ['q', 'circulationSearch'],
+      ['motivo', 'circulationReason'],
+      ['usuario', 'circulationUser'],
+      ['equipo', 'circulationEquipment']
+    ]){
+      const value = document.getElementById(id)?.value.trim();
+      if(value) filters.set(key, value);
+    }
+    const carro = document.getElementById('circulationCarro')?.value;
+    const ubicacion = document.getElementById('circulationLocation')?.value;
+    if(carro) filters.set('carro', carro);
+    if(ubicacion) filters.set('ubicacion', ubicacion);
+    const data = await apiRequest(`/api/admin/loans?${filters}`);
     circulationLoans = data.loans;
+    const count = document.getElementById('circulationResultsCount');
+    if(count) count.textContent = `${circulationLoans.length} resultados`;
     renderCirculationLoans();
   }catch(error){
     renderCirculationLoans(error.message);
+  }
+}
+
+function limpiarFiltrosPrestamos(){
+  for(const id of ['circulationSearch','circulationReason','circulationUser','circulationEquipment',
+    'circulationDateFrom','circulationDateTo','circulationCarro','circulationLocation','circulationOverdue']){
+    const element = document.getElementById(id);
+    if(element) element.value = '';
+  }
+  document.getElementById('circulationState').value = 'pendientes';
+  programarBusquedaPrestamos();
+}
+
+function renderCirculationFilters(){
+  const carroSelect = document.getElementById('circulationCarro');
+  if(carroSelect){
+    const selected = carroSelect.value;
+    carroSelect.innerHTML = `<option value="">Todos los carros</option>${carros.map(carro=>
+      `<option value="${escapeHtml(carro.numero)}">Carro ${escapeHtml(carro.numero)}</option>`).join('')}`;
+    if(carros.some(carro=>String(carro.numero)===selected)) carroSelect.value = selected;
+  }
+  const locationSelect = document.getElementById('circulationLocation');
+  if(locationSelect){
+    const selected = locationSelect.value;
+    locationSelect.innerHTML = `<option value="">Todas las ubicaciones</option>${ubicaciones.map(location=>
+      `<option value="${escapeHtml(location.slug)}">${escapeHtml(location.nombre)}</option>`).join('')}`;
+    if(ubicaciones.some(location=>location.slug===selected)) locationSelect.value = selected;
   }
 }
 
@@ -1852,10 +2130,12 @@ function renderCirculationLoans(message=''){
   if(!wrap) return;
   if(message){
     wrap.textContent = message;
+    actualizarSeleccionDevoluciones();
     return;
   }
   if(!circulationLoans.length){
     wrap.innerHTML = '<p class="hint">No hay préstamos pendientes de devolución.</p>';
+    actualizarSeleccionDevoluciones();
     return;
   }
   const groups = new Map();
@@ -1870,17 +2150,17 @@ function renderCirculationLoans(message=''){
       const overdue = Boolean(loan.vencido);
       const returnPending = loan.estado==='devolucion_pendiente';
       const stateLabel = returnPending ? 'Devolución informada; falta confirmar la recepción física' : 'Préstamo activo';
+      const returned = loan.estado==='devuelto';
       return `<div class="action-card" style="cursor:default;margin:.6rem 0;${overdue?'border-color:var(--red-text);color:var(--red-text);':''}">
         <div class="action-info"><h4>${escapeHtml(loan.notebook)} · ${escapeHtml(loan.curso || 'Sin curso')}</h4>
-          <p>${escapeHtml(stateLabel)} · Retirada ${escapeHtml(formatBusinessDateTime(loan.retirada_at))} · Vence ${escapeHtml(formatBusinessDateTime(loan.vence_at))}${overdue?' · VENCIDA':''}</p></div>
-        <button class="btn btn-sm btn-primary" onclick="registrarDevolucionAdmin(${escapeHtml(JSON.stringify(loan.id))}, ${escapeHtml(JSON.stringify(loan.notebook))})">${returnPending?'Confirmar recepción':'Registrar devolución'}</button>
+          <p>${escapeHtml(returned?'Devuelto':stateLabel)} · Retirada ${escapeHtml(formatBusinessDateTime(loan.retirada_at))} · Vence ${escapeHtml(formatBusinessDateTime(loan.vence_at))}${overdue?' · VENCIDA':''} · ${escapeHtml(loan.carro ? `Carro ${loan.carro}` : 'Sin carro')} · ${escapeHtml(loan.ubicacion || 'Sin ubicación')} · Motivo: ${escapeHtml(loan.motivo || 'Sin especificar')}</p></div>
+        ${returned?'':`<label class="loan-return-select"><input type="checkbox" data-loan-id="${escapeHtml(loan.id)}" data-overdue="${overdue}" onchange="actualizarSeleccionDevoluciones()"> Seleccionar</label>
+        <button class="btn btn-sm btn-primary" onclick="registrarDevolucionAdmin(${escapeHtml(JSON.stringify(loan.id))}, ${escapeHtml(JSON.stringify(loan.notebook))})">${returnPending?'Confirmar recepción':'Registrar devolución'}</button>`}
       </div>`;
     }).join('');
-    const allButton = loans.length>1
-      ? `<button class="btn btn-primary" onclick="registrarTodasDevolucionesAdmin(${escapeHtml(JSON.stringify(loans.map(loan=>loan.id)))})">Registrar todas (${loans.length})</button>`
-      : '';
-    return `<section class="card" style="margin-top:1rem"><h4>${escapeHtml(first.usuario)} · ${escapeHtml(first.email)} · DNI ${escapeHtml(first.dni)}</h4>${cards}${allButton}</section>`;
+    return `<section class="card" data-loan-owner="${escapeHtml(first.user_id)}" style="margin-top:1rem"><h4>${escapeHtml(first.usuario)} · ${escapeHtml(first.email)} · DNI ${escapeHtml(first.dni)}</h4><button type="button" class="btn btn-sm" onclick="seleccionarDevolucionesUsuario(${escapeHtml(JSON.stringify(first.user_id))})">Seleccionar las de este usuario</button>${cards}</section>`;
   }).join('');
+  actualizarSeleccionDevoluciones();
 }
 
 async function registrarDevolucionAdmin(id, notebook){
@@ -1892,21 +2172,85 @@ async function registrarDevolucionAdmin(id, notebook){
   }catch(error){ showToast(mensajeErrorDevolucion(error), 'warn'); }
 }
 
-async function registrarTodasDevolucionesAdmin(ids){
-  if(!window.confirm(`¿Registrar la devolución de las ${ids.length} notebooks?`)) return;
+function actualizarSeleccionDevoluciones(){
+  const selected = document.querySelectorAll('#circulationResults input[data-loan-id]:checked');
+  const button = document.getElementById('returnSelectedFloating');
+  if(!button) return;
+  button.disabled = selected.length === 0;
+  button.textContent = `Devolver seleccionadas (${selected.length})`;
+}
+
+function seleccionarTodasDevoluciones(){
+  document.querySelectorAll('#circulationResults input[data-loan-id]').forEach(input=>{ input.checked = true; });
+  actualizarSeleccionDevoluciones();
+}
+
+function seleccionarDevolucionesUsuario(userId){
+  const section = [...document.querySelectorAll('#circulationResults section[data-loan-owner]')]
+    .find(item=>item.dataset.loanOwner===String(userId));
+  section?.querySelectorAll('input[data-loan-id]').forEach(input=>{ input.checked = true; });
+  actualizarSeleccionDevoluciones();
+}
+
+function seleccionarDevolucionesVencidas(){
+  const inputs = [...document.querySelectorAll('#circulationResults input[data-loan-id]')];
+  inputs.forEach(input=>{ input.checked = input.dataset.overdue==='true'; });
+  actualizarSeleccionDevoluciones();
+}
+
+function seleccionarDevolucionesPorNumeros(){
+  const input = document.getElementById('returnByNumbers');
+  const message = document.getElementById('returnByNumbersMessage');
+  const text = input.value.trim();
+  if(!text || !/^\d+(?:\s*-\s*\d+)?(?:\s*,\s*\d+(?:\s*-\s*\d+)?)*$/.test(text)){
+    message.textContent = 'Usá números separados por coma y rangos como 10-14.';
+    return;
+  }
+  const numbers = new Set();
+  for(const part of text.split(',')){
+    const [start, end = start] = part.split('-').map(value=>Number(value.trim()));
+    if(!Number.isSafeInteger(start) || !Number.isSafeInteger(end)
+      || start < 1 || end < start || end - start > 100){
+      message.textContent = 'El rango de números no es válido.';
+      return;
+    }
+    for(let number=start; number<=end; number+=1) numbers.add(number);
+  }
+  const loans = circulationLoans.filter(loan=>loan.estado!=='devuelto'
+    && numbers.has(Number(String(loan.notebook).match(/(\d+)$/)?.[1])));
+  document.querySelectorAll('#circulationResults input[data-loan-id]').forEach(checkbox=>{
+    checkbox.checked = loans.some(loan=>String(loan.id)===checkbox.dataset.loanId);
+  });
+  const found = new Set(loans.map(loan=>Number(String(loan.notebook).match(/(\d+)$/)?.[1])));
+  const missing = [...numbers].filter(number=>!found.has(number)).sort((a,b)=>a-b);
+  message.textContent = missing.length ? `No están prestadas: ${missing.join(', ')}.` : `${loans.length} notebook(s) seleccionadas.`;
+  actualizarSeleccionDevoluciones();
+}
+
+async function registrarDevolucionesSeleccionadas(){
+  const selectedInputs = [...document.querySelectorAll('#circulationResults input[data-loan-id]:checked')];
+  const ids = selectedInputs.map(input=>Number(input.dataset.loanId));
+  if(ids.length===0) return;
+  const labels = ids.map(id=>circulationLoans.find(loan=>Number(loan.id)===id)?.notebook || `préstamo ${id}`);
+  if(!window.confirm(`¿Confirmar una sola vez la devolución de estas notebooks?\n\n${labels.join(', ')}`)) return;
   try{
-    const result = await apiRequest('/api/admin/loans/return', {
+    await apiRequest('/api/admin/loans/return', {
       method:'POST', body:JSON.stringify({loanIds:ids})
     });
-    showToast(result.message, 'success');
-    await refreshAdminCirculationLoans();
-  }catch(error){ showToast(mensajeErrorDevolucion(error), 'warn'); }
+    showToast(`${ids.length} devueltas.`, 'success');
+    try{ await refreshAdminCirculationLoans(); }
+    catch(error){ showToast(`Devolución registrada, pero no se pudo actualizar la lista: ${error.message}`, 'warn'); }
+  }catch(error){
+    showToast(`0 devueltas, lote cancelado: ${mensajeErrorDevolucion(error)}`, 'warn');
+    try{ await refreshAdminCirculationLoans(); }
+    catch(refreshError){ showToast(`No se pudo actualizar la lista: ${refreshError.message}`, 'warn'); }
+  }
 }
 
 async function refreshAdminCirculationLoans(){
   await cargarEstadoAPI();
   renderAll();
-  await buscarPrestamosAdmin(document.getElementById('circulationSearch').value);
+  await buscarPrestamosAdmin();
 }
 
 let pendingRejectId = null;
@@ -1949,7 +2293,9 @@ async function crearTicket(e){
   }
   try{
     await apiRequest('/api/tickets', {method:'POST', body:JSON.stringify({
-      notebook:nbSel.value==='otro' ? null : nbSel.value, motivo, descripcion:desc
+      loanId:nbSel.value==='otro' ? null : Number(nbSel.value),
+      notebook:nbSel.value==='otro' ? null : nbSel.selectedOptions[0].dataset.notebook,
+      motivo, descripcion:desc
     })});
     document.getElementById('fallaForm').reset();
     await cargarEstadoAPI();
@@ -1973,10 +2319,16 @@ function renderTicketsPropios(){
   // "Mis tickets" sólo muestra los del usuario logueado (alumno o profesor)
   const tbody = document.getElementById('ticketsTable');
   if(!tbody || !currentUser) return;
-  const propios = tickets.filter(t=>t.ownerDni===currentUser.dni);
+  const query = normalizeSearchText(document.getElementById('myTicketsSearch')?.value);
+  const state = document.getElementById('myTicketsState')?.value || '';
+  const propios = tickets.filter(t=>t.ownerDni===currentUser.dni
+    && (!state || t.estado===state)
+    && normalizeSearchText([t.id, t.notebook, t.motivo, t.motivoCompleto, ticketStateLabel(t.estado)].join(' ')).includes(query));
+  const count = document.getElementById('myTicketsResultsCount');
+  if(count) count.textContent = `${propios.length} resultados`;
   if(propios.length===0){
-    tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state">
-      <div class="glyph">🎫</div><h4>No tenés tickets abiertos</h4><p>Si encontrás un problema con un equipo, reportalo desde acá.</p>
+    tbody.innerHTML = `<tr><td colspan="7"><div class="empty-state">
+      <div class="glyph">🎫</div><h4>${tickets.some(t=>t.ownerDni===currentUser.dni) ? 'No hay tickets que coincidan' : 'Todavía no tenés tickets'}</h4><p>Si encontrás un problema con un equipo, reportalo desde acá.</p><button type="button" class="btn btn-primary" onclick="switchView('falla')">Reportar falla</button>
     </div></td></tr>`;
     return;
   }
@@ -1984,12 +2336,17 @@ function renderTicketsPropios(){
     <tr>
       <td class="mono">${escapeHtml(t.id)}</td>
       <td class="mono">${escapeHtml(t.notebook)}</td>
-      <td>${escapeHtml(t.motivo)}</td>
-      <td><span class="badge ${escapeHtml(ticketBadgeClass[t.estado])}">${escapeHtml(ticketBadgeLabel[t.estado])}</span></td>
-      <td>${escapeHtml(t.fecha)}</td>
+      <td>${t.loanId ? `#${escapeHtml(t.loanId)} · ${escapeHtml(t.loanRetiradaAt ? formatBusinessDateTime(t.loanRetiradaAt, {dateStyle:'short'}) : '')}` : 'Sin préstamo asociado'}</td>
+      <td>${ticketDescriptionMarkup(t)}</td>
+      <td><span class="badge ${escapeHtml(ticketStateClass(t.estado))}">${escapeHtml(ticketStateLabel(t.estado))}</span></td>
+      <td>${escapeHtml(t.fecha || '—')}</td>
       <td><button class="btn btn-sm" onclick="abrirRespuestasTicket(${escapeHtml(JSON.stringify(t.id))})">Ver respuestas</button>
         ${ticketTieneRespuestaAdminSinLeer(t) ? '<span class="badge badge-progreso" aria-label="Respuesta nueva sin leer">Respuesta nueva</span>' : ''}</td>
     </tr>`).join('');
+}
+
+function filterMyTickets(){
+  debounceSearch('my-tickets', renderTicketsPropios);
 }
 
 function ticketReplyReadKey(code){
@@ -2022,14 +2379,22 @@ function marcarRespuestasAdminLeidas(code, replies){
 function renderAdminTickets(){
   const tbody = document.getElementById('adminTicketsTable');
   if(!tbody) return;
-  if(tickets.length===0){
-    tbody.innerHTML = `<tr><td colspan="7"><div class="empty-state">
-      <div class="glyph">🎫</div><h4>No hay fallas reportadas</h4><p>Los reportes de alumnos y profesores van a aparecer acá.</p>
+  const query = normalizeSearchText(document.getElementById('adminTicketsSearch')?.value);
+  const state = document.getElementById('adminTicketsState')?.value || '';
+  const filtered = tickets.filter(ticket=>
+    (!state || ticket.estado===state)
+    && normalizeSearchText([ticket.id, ticket.ownerNombre, ticket.ownerRol, ticket.notebook,
+      ticket.motivo, ticket.motivoCompleto, ticketStateLabel(ticket.estado)].join(' ')).includes(query));
+  const count = document.getElementById('adminTicketsResultsCount');
+  if(count) count.textContent = `${filtered.length} resultados`;
+  if(filtered.length===0){
+    tbody.innerHTML = `<tr><td colspan="8"><div class="empty-state">
+      <div class="glyph">🎫</div><h4>${tickets.length ? 'No hay fallas que coincidan' : 'No hay fallas reportadas'}</h4><p>Los reportes de alumnos y profesores van a aparecer acá.</p>
     </div></td></tr>`;
     updateAdminTicketsBadge();
     return;
   }
-  tbody.innerHTML = tickets.map(t=>{
+  tbody.innerHTML = filtered.map(t=>{
     const nb = notebooks.find(n=>n.id===t.notebook);
     const equipoCol = nb
       ? `<span class="badge ${escapeHtml(badgeClass[nb.estado])}">${escapeHtml(badgeLabel[nb.estado])}</span>`
@@ -2037,9 +2402,10 @@ function renderAdminTickets(){
     return `
     <tr>
       <td class="mono">${escapeHtml(t.id)}</td>
-      <td>${escapeHtml(t.ownerNombre)} <span class="hint">(${escapeHtml(rolLabel[t.ownerRol] || t.ownerRol)})</span></td>
-      <td class="mono">${escapeHtml(t.notebook)}</td>
-      <td>${escapeHtml(t.motivo)}</td>
+      <td>${escapeHtml(t.ownerNombre || '—')} <span class="hint">(${escapeHtml(rolLabel[t.ownerRol] || t.ownerRol || '—')})</span></td>
+      <td class="mono">${escapeHtml(t.notebook || 'Sin equipo')}</td>
+      <td>${t.loanId ? `#${escapeHtml(t.loanId)} · ${escapeHtml(t.loanRetiradaAt ? formatBusinessDateTime(t.loanRetiradaAt, {dateStyle:'short'}) : '')}` : 'Sin préstamo asociado'}</td>
+      <td>${ticketDescriptionMarkup(t)}</td>
       <td>
         ${renderAdminStateSelect(`Cambiar estado del ticket ${escapeHtml(t.id)}`, t.estado, Object.keys(ticketBadgeLabel), 'ticket', t.id)}
       </td>
@@ -2048,6 +2414,10 @@ function renderAdminTickets(){
     </tr>`;
   }).join('');
   updateAdminTicketsBadge();
+}
+
+function filterAdminTickets(){
+  debounceSearch('admin-tickets', renderAdminTickets);
 }
 
 async function abrirRespuestasTicket(code){
@@ -2068,19 +2438,23 @@ async function abrirRespuestasTicket(code){
 }
 
 async function cargarRespuestasTicket(){
-  if(!activeTicketRepliesCode) return;
+  const code = activeTicketRepliesCode;
+  if(!code) return;
   const thread = document.getElementById('ticketRepliesThread');
   thread.textContent = 'Cargando respuestas…';
   try{
-    const data = await apiRequest(`/api/tickets/${encodeURIComponent(activeTicketRepliesCode)}/replies`);
+    const data = await apiRequest(`/api/tickets/${encodeURIComponent(code)}/replies`);
+    if(activeTicketRepliesCode!==code) return;
     thread.innerHTML = data.replies.length
       ? data.replies.map(reply=>`<div class="action-card" style="cursor:default;margin:.5rem 0">
-          <div class="action-info"><h4>${escapeHtml(reply.autor)} · ${escapeHtml(rolLabel[reply.author_role] || reply.author_role)}</h4>
-            <p>${escapeHtml(formatBusinessDateTime(reply.created_at))}</p><p>${escapeHtml(reply.mensaje)}</p></div>
+          <div class="action-info"><h4>${escapeHtml(reply.autor || '—')} · ${escapeHtml(rolLabel[reply.author_role] || reply.author_role || '—')}</h4>
+            <p>${escapeHtml(Number.isFinite(Date.parse(reply.created_at)) ? formatBusinessDateTime(reply.created_at) : '—')}</p><p>${escapeHtml(reply.mensaje || '—')}</p></div>
         </div>`).join('')
       : '<p class="hint">Todavía no hay respuestas.</p>';
-    if(currentUser?.rol!=='admin') marcarRespuestasAdminLeidas(activeTicketRepliesCode, data.replies);
-  }catch(error){ thread.textContent = error.message; }
+    if(currentUser?.rol!=='admin') marcarRespuestasAdminLeidas(code, data.replies);
+  }catch(error){
+    if(activeTicketRepliesCode===code) thread.textContent = error.message;
+  }
 }
 
 function actualizarContadorRespuesta(){
@@ -2093,17 +2467,21 @@ async function enviarRespuestaTicket(event){
   if(currentUser?.rol!=='admin') return;
   const input = document.getElementById('ticketReplyMessage');
   const mensaje = input.value.trim();
+  const code = activeTicketRepliesCode;
+  if(!code) return;
   if(!mensaje || mensaje.length>500){
     showToast('La respuesta debe tener entre 1 y 500 caracteres.', 'warn');
     return;
   }
   try{
-    await apiRequest(`/api/tickets/${encodeURIComponent(activeTicketRepliesCode)}/replies`, {
+    await apiRequest(`/api/tickets/${encodeURIComponent(code)}/replies`, {
       method:'POST', body:JSON.stringify({mensaje})
     });
-    input.value = '';
-    actualizarContadorRespuesta();
-    await cargarRespuestasTicket();
+    if(activeTicketRepliesCode===code){
+      input.value = '';
+      actualizarContadorRespuesta();
+      await cargarRespuestasTicket();
+    }
     showToast('Respuesta enviada.', 'success');
   }catch(error){ showToast(error.message, 'warn'); }
 }
@@ -2112,10 +2490,12 @@ async function refreshOwnTickets(){
   try{
     const data = await apiRequest('/api/tickets');
     tickets = data.tickets.map(ticket=>({
-      id:ticket.id, notebook:ticket.notebook || 'otro', motivo:ticket.motivo, motivoCompleto:ticket.descripcion,
-      estado:ticket.estado, fecha:formatBusinessDateTime(ticket.created_at, {dateStyle:'short'}),
-      latestAdminReplyAt:ticket.latest_admin_reply_at,
-      ownerDni:currentUser.dni, ownerNombre:currentUser.nombre, ownerRol:currentUser.rol
+      id:ticket.id, notebook:ticket.notebook || 'Sin equipo', loanId:ticket.loanId,
+      loanRetiradaAt:ticket.loanRetiradaAt, motivo:ticket.motivo || '—', motivoCompleto:ticket.descripcion || '—',
+      estado:ticket.estado || 'desconocido', fecha:ticketDate(ticket.fecha),
+      latestAdminReplyAt:ticket.latestAdminReplyAt,
+      ownerDni:currentUser.dni, ownerNombre:ticket.ownerNombre || currentUser.nombre || '—',
+      ownerRol:ticket.ownerRol || currentUser.rol || '—'
     }));
     renderTicketsPropios();
     updateTicketsBadge();
@@ -2142,11 +2522,19 @@ function renderTardanzas(){
   const badge = document.getElementById('tardanzasBadge');
   if(!wrap || !tbody) return;
 
-  const todosUsuarios = usuariosConTardanzas;
+  const query = normalizeSearchText(document.getElementById('lateReturnsSearch')?.value);
+  const todosUsuarios = usuariosConTardanzas.filter(user=>normalizeSearchText([
+    user.nombre, user.rol, rolLabel[user.rol], user.dni, user.baneado ? 'bloqueada' : 'activa'
+  ].join(' ')).includes(query));
+  const filteredHistory = historialTardanzas.filter(item=>normalizeSearchText([
+    item.nombre, item.rol, rolLabel[item.rol], item.dni, item.notebookId, item.fecha
+  ].join(' ')).includes(query));
+  const resultsCount = document.getElementById('lateReturnsResultsCount');
+  if(resultsCount) resultsCount.textContent = `${todosUsuarios.length + filteredHistory.length} resultados`;
 
   if(porUsuarioBody){
     if(todosUsuarios.length===0){
-      porUsuarioBody.innerHTML = `<tr><td colspan="5"><div class="empty-state"><p>Todavía no hay alumnos ni profesores registrados.</p></div></td></tr>`;
+      porUsuarioBody.innerHTML = `      <tr><td colspan="5"><div class="empty-state"><p>${usuariosConTardanzas.length ? 'No hay usuarios que coincidan.' : 'Todavía no hay alumnos ni profesores registrados.'}</p></div></td></tr>`;
     } else {
       porUsuarioBody.innerHTML = todosUsuarios.map(u=>`
         <tr>
@@ -2190,10 +2578,10 @@ function renderTardanzas(){
   if(pendientesAviso>0){ badge.style.display='inline-flex'; badge.textContent = pendientesAviso; }
   else{ badge.style.display='none'; }
 
-  if(historialTardanzas.length===0){
+  if(filteredHistory.length===0){
     tbody.innerHTML = '<tr><td colspan="4"><div class="empty-state"><p>Todavía no hay entregas tardías registradas.</p></div></td></tr>';
   } else {
-    tbody.innerHTML = historialTardanzas.map(h=>`
+    tbody.innerHTML = filteredHistory.map(h=>`
       <tr>
         <td>${escapeHtml(h.nombre)}</td>
         <td>${escapeHtml(rolLabel[h.rol] || h.rol)}</td>
@@ -2201,6 +2589,10 @@ function renderTardanzas(){
         <td>${escapeHtml(h.fecha)}</td>
       </tr>`).join('');
   }
+}
+
+function filterLateReturns(){
+  debounceSearch('late-returns', renderTardanzas);
 }
 
 async function cambiarBaneo(dni, baneado, duracion){
@@ -2232,7 +2624,7 @@ function renderPerfil(){
   document.getElementById('preferenciasEmail').checked = preferencias.email;
   document.getElementById('preferenciasRecordatorio').value = preferencias.recordatorio;
   document.getElementById('preferenciasRecordatorioInfo').textContent =
-    'Las preferencias se guardan, pero el envío de notificaciones no está disponible hasta integrar Gmail.';
+    'Las preferencias se guardan, pero los recordatorios automáticos aún no están disponibles.';
 }
 
 async function actualizarPreferencias(){
@@ -2323,11 +2715,19 @@ function initializeTextLimits(){
 
 updateReservationMinima();
 document.getElementById('resFecha').addEventListener('change', updateReservationMinima);
+document.getElementById('resFecha').addEventListener('change', actualizarResumenReserva);
 document.getElementById('resHora').addEventListener('focus', updateReservationMinima);
 document.getElementById('resHora').addEventListener('input', updateReservationMinima);
+['resHora','resHoraDevolucion','resCantidad','loteCantidad','resCarro'].forEach(id=>{
+  document.getElementById(id).addEventListener('input', actualizarResumenReserva);
+  document.getElementById(id).addEventListener('change', actualizarResumenReserva);
+});
 document.getElementById('reservaForm').addEventListener('reset', ()=>{
   document.getElementById('resCursoPreview').textContent = 'Se enviará como A°D° (por ejemplo, 2°14°).';
-  setTimeout(updateReservationMinima);
+  setTimeout(()=>{
+    updateReservationMinima();
+    actualizarResumenReserva();
+  });
 });
 initializeTextLimits();
 document.getElementById('ubicacionNombre').addEventListener('input', actualizarContadorUbicacion);
@@ -2339,8 +2739,10 @@ actualizarContadorUbicacion();
     document.getElementById('resCursoPreview').textContent = anio && division
       ? `Curso: ${anio}°${division}°`
       : 'Se enviará como A°D° (por ejemplo, 2°14°).';
+    actualizarResumenReserva();
   });
 });
+actualizarResumenReserva();
 
 (function initTheme(){
   let saved = null;

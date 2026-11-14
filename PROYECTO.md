@@ -30,7 +30,7 @@ El seed contiene cuentas de ejemplo para instalaciones nuevas. No hay registro p
 | Reservas | Crea reservas individuales o solicitudes de lote filtrando equipos por ubicación del carro, muestra las propias y permite cancelar las que aún son cancelables. |
 | Reportar falla / Mis tickets | Crea reportes asociados a notebooks del historial propio o a “Otra / no sé”; muestra el seguimiento y el hilo de respuestas. |
 | Perfil | Muestra los datos de cuenta y permite configurar notificaciones por correo y minutos de recordatorio (0 desactiva el aviso). |
-| Administración: Usuarios | Crea cuentas de alumno y profesor, consulta las listas reales, permite cambiar roles y banear cuentas. |
+| Administración: Usuarios | Crea cuentas con correo institucional o `@gmail.com`, consulta las listas reales, permite cambiar roles y banear cuentas. |
 | Administración: Inventario | Lista y filtra notebooks; administra carros y ubicaciones editables, renumera carros y da de alta o mueve notebooks. |
 | Administración: Entregas y devoluciones | Busca usuarios y préstamos activos, registra devoluciones individuales o de un lote y actualiza la lista periódicamente. |
 | Administración: Préstamos | Lista reservas individuales y por lote, permite aprobar lotes y registrar entrega; notebooks disponibles pueden asignarse al entregar. |
@@ -48,7 +48,7 @@ El seed contiene cuentas de ejemplo para instalaciones nuevas. No hay registro p
 4. El administrador crea nuevas cuentas; el backend valida nombre, apellido, DNI de 7 a 10 dígitos, correo, rol y contraseña, y genera preferencias iniciales.
 5. El administrador puede cambiar el rol de otra cuenta, pero no el propio; no puede dejar el sistema sin administradores y debe confirmar su contraseña para ascender una cuenta. El rol vigente se consulta desde la base en cada solicitud.
 
-No se valida que el dominio del correo sea institucional. La indicación de Gmail/correo institucional de la interfaz no constituye una regla del servidor.
+Las altas y cambios de correo de alumnos/profesores aceptan únicamente `@alu.bue.edu.ar`, `@bue.edu.ar` y `@gmail.com`. El rol institucional se valida; con `@gmail.com` se elige alumno o profesor. No se migran ni bloquean cuentas existentes.
 
 ### Reservas
 
@@ -169,7 +169,7 @@ Salvo health y login, las rutas requieren `Authorization: Bearer <token>`. Los e
 | POST | `/api/loans/:id/return` | Autenticado; solo propietario | — | Compatibilidad con clientes anteriores; no se usa en la interfaz. |
 | GET | `/api/admin/loans?q=texto&estado=activo` | Admin | — | Préstamos coincidentes, hasta 50; incluye si está vencido. |
 | POST | `/api/admin/loans/:id/return` | Admin | — | Registra una devolución directa. |
-| POST | `/api/admin/loans/return` | Admin | `{loanIds}` | Registra en una transacción la devolución de varias notebooks de una persona. |
+| POST | `/api/admin/loans/return` | Admin | `{loanIds}` | Registra en una transacción la devolución de varias notebooks; si alguna falla, se revierte el lote completo. |
 | GET | `/api/admin/returns` | Admin | — | Devoluciones pendientes en `{returns}`. |
 | POST | `/api/admin/returns/:id/confirm` | Admin | — | `{message}`. |
 | GET | `/api/tickets` | Autenticado | — | Tickets propios en `{tickets}`. |
@@ -270,8 +270,8 @@ Los manifiestos y documentos describen el destino previsto; el estado operativo 
 
 1. **Sesiones:** no existe revocación individual del token antes de su vencimiento; la sesión se conserva en el navegador según la preferencia del usuario.
 2. **Acciones no disponibles:** los cambios manuales de inventario no incluyen cambios arbitrarios de estado; se administran ubicación y carro.
-3. **Notificaciones:** preferencias de correo/recordatorio se guardan, pero no existe envío ni ejecución de recordatorios.
-4. **Validación/interfaz:** el correo se valida por formato, no por dominio institucional.
+3. **Notificaciones:** se envían avisos existentes por correo; el envío automático de recordatorios todavía no está implementado.
+4. **Validación/interfaz:** los dominios permitidos para altas/cambios se validan en el backend; no se migran cuentas existentes.
 5. **Pruebas:** las pruebas API no cubren flujos contra PostgreSQL real; las pruebas de backup usan herramientas simuladas.
 6. **Documentación:** no existe `CONTEXT.md` en raíz; el estado operativo real de servicios externos no se puede determinar desde el repositorio.
 

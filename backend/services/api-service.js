@@ -11,11 +11,14 @@ const {
   requiredText,
   personName,
   accountEmail,
+  roleFromEmail,
+  validateEmailRole,
   accountPassword,
   courseDivision,
   dniIdentifier
 } = require('./validation');
 const { sendMail } = require('./mail-service');
+const { mapTicketRow } = require('./ticket-mapper');
 
 async function notifyByEmail(userId, subject, html) {
   try {
@@ -286,11 +289,28 @@ const actions = {
     requireAdmin(user, 'Solo admin puede consultar usuarios');
     const role = query?.get('rol');
     if (role && !['alumno', 'profesor', 'admin'].includes(role)) throw new AppError('Rol de usuario inválido', 400);
+    const emailType = query?.get('tipoCorreo');
+    if (emailType && !['profesor', 'alumno', 'gmail', 'otro'].includes(emailType)) {
+      throw new AppError('Tipo de correo inválido', 400);
+    }
     const result = await db.query(`SELECT dni, nombre, email, rol,
       (baneado AND (baneado_hasta IS NULL OR baneado_hasta > now())) AS baneado,
-      baneado_hasta
-      FROM users WHERE ($1::user_role IS NULL OR rol = $1::user_role)
-      ORDER BY nombre`, [role || null]);
+      baneado_hasta,
+      CASE split_part(lower(email::text), '@', 2)
+        WHEN 'bue.edu.ar' THEN 'profesor'
+        WHEN 'alu.bue.edu.ar' THEN 'alumno'
+        WHEN 'gmail.com' THEN 'gmail'
+        ELSE 'otro'
+      END AS tipo_correo
+      FROM users
+      WHERE ($1::user_role IS NULL OR rol = $1::user_role)
+        AND ($2::text IS NULL OR CASE split_part(lower(email::text), '@', 2)
+          WHEN 'bue.edu.ar' THEN 'profesor'
+          WHEN 'alu.bue.edu.ar' THEN 'alumno'
+          WHEN 'gmail.com' THEN 'gmail'
+          ELSE 'otro'
+        END = $2)
+      ORDER BY nombre`, [role || null, emailType || null]);
     return { users: result.rows };
   },
   async createUser(body, user) {
@@ -304,12 +324,12 @@ const actions = {
     if (typeof body.passwordConfirmation !== 'string' || password !== body.passwordConfirmation) {
       throw new AppError('Las contraseñas no coinciden', 400);
     }
-    if (!['alumno', 'profesor'].includes(body.rol)) throw new AppError('Rol inválido', 400);
+    const role = validateEmailRole(email, body.rol || roleFromEmail(email));
     try {
       return await db.transaction(async (client) => {
         const inserted = await client.query(`INSERT INTO users (dni, nombre, email, rol, password_hash, baneado)
           VALUES ($1, $2, $3, $4, crypt($5, gen_salt('bf')), FALSE)
-          RETURNING id, dni, nombre, email, rol, baneado`, [dni, nombreCompleto, email, body.rol, password]);
+          RETURNING id, dni, nombre, email, rol, baneado`, [dni, nombreCompleto, email, role, password]);
         await client.query(`INSERT INTO user_preferences (user_id, email_notifications, return_reminder_minutes)
           VALUES ($1, TRUE, 30)`, [inserted.rows[0].id]);
         return { user: inserted.rows[0] };
@@ -720,33 +740,95 @@ const actions = {
       (l.estado IN ('activo', 'devolucion_pendiente') AND l.vence_at <= now()) AS vencido FROM loans l
       JOIN notebooks n ON n.id = l.notebook_id LEFT JOIN returns r ON r.loan_id = l.id
       LEFT JOIN reservations res ON res.id = l.reservation_id
-      WHERE l.user_id = $1 ORDER BY l.retirada_at DESC`, [user.id]);
+      WHERE l.user_id = $1 ORDER BY l.retirada_at, l.id`, [user.id]);
     return { loans: result.rows };
   },
   async adminLoans(_body, user, _params, query) {
     requireAdmin(user, 'Solo admin puede consultar préstamos');
     const q = searchText(query?.get('q'));
     const state = query?.get('estado') || 'pendientes';
-    if (!['pendientes', 'activo', 'devolucion_pendiente', 'devuelto'].includes(state)) {
+    if (!['todos', 'pendientes', 'activo', 'devolucion_pendiente', 'devuelto'].includes(state)) {
       throw new AppError('Estado de préstamo inválido', 400);
     }
     const values = [];
-    let where = state === 'pendientes'
-      ? "l.estado IN ('activo', 'devolucion_pendiente')"
-      : 'l.estado = $1::loan_status';
-    if (state !== 'pendientes') values.push(state);
+    const clauses = [];
+    if (state === 'pendientes') clauses.push("l.estado IN ('activo', 'devolucion_pendiente')");
+    else if (state !== 'todos') {
+      values.push(state);
+      clauses.push(`l.estado = $${values.length}::loan_status`);
+    }
+    const overdue = query?.get('vencidas');
+    if (overdue && !['si', 'no'].includes(overdue)) {
+      throw new AppError('El filtro de vencimiento no es válido', 400);
+    }
+    if (overdue === 'si') {
+      clauses.push("l.estado IN ('activo', 'devolucion_pendiente') AND l.vence_at <= now()");
+    } else if (overdue === 'no') {
+      clauses.push("NOT (l.estado IN ('activo', 'devolucion_pendiente') AND l.vence_at <= now())");
+    }
+    const dateFrom = query?.get('desde') || '';
+    const dateTo = query?.get('hasta') || '';
+    for (const [label, value] of [['desde', dateFrom], ['hasta', dateTo]]) {
+      if (value && !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+        throw new AppError(`La fecha ${label} debe tener formato AAAA-MM-DD`, 400);
+      }
+      if (value && (Number.isNaN(Date.parse(`${value}T00:00:00Z`))
+        || new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) !== value)) {
+        throw new AppError(`La fecha ${label} no es válida`, 400);
+      }
+    }
+    if (dateFrom && dateTo && dateFrom > dateTo) {
+      throw new AppError('La fecha inicial no puede ser posterior a la fecha final', 400);
+    }
+    if (dateFrom) {
+      values.push(dateFrom);
+      clauses.push(`l.retirada_at >= ($${values.length}::date::timestamp AT TIME ZONE 'America/Argentina/Buenos_Aires')`);
+    }
+    if (dateTo) {
+      values.push(dateTo);
+      clauses.push(`l.retirada_at < (($${values.length}::date + 1)::timestamp AT TIME ZONE 'America/Argentina/Buenos_Aires')`);
+    }
     if (q) {
       values.push(searchPattern(q));
-      where += ` AND ${matchesSearchSql(`$${values.length}`, true)}`;
+      const pattern = `$${values.length}`;
+      clauses.push(`(${matchesSearchSql(pattern, true)} OR translate(lower(coalesce(res.motivo, '')), 'áéíóúüñàèìòùäëïöüç', 'aeiouunaeiouaeiouc') LIKE ${pattern} ESCAPE '\\')`);
     }
-    const limit = q ? 'LIMIT 50' : '';
+    for (const [parameter, columns] of [
+      ['motivo', ["res.motivo"]],
+      ['usuario', ['u.nombre', 'u.email::text', 'u.dni']],
+      ['equipo', ['n.codigo']]
+    ]) {
+      const value = searchText(query?.get(parameter));
+      if (!value) continue;
+      values.push(searchPattern(value));
+      const pattern = `$${values.length}`;
+      clauses.push(`(${columns.map((column) => `translate(lower(coalesce(${column}, '')), 'áéíóúüñàèìòùäëïöüç', 'aeiouunaeiouaeiouc') LIKE ${pattern} ESCAPE '\\'`).join(' OR ')})`);
+    }
+    const carro = query?.get('carro');
+    if (carro) {
+      if (!/^\d{1,3}$/.test(carro) || Number(carro) < 1 || Number(carro) > 999) {
+        throw new AppError('El carro no es válido', 400);
+      }
+      values.push(Number(carro));
+      clauses.push(`c.numero = $${values.length}`);
+    }
+    const ubicacion = query?.get('ubicacion');
+    if (ubicacion) {
+      if (!/^[a-z0-9-]{1,32}$/.test(ubicacion)) throw new AppError('La ubicación no es válida', 400);
+      values.push(ubicacion);
+      clauses.push(`ub.slug = $${values.length}`);
+    }
+    const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
     const result = await db.query(`SELECT l.id, u.id AS user_id, u.dni, u.nombre AS usuario,
       u.email, n.codigo AS notebook, l.curso, l.retirada_at, l.vence_at, l.devuelta_at,
-      l.estado, r.id AS return_id, r.solicitado_at, r.hora_prevista,
+      c.numero AS carro, ub.nombre AS ubicacion, l.estado, r.id AS return_id, r.solicitado_at, r.hora_prevista, res.motivo,
       (l.estado IN ('activo', 'devolucion_pendiente') AND l.vence_at <= now()) AS vencido
       FROM loans l JOIN users u ON u.id = l.user_id JOIN notebooks n ON n.id = l.notebook_id
+      LEFT JOIN carros c ON c.id = n.carro_id
+      LEFT JOIN ubicaciones ub ON ub.id = c.ubicacion_id
       LEFT JOIN returns r ON r.loan_id = l.id
-      WHERE ${where} ORDER BY l.vence_at, u.nombre ${limit}`, values);
+      LEFT JOIN reservations res ON res.id = l.reservation_id
+      ${where} ORDER BY l.retirada_at, l.id`, values);
     return { loans: result.rows };
   },
   async adminReturnLoan(_body, user, { id }) {
@@ -758,18 +840,15 @@ const actions = {
   async adminReturnLoans(body, user) {
     requireAdmin(user, 'Solo admin puede registrar devoluciones');
     const loanIds = body.loanIds;
-    if (!Array.isArray(loanIds) || loanIds.length < 2 || loanIds.length > 50
+    if (!Array.isArray(loanIds) || loanIds.length < 1 || loanIds.length > 50
       || loanIds.some((id) => !Number.isSafeInteger(Number(id)) || Number(id) < 1)
       || new Set(loanIds.map(Number)).size !== loanIds.length) {
-      throw new AppError('Seleccioná entre 2 y 50 préstamos válidos', 400);
+      throw new AppError('Seleccioná entre 1 y 50 préstamos válidos', 400);
     }
     const result = await db.transaction(async (client) => {
       const returns = [];
       for (const id of loanIds) {
         returns.push(await completeLoanReturn(client, Number(id), user.id));
-      }
-      if (new Set(returns.map((item) => String(item.userId))).size !== 1) {
-        throw new AppError('Los préstamos deben pertenecer a la misma persona', 400);
       }
       return returns;
     });
@@ -852,48 +931,76 @@ const actions = {
     return { message: 'Devolución confirmada' };
   },
   async ticketNotebooks(_body, user) {
-    const result = await db.query(`SELECT n.codigo, MAX(l.retirada_at) AS ultimo_uso
+    const result = await db.query(`SELECT l.id AS loan_id, n.codigo, l.retirada_at, l.estado
       FROM loans l JOIN notebooks n ON n.id = l.notebook_id
-      WHERE l.user_id = $1 GROUP BY n.id, n.codigo
-      ORDER BY MAX(l.retirada_at) DESC, n.codigo`, [user.id]);
+      WHERE l.user_id = $1 ORDER BY l.retirada_at DESC, l.id DESC`, [user.id]);
     return { notebooks: result.rows };
   },
   async tickets(_body, user) {
-    const result = await db.query(`SELECT t.codigo AS id, n.codigo AS notebook, t.motivo, t.descripcion, t.estado, t.created_at,
+    const result = await db.query(`SELECT t.codigo AS id, n.codigo AS notebook, t.loan_id, l.retirada_at AS loan_retirada_at,
+      t.motivo, t.descripcion, t.estado, t.created_at,
       (SELECT MAX(r.created_at) FROM ticket_replies r JOIN users author ON author.id = r.author_id
         WHERE r.ticket_id = t.id AND author.rol = 'admin') AS latest_admin_reply_at
-      FROM tickets t LEFT JOIN notebooks n ON n.id = t.notebook_id WHERE t.owner_id = $1 ORDER BY t.created_at DESC`, [user.id]);
-    return { tickets: result.rows };
+      FROM tickets t LEFT JOIN notebooks n ON n.id = t.notebook_id
+      LEFT JOIN loans l ON l.id = t.loan_id
+      WHERE t.owner_id = $1 ORDER BY t.created_at DESC`, [user.id]);
+    return { tickets: result.rows.map(mapTicketRow) };
   },
   async adminTickets(_body, user) {
     requireAdmin(user, 'Solo admin puede consultar tickets');
-    const result = await db.query(`SELECT t.codigo AS id, n.codigo AS notebook, t.motivo, t.descripcion, t.estado, t.created_at,
+    const result = await db.query(`SELECT t.codigo AS id, n.codigo AS notebook, t.loan_id, l.retirada_at AS loan_retirada_at,
+      t.motivo, t.descripcion, t.estado, t.created_at,
       u.nombre AS owner_nombre, u.rol AS owner_rol FROM tickets t LEFT JOIN notebooks n ON n.id = t.notebook_id
-      JOIN users u ON u.id = t.owner_id ORDER BY t.created_at DESC`);
-    return { tickets: result.rows };
+      JOIN users u ON u.id = t.owner_id LEFT JOIN loans l ON l.id = t.loan_id
+      ORDER BY t.created_at DESC`);
+    return { tickets: result.rows.map(mapTicketRow) };
   },
   async createTicket(body, user) {
     const motivo = requiredText(body.motivo, 'El motivo');
-    const descripcion = requiredText(body.descripcion, 'La descripción');
+    const descripcion = requiredText(body.descripcion, 'La descripción', 4000);
     let notebook = null;
     if (body.notebook !== undefined && body.notebook !== null && body.notebook !== '' && body.notebook !== 'otro') {
       notebook = requiredText(body.notebook, 'La notebook');
     }
+    const loanId = body.loanId === undefined || body.loanId === null || body.loanId === ''
+      ? null
+      : Number(body.loanId);
+    if (loanId !== null && (!Number.isSafeInteger(loanId) || loanId < 1)) {
+      throw new AppError('El préstamo seleccionado no es válido', 400);
+    }
     return db.transaction(async (client) => {
       let notebookId = null;
-      if (notebook) {
+      let relatedLoanId = loanId;
+      if (relatedLoanId !== null) {
+        const loan = await client.query(`SELECT l.id, l.notebook_id, n.codigo
+          FROM loans l JOIN notebooks n ON n.id = l.notebook_id
+          WHERE l.id = $1 AND ($2::bigint IS NULL OR l.user_id = $2)
+          FOR SHARE OF l`, [relatedLoanId, user.rol === 'admin' ? null : user.id]);
+        if (!loan.rowCount) throw new AppError('El préstamo seleccionado no pertenece a tu historial', 400);
+        if (notebook && notebook !== loan.rows[0].codigo) {
+          throw new AppError('La notebook no corresponde al préstamo seleccionado', 400);
+        }
+        notebookId = loan.rows[0].notebook_id;
+        notebook = loan.rows[0].codigo;
+      } else if (notebook) {
         const existing = await client.query(`SELECT n.id,
-          EXISTS (SELECT 1 FROM loans l WHERE l.notebook_id = n.id AND l.user_id = $2) AS in_history
-          FROM notebooks n WHERE n.codigo = $1 FOR UPDATE OF n`, [notebook, user.id]);
+          (SELECT l.id FROM loans l WHERE l.notebook_id = n.id
+            AND ($2::bigint IS NULL OR l.user_id = $2)
+            ORDER BY l.retirada_at DESC, l.id DESC LIMIT 1) AS loan_id
+          FROM notebooks n WHERE n.codigo = $1 FOR UPDATE OF n`,
+        [notebook, user.rol === 'admin' ? null : user.id]);
         if (!existing.rowCount) throw new AppError('La notebook seleccionada no existe', 400);
-        if (user.rol !== 'admin' && !existing.rows[0].in_history) {
+        if (!existing.rows[0].loan_id) {
           throw new AppError('Solo podés asociar notebooks de tu historial de préstamos', 400);
         }
         notebookId = existing.rows[0].id;
+        relatedLoanId = existing.rows[0].loan_id;
       }
-      const result = await client.query(`INSERT INTO tickets (codigo, notebook_id, owner_id, motivo, descripcion)
-        VALUES ($1, $2, $3, $4, $5) RETURNING codigo AS id, estado`,
-      [`TCK-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`, notebookId, user.id, motivo, descripcion]);
+      const result = await client.query(`INSERT INTO tickets
+        (codigo, loan_id, notebook_id, owner_id, motivo, descripcion)
+        VALUES ($1, $2, $3, $4, $5, $6) RETURNING codigo AS id, estado, loan_id, notebook_id`,
+      [`TCK-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`, relatedLoanId,
+        notebookId, user.id, motivo, descripcion]);
       if (notebookId) {
         await client.query(`UPDATE notebooks SET estado = CASE WHEN estado = 'disponible' THEN 'mantenimiento' ELSE estado END,
           updated_at = now() WHERE id = $1`, [notebookId]);
@@ -970,11 +1077,11 @@ const actions = {
       || provided.length !== expected.length) {
       throw new AppError('No autorizado', 401);
     }
-    throw new AppError('El envío de recordatorios no está disponible hasta integrar Gmail', 503);
+    throw new AppError('El envío automático de recordatorios no está disponible actualmente', 503);
   },
   async runAdminReminders(_body, user) {
     requireAdmin(user, 'Solo admin puede enviar recordatorios');
-    throw new AppError('El envío de recordatorios no está disponible hasta integrar Gmail', 503);
+    throw new AppError('El envío automático de recordatorios no está disponible actualmente', 503);
   },
   async lateReturns(_body, user) {
     requireAdmin(user, 'Solo admin puede consultar demoras');
@@ -989,6 +1096,22 @@ const actions = {
   },
   async updateUser(body, user, { dni }) {
     requireAdmin(user, 'Solo admin puede suspender usuarios');
+    if (body.email !== undefined) {
+      const email = accountEmail(body.email);
+      try {
+        return await db.transaction(async (client) => {
+          const current = await client.query('SELECT id, rol FROM users WHERE dni = $1 FOR UPDATE', [dni]);
+          if (!current.rowCount) throw new AppError('Usuario no encontrado o no modificable', 404);
+          const nextRole = current.rows[0].rol === 'admin' ? 'admin' : roleFromEmail(email);
+          const updated = await client.query(`UPDATE users SET email = $1, rol = $2
+            WHERE id = $3 RETURNING dni, nombre, email, rol`, [email, nextRole, current.rows[0].id]);
+          return { user: updated.rows[0] };
+        });
+      } catch (error) {
+        if (error.code === '23505') throw new AppError('El email ya está registrado', 409);
+        throw error;
+      }
+    }
     if (typeof body.baneado !== 'boolean') throw new AppError('El estado de baneo es inválido', 400);
     let duration = null;
     if (body.baneado && body.duracionDias !== undefined && body.duracionDias !== null) {
@@ -1013,6 +1136,7 @@ const actions = {
       if (!current.rowCount) throw new AppError('Usuario no encontrado', 404);
       const target = current.rows[0];
       if (String(target.id) === String(user.id)) throw new AppError('No podés cambiar tu propio rol', 403);
+      if (body.rol !== 'admin') validateEmailRole(target.email, body.rol);
       if (target.rol === body.rol) return { user: target };
       if (body.rol === 'admin' && target.rol !== 'admin') {
         if (typeof body.password !== 'string' || !body.password) {

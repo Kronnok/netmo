@@ -22,8 +22,6 @@ services:
         generateValue: true
       - key: MAIL_PROVIDER
         sync: false
-      - key: MAIL_API_KEY
-        sync: false
       - key: MAIL_GAS_URL
         sync: false
       - key: MAIL_GAS_SECRET

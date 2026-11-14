@@ -69,7 +69,7 @@ const NULLABLE_FIELDS = new Set([
   'loans.reservation_id', 'loans.curso', 'loans.devuelta_at',
   'loans.reminder_sent_at',
   'returns.hora_prevista', 'returns.confirmado_at', 'returns.confirmado_por',
-  'tickets.notebook_id', 'tickets.resolved_at', 'tickets.resolved_by',
+  'tickets.loan_id', 'tickets.notebook_id', 'tickets.resolved_at', 'tickets.resolved_by',
   'audit_log.user_id'
 ]);
 
@@ -249,6 +249,7 @@ function validateRows(backup, availableTables, columnsByTable) {
     ['loans', 'reservation_id', 'reservations', true],
     ['returns', 'loan_id', 'loans', false],
     ['returns', 'confirmado_por', 'users', true],
+    ['tickets', 'loan_id', 'loans', true],
     ['tickets', 'notebook_id', 'notebooks', true],
     ['tickets', 'owner_id', 'users', false],
     ['tickets', 'resolved_by', 'users', true],

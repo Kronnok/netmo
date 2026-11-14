@@ -25,10 +25,15 @@ const {
 const {
   accountEmail,
   accountPassword,
+  ALLOWED_EMAIL_DOMAINS,
   courseDivision,
   dniIdentifier,
+  emailType,
+  loginEmail,
   personName,
-  requiredText
+  requiredText,
+  roleFromEmail,
+  validateEmailRole
 } = require('../services/validation');
 
 after(() => db.pool.end());
@@ -58,6 +63,45 @@ test('las altas validan DNI numérico de 7 a 10 dígitos sin alterar ceros inici
     );
   }
   assert.throws(() => dniIdentifier('123456'), /DNI debe contener de 7 a 10 dígitos numéricos/);
+});
+
+test('clasifica dominios permitidos exactamente y deriva roles', () => {
+  assert.deepEqual(ALLOWED_EMAIL_DOMAINS, ['bue.edu.ar', 'alu.bue.edu.ar', 'gmail.com']);
+  assert.equal(emailType('profesor@bue.edu.ar'), 'profesor');
+  assert.equal(emailType('alumno@alu.bue.edu.ar'), 'alumno');
+  assert.equal(emailType('persona@gmail.com'), 'gmail');
+  assert.equal(emailType('persona@otro.edu.ar'), 'otro');
+  assert.equal(roleFromEmail('PERSONA@BUE.EDU.AR'), 'profesor');
+  assert.equal(roleFromEmail('alumno@alu.bue.edu.ar'), 'alumno');
+  assert.equal(roleFromEmail('persona@gmail.com'), 'profesor');
+  assert.equal(validateEmailRole('persona@gmail.com', 'alumno'), 'alumno');
+  assert.equal(validateEmailRole('persona@bue.edu.ar', 'profesor'), 'profesor');
+  for (const invalid of [
+    'x@evilbue.edu.ar', 'x@a.bue.edu.ar', 'x@gmail.com.ar',
+    'x@bue.edu.ar.com', 'x@otro.edu.ar'
+  ]) {
+    assert.throws(() => roleFromEmail(invalid), /Usá un correo @bue.edu.ar, @alu.bue.edu.ar o @gmail.com/);
+  }
+  assert.throws(() => validateEmailRole('alumno@alu.bue.edu.ar', 'profesor'), /solo puede ser alumno/);
+  assert.throws(() => validateEmailRole('persona@bue.edu.ar', 'alumno'), /solo puede ser profesor/);
+  assert.equal(accountEmail('PERSONA@GMAIL.COM'), 'persona@gmail.com');
+  assert.equal(loginEmail('PERSONA@GMAIL.COM'), 'persona@gmail.com');
+  assert.equal(accountEmail('legacy@otro.edu.ar'), 'legacy@otro.edu.ar');
+});
+
+test('las cuentas existentes con otros dominios siguen pudiendo iniciar sesión y recuperar clave', async () => {
+  const originalTransaction = db.transaction;
+  const request = { headers: {}, socket: { remoteAddress: '192.0.2.23' } };
+  db.transaction = async (callback) => callback({ query: async (_sql, params) => {
+    assert.equal(params[0], 'legacy@example.test');
+    return { rowCount: 0, rows: [] };
+  } });
+  try {
+    const result = await passwordResetService.requestForgot({ email: 'legacy@example.test' }, request);
+    assert.equal(result.message, 'Si el correo está registrado, recibirás instrucciones para continuar.');
+  } finally {
+    db.transaction = originalTransaction;
+  }
 });
 
 test('refresh renueva un token válido y consulta el rol actual del usuario', async () => {
@@ -228,8 +272,8 @@ test('el alta y el login preservan la clave, y solo los fallos cuentan para el l
     id: '909',
     dni: '9900991',
     nombre: 'Usuario Prueba',
-    email: 'login-regression@example.test',
-    rol: 'alumno',
+    email: 'login-regression@gmail.com',
+    rol: 'profesor',
     baneado: false
   };
   let savedPassword;
@@ -263,14 +307,14 @@ test('el alta y el login preservan la clave, y solo los fallos cuentan para el l
       apellido: 'Prueba',
       email: createdUser.email,
       dni: createdUser.dni,
-      rol: 'alumno',
+      rol: 'profesor',
       password,
       passwordConfirmation: password
     }, { id: '1', rol: 'admin' });
     assert.equal(savedPassword, password);
 
     const accepted = await authService.login(
-      { email: 'LOGIN-REGRESSION@EXAMPLE.TEST', password },
+      { email: 'LOGIN-REGRESSION@GMAIL.COM', password },
       request
     );
     assert.equal(accepted.user.id, createdUser.id);
@@ -453,59 +497,128 @@ test('las altas administrativas validan cuenta, almacenan hashes y crean prefere
           error.code = '23505';
           throw error;
         }
-        return { rows: [{ id: '5', dni: '1234567', nombre: 'Ana Pérez', email: 'user@example.test', rol: 'alumno' }] };
+        return { rows: [{ id: '5', dni: params[0], nombre: 'Ana Pérez', email: params[2], rol: params[3] }] };
       }
       return { rowCount: 1 };
     }
   });
   try {
     await assert.rejects(
-      apiService.createUser({ nombre: 'A ', apellido: 'Pérez', email: 'short@example.test', dni: '1234567', rol: 'alumno', password: 'short' }, { id: 1, rol: 'admin' }),
+      apiService.createUser({ nombre: 'A ', apellido: 'Pérez', email: 'short@example.test', dni: '1234567', rol: 'profesor', password: 'short' }, { id: 1, rol: 'admin' }),
       (error) => error.status === 400
     );
     await assert.rejects(
-      apiService.createUser({ nombre: 'Ana', apellido: 'Pérez', email: 'ana@example.test', dni: '123456', rol: 'alumno', password: 'long-enough' }, { id: 1, rol: 'admin' }),
+      apiService.createUser({ nombre: 'Ana', apellido: 'Pérez', email: 'ana@example.test', dni: '123456', rol: 'profesor', password: 'long-enough' }, { id: 1, rol: 'admin' }),
       (error) => error.status === 400 && /DNI.*7 a 10 dígitos/.test(error.message)
     );
     const result = await apiService.createUser({
-      nombre: 'Ana', apellido: 'Pérez', email: 'USER@example.test', dni: '1234567', rol: 'alumno', password: 'long-enough', passwordConfirmation: 'long-enough'
+      nombre: 'Ana', apellido: 'Pérez', email: 'USER@GMAIL.COM', dni: '1234567', password: 'long-enough', passwordConfirmation: 'long-enough'
     }, { id: 1, rol: 'admin' });
-    assert.equal(result.user.email, 'user@example.test');
-    assert.equal(result.user.rol, 'alumno');
+    assert.equal(result.user.email, 'user@gmail.com');
+    assert.equal(result.user.rol, 'profesor');
     assert.equal('password' in result.user, false);
     assert.equal('passwordConfirmation' in result.user, false);
     assert.equal(calls.length, 2);
     assert.match(calls[0].sql, /crypt\(\$5, gen_salt\('bf'\)\)/);
-    assert.deepEqual(calls[0].params.slice(0, 4), ['1234567', 'Ana Pérez', 'user@example.test', 'alumno']);
+    assert.deepEqual(calls[0].params.slice(0, 4), ['1234567', 'Ana Pérez', 'user@gmail.com', 'profesor']);
     assert.match(calls[1].sql, /INSERT INTO user_preferences/);
     assert.deepEqual(calls[1].params, ['5']);
+    const student = await apiService.createUser({
+      nombre: 'Ana', apellido: 'Pérez', email: 'student@alu.bue.edu.ar', dni: '1234568',
+      rol: 'alumno', password: 'long-enough', passwordConfirmation: 'long-enough'
+    }, { id: 1, rol: 'admin' });
+    assert.equal(student.user.rol, 'alumno');
+    const callsBeforeMismatchedRole = calls.length;
+    await assert.rejects(
+      apiService.createUser({
+        nombre: 'Ana', apellido: 'Pérez', email: 'student@alu.bue.edu.ar', dni: '1234569',
+        rol: 'profesor', password: 'long-enough', passwordConfirmation: 'long-enough'
+      }, { id: 1, rol: 'admin' }),
+      (error) => error.status === 400 && /solo puede ser alumno/.test(error.message)
+    );
+    assert.equal(calls.length, callsBeforeMismatchedRole);
     const callsBeforeMismatchedPassword = calls.length;
     await assert.rejects(
-      apiService.createUser({ nombre: 'Ana', apellido: 'Pérez', email: 'different@example.test', dni: '1234568', rol: 'alumno', password: 'long-enough', passwordConfirmation: 'not-the-same' }, { id: 1, rol: 'admin' }),
+      apiService.createUser({ nombre: 'Ana', apellido: 'Pérez', email: 'different@gmail.com', dni: '1234569', rol: 'profesor', password: 'long-enough', passwordConfirmation: 'not-the-same' }, { id: 1, rol: 'admin' }),
       (error) => error.status === 400 && /Las contraseñas no coinciden/.test(error.message)
     );
     await assert.rejects(
-      apiService.createUser({ nombre: 'Ana', apellido: 'Pérez', email: 'missing@example.test', dni: '1234569', rol: 'alumno', password: 'long-enough' }, { id: 1, rol: 'admin' }),
+      apiService.createUser({ nombre: 'Ana', apellido: 'Pérez', email: 'missing@bue.edu.ar', dni: '1234570', rol: 'profesor', password: 'long-enough' }, { id: 1, rol: 'admin' }),
       (error) => error.status === 400 && /Las contraseñas no coinciden/.test(error.message)
     );
     assert.equal(calls.length, callsBeforeMismatchedPassword);
     await assert.rejects(
-      apiService.createUser({ nombre: 'Ana', apellido: 'Pérez', email: 'bad email@example.test', dni: '1234567', rol: 'alumno', password: 'long-enough' }, { id: 1, rol: 'admin' }),
+      apiService.createUser({ nombre: 'Ana', apellido: 'Pérez', email: 'bad email@example.test', dni: '1234567', rol: 'profesor', password: 'long-enough' }, { id: 1, rol: 'admin' }),
       (error) => error.status === 400
     );
     await assert.rejects(
-      apiService.createUser({ nombre: 'Ana', apellido: 'Pérez', email: 'ana@bad@domain.test', dni: '1234567', rol: 'alumno', password: 'long-enough' }, { id: 1, rol: 'admin' }),
+      apiService.createUser({ nombre: 'Ana', apellido: 'Pérez', email: 'ana@bad@domain.test', dni: '1234567', rol: 'profesor', password: 'long-enough' }, { id: 1, rol: 'admin' }),
       (error) => error.status === 400
     );
     await assert.rejects(
-      apiService.createUser({ nombre: 'Ana', apellido: 'Pérez', email: 'ok@example.test', dni: '1234567', rol: 'alumno', password: 'long pass' }, { id: 1, rol: 'admin' }),
+      apiService.createUser({ nombre: 'Ana', apellido: 'Pérez', email: 'ok@example.test', dni: '1234567', rol: 'profesor', password: 'long pass' }, { id: 1, rol: 'admin' }),
       (error) => error.status === 400
     );
     duplicateAccount = true;
     await assert.rejects(
-      apiService.createUser({ nombre: 'Ana', apellido: 'Pérez', email: 'ana@example.test', dni: '1234567', rol: 'alumno', password: 'long-enough', passwordConfirmation: 'long-enough' }, { id: 1, rol: 'admin' }),
+      apiService.createUser({ nombre: 'Ana', apellido: 'Pérez', email: 'ana@gmail.com', dni: '1234567', rol: 'profesor', password: 'long-enough', passwordConfirmation: 'long-enough' }, { id: 1, rol: 'admin' }),
       (error) => error.status === 409
     );
+  } finally {
+    db.transaction = originalTransaction;
+  }
+});
+
+test('la administración filtra usuarios por dominio de correo', async () => {
+  const originalQuery = db.query;
+  const queries = [];
+  db.query = async (sql, params) => {
+    queries.push({ sql, params });
+    return { rows: [], rowCount: 0 };
+  };
+  try {
+    await apiService.users({}, { id: '1', rol: 'admin' }, {}, new URLSearchParams('tipoCorreo=gmail'));
+    assert.deepEqual(queries[0].params, [null, 'gmail']);
+    assert.match(queries[0].sql, /split_part\(lower\(email::text\), '@', 2\)/);
+    await assert.rejects(
+      apiService.users({}, { id: '1', rol: 'admin' }, {}, new URLSearchParams('tipoCorreo=invalid')),
+      (error) => error.status === 400
+    );
+  } finally {
+    db.query = originalQuery;
+  }
+});
+
+test('el cambio de correo valida el dominio y actualiza el rol dentro de una transacción', async () => {
+  const originalTransaction = db.transaction;
+  const calls = [];
+  let target = { id: '18', rol: 'alumno', dni: '1234567', nombre: 'Ana' };
+  db.transaction = async (callback) => callback({
+    query: async (sql, params) => {
+      calls.push({ sql, params });
+      if (sql.includes('SELECT id, rol FROM users')) return { rowCount: 1, rows: [target] };
+      if (sql.includes('UPDATE users SET email =')) {
+        target = { ...target, email: params[0], rol: params[1] };
+        return { rowCount: 1, rows: [target] };
+      }
+      throw new Error(`Consulta no prevista: ${sql}`);
+    }
+  });
+  try {
+    const updated = await apiService.updateUser(
+      { email: 'DOCENTE@BUE.EDU.AR' }, { id: '1', rol: 'admin' }, { dni: target.dni }
+    );
+    assert.equal(updated.user.email, 'docente@bue.edu.ar');
+    assert.equal(updated.user.rol, 'profesor');
+    assert.ok(calls[0].sql.includes('FOR UPDATE'));
+    await assert.rejects(
+      apiService.updateUser({ email: 'ana@evilbue.edu.ar' }, { id: '1', rol: 'admin' }, { dni: target.dni }),
+      (error) => error.status === 400 && /Usá un correo/.test(error.message)
+    );
+    const gmail = await apiService.updateUser(
+      { email: 'ana@gmail.com' }, { id: '1', rol: 'admin' }, { dni: target.dni }
+    );
+    assert.equal(gmail.user.rol, 'profesor');
   } finally {
     db.transaction = originalTransaction;
   }
@@ -600,8 +713,12 @@ test('el cambio de rol protege auto-cambio, último admin y ascenso con contrase
     const audit = calls.find(call => call.sql.includes('INSERT INTO audit_log'));
     assert.ok(audit);
     assert.doesNotMatch(audit.params[1], /2222222|dni/i);
+    await assert.rejects(
+      apiService.updateUserRole({ rol: 'alumno' }, actor, { dni: target.dni }),
+      (error) => error.status === 400 && /Usá un correo/.test(error.message)
+    );
 
-    target = { id: '2', dni: '2222222', nombre: 'Ana', email: 'ana@example.test', rol: 'admin' };
+    target = { id: '2', dni: '2222222', nombre: 'Ana', email: 'ana@bue.edu.ar', rol: 'admin' };
     adminCount = 1;
     await assert.rejects(
       apiService.updateUserRole({ rol: 'profesor' }, actor, { dni: target.dni }),
@@ -629,7 +746,7 @@ test('rechaza reservas pasadas y valida el texto de tickets antes de persistir',
   );
   await assert.rejects(
     apiService.createTicket({ motivo: 'Motivo', descripcion: 'x'.repeat(4001) }, user),
-    (error) => error.status === 400 && /50 caracteres/.test(error.message)
+    (error) => error.status === 400 && /4000 caracteres/.test(error.message)
   );
 });
 
@@ -641,6 +758,8 @@ test('los valores de texto nuevos se recortan y respetan 50 caracteres', () => {
   assert.equal(accountPassword('x'.repeat(50)), 'x'.repeat(50));
   assert.throws(() => accountPassword('x'.repeat(51)), (error) => error.status === 400 && /50 caracteres/.test(error.message));
   assert.equal(requiredText('x'.repeat(50), 'El motivo'), 'x'.repeat(50));
+  assert.equal(requiredText('x'.repeat(4000), 'La descripción', 4000), 'x'.repeat(4000));
+  assert.throws(() => requiredText('x'.repeat(4001), 'La descripción', 4000), (error) => error.status === 400 && /4000 caracteres/.test(error.message));
   assert.throws(() => requiredText('x'.repeat(51), 'El motivo'), (error) => error.status === 400 && /50 caracteres/.test(error.message));
   assert.throws(() => requiredText('   ', 'El motivo'), (error) => error.status === 400 && /vacío/.test(error.message));
   assert.equal(courseDivision(' 2°14° '), '2°14°');
@@ -744,6 +863,11 @@ test('las reservas individuales y por lote asignan solo el carro seleccionado', 
   });
   const now = new Date();
   const retiroAt = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+  while (['Sat', 'Sun'].includes(new Intl.DateTimeFormat('en-US', {
+    timeZone: TIME_ZONE, weekday: 'short'
+  }).format(retiroAt))) {
+    retiroAt.setTime(retiroAt.getTime() + 24 * 60 * 60 * 1000);
+  }
   retiroAt.setUTCHours(14, 0, 0, 0);
   const request = (tipo, cantidad) => ({
     tipo, cantidad, carro: '2', ubicacion: 'todas', curso: '6°14°',
@@ -1282,10 +1406,10 @@ test('la interfaz muestra selector reabrible, contador de texto, carro y curso e
   assert.match(html, /option value="reservada"/);
   assert.match(html, /type="number" id="resCursoAnio"/);
   assert.match(html, /type="number" id="resCursoDivision"/);
-  assert.match(html, /id="fallaDesc" maxlength="50"/);
+  assert.match(html, /id="fallaDesc" maxlength="4000"/);
   assert.match(html, /<button class="btn btn-primary" type="button" disabled aria-describedby="remindersUnavailableMessage">Enviar recordatorios<\/button>/);
   assert.match(html, /id="preferenciasRecordatorioInfo"/);
-  assert.match(app, /Las preferencias se guardan, pero el envío de notificaciones no está disponible hasta integrar Gmail/);
+  assert.match(app, /Las preferencias se guardan, pero los recordatorios automáticos aún no están disponibles/);
   assert.doesNotMatch(app, /El recordatorio por correo se envía cuando falten/);
   assert.doesNotMatch(html, /onclick="enviarRecordatoriosAdmin/);
   assert.doesNotMatch(app, /api\/admin\/reminders\/run/);
@@ -1326,7 +1450,8 @@ test('la interfaz muestra selector reabrible, contador de texto, carro y curso e
   assert.match(app, /validarHoraDevolucionReserva\(hora, horaDevolucion\)/);
   assert.match(app, /horaDevolucion, motivo/);
   assert.match(html, /id="circulationResults"/);
-  assert.match(app, /apiRequest\(`\/api\/admin\/loans\?estado=pendientes\$\{suffix\}`\)/);
+  assert.match(app, /filters\.set\(key, value\)/);
+  assert.match(app, /apiRequest\(`\/api\/admin\/loans\?\$\{filters\}`\)/);
   assert.match(app, /const returnPending = loan\.estado==='devolucion_pendiente'/);
   assert.match(app, /returnPending\?'Confirmar recepción':'Registrar devolución'/);
   assert.match(app, /buscarHistorialDevoluciones\(query\)/);
@@ -1340,17 +1465,19 @@ test('la interfaz muestra selector reabrible, contador de texto, carro y curso e
   assert.doesNotMatch(app, /function pedirRechazoLote\(id\)/);
   assert.match(app, /const adminReservations = reservas\.filter\(r=>!\['cancelada','retirada'\]\.includes\(r\.estado\)\)/);
   assert.match(app, /loanReminderInterval = setInterval\([\s\S]{0,120}60_000/);
-  assert.match(app, /function switchView\(name\)[\s\S]*name==='admin-circulation'[\s\S]{0,160}void buscarPrestamosAdmin\(search\)/);
+  assert.match(app, /if\(name==='admin-circulation' && authToken && rolActivo==='admin'\)\{\s*void buscarPrestamosAdmin\(\)/);
   assert.match(app, /minutes > 0 \? loans\.map/);
   assert.match(app, /circulationInterval = setInterval\([\s\S]{0,240}30000/);
-  assert.match(app, /setTimeout\(\(\)=>void buscarPrestamosAdmin\(query\),300\)/);
-  assert.match(app, /ticketNotebookHistory\.map\(notebook=>/);
+  assert.match(app, /debounceSearch\('circulation', \(\)=>void buscarPrestamosAdmin\(\), 250\)/);
+  assert.match(app, /ticketNotebookHistory\.map\(loan=>/);
   assert.match(app, /'<option value="otro">Otra \/ no sé<\/option>'/);
-  assert.match(app, /function registrarTodasDevolucionesAdmin/);
+  assert.match(app, /function seleccionarTodasDevoluciones\(\)/);
+  assert.match(app, /function seleccionarDevolucionesPorNumeros\(\)/);
+  assert.match(html, /id="returnSelectedFloating"/);
   assert.match(app, /async function registrarRetiro\(id\)[\s\S]*catch\(error\)\{ showToast\(error\.message, 'warn'\); \}/);
   assert.match(app, /async function aprobarYEntregar\(id\)[\s\S]*catch\(error\)\{ showToast\(error\.message, 'warn'\); \}/);
   assert.match(app, /async function registrarDevolucionAdmin\(id, notebook\)[\s\S]*catch\(error\)\{ showToast\(error\.message, 'warn'\); \}/);
-  assert.match(app, /await buscarPrestamosAdmin\(document\.getElementById\('circulationSearch'\)\.value\)/);
+  assert.match(app, /await buscarPrestamosAdmin\(\)/);
   assert.match(app, /const priority = \{confirmada:0, aprobada:0, pendiente_aprobacion:1, rechazada:2\}/);
   assert.match(app, /\(priority\[a\.estado\] \?\? 2\) - \(priority\[b\.estado\] \?\? 2\) \|\| b\.fecha\.localeCompare\(a\.fecha\)/);
   assert.match(app, /let reservationSubmitting = false/);
@@ -1432,7 +1559,7 @@ test('el catálogo de ubicaciones valida nombres, genera slugs únicos y no elim
   }
 });
 
-test('las búsquedas de préstamos y reservas normalizan acentos, escapan comodines y limitan q', async () => {
+test('los filtros de préstamos se combinan con búsqueda por texto y motivo', async () => {
   const originalQuery = db.query;
   const queries = [];
   db.query = async (sql, params) => {
@@ -1448,14 +1575,35 @@ test('las búsquedas de préstamos y reservas normalizan acentos, escapan comodi
     await apiService.adminLoans({}, { id: 1, rol: 'admin' }, {}, new URLSearchParams('estado=activo&q=P%C3%A9rez'));
     assert.deepEqual(queries[1].params, ['activo', '%perez%']);
     assert.match(queries[1].sql, /n\.codigo/);
-    assert.match(queries[1].sql, /LIMIT 50/);
+    assert.match(queries[1].sql, /res\.motivo/);
+    assert.doesNotMatch(queries[1].sql, /LIMIT 50/);
+    await apiService.adminLoans({}, { id: 1, rol: 'admin' }, {}, new URLSearchParams(
+      'estado=todos&desde=2026-03-01&hasta=2026-03-20&motivo=Pr%C3%A1ctica&usuario=Ana&equipo=NB-001'
+    ));
+    assert.deepEqual(queries[2].params, [
+      '2026-03-01', '2026-03-20', '%practica%', '%ana%', '%nb-001%'
+    ]);
+    assert.match(queries[2].sql, /America\/Argentina\/Buenos_Aires/);
+    assert.match(queries[2].sql, /u\.nombre/);
+    assert.match(queries[2].sql, /n\.codigo/);
+    assert.match(queries[2].sql, /res\.motivo/);
+    const filterClause = queries[2].sql.split('WHERE ')[1].split(' ORDER BY')[0];
+    assert.doesNotMatch(filterClause, /l\.estado IN/);
     await apiService.adminReservations({}, { id: 1, rol: 'admin' }, {}, new URLSearchParams('q=P%C3%A9rez_%'));
-    assert.deepEqual(queries[2].params, ['%perez\\_\\%%']);
-    assert.match(queries[2].sql, /r\.estado IN \('pendiente_aprobacion', 'aprobada', 'confirmada'\)/);
-    assert.match(queries[2].sql, /LIMIT 50/);
-    assert.doesNotMatch(queries[2].sql, /Pérez/);
+    assert.deepEqual(queries[3].params, ['%perez\\_\\%%']);
+    assert.match(queries[3].sql, /r\.estado IN \('pendiente_aprobacion', 'aprobada', 'confirmada'\)/);
+    assert.match(queries[3].sql, /LIMIT 50/);
+    assert.doesNotMatch(queries[3].sql, /Pérez/);
     await assert.rejects(
       apiService.adminLoans({}, { id: 1, rol: 'admin' }, {}, new URLSearchParams(`q=${'x'.repeat(51)}`)),
+      (error) => error.status === 400
+    );
+    await assert.rejects(
+      apiService.adminLoans({}, { id: 1, rol: 'admin' }, {}, new URLSearchParams('desde=2026-02-31')),
+      (error) => error.status === 400
+    );
+    await assert.rejects(
+      apiService.adminLoans({}, { id: 1, rol: 'admin' }, {}, new URLSearchParams('desde=2026-03-02&hasta=2026-03-01')),
       (error) => error.status === 400
     );
   } finally {
@@ -1648,6 +1796,61 @@ test('la devolución administrativa es transaccional, idempotente y libera segú
   }
 });
 
+test('la devolución por lote confirma cada equipo y conserva su préstamo aunque sean usuarios distintos', async () => {
+  const originalQuery = db.query;
+  const originalTransaction = db.transaction;
+  const loans = new Map([
+    ['80', { id: '80', user_id: '7', notebook_id: '11', estado: 'activo', vence_at: new Date(0) }],
+    ['81', { id: '81', user_id: '8', notebook_id: '12', estado: 'devolucion_pendiente', vence_at: new Date(0) }]
+  ]);
+  const returnRows = [];
+  const notebookUpdates = [];
+  db.query = async () => ({ rowCount: 0, rows: [] });
+  db.transaction = async (callback) => callback({
+    query: async (sql, params) => {
+      if (sql.includes('SELECT id, user_id, notebook_id, estado, vence_at')) {
+        const loan = loans.get(String(params[0]));
+        return loan ? { rowCount: 1, rows: [loan] } : { rowCount: 0, rows: [] };
+      }
+      if (sql.includes("UPDATE loans SET estado = 'devuelto'")) {
+        const loan = loans.get(String(params[0]));
+        loan.estado = 'devuelto';
+        return { rowCount: 1, rows: [{ devuelta_at: new Date() }] };
+      }
+      if (sql.includes('INSERT INTO returns')) {
+        returnRows.push(params);
+        return { rowCount: 1, rows: [] };
+      }
+      if (sql.includes('UPDATE notebooks AS n SET')) {
+        notebookUpdates.push(params);
+        return { rowCount: 1, rows: [] };
+      }
+      throw new Error(`Consulta no prevista: ${sql}`);
+    }
+  });
+  try {
+    const result = await apiService.adminReturnLoans(
+      { loanIds: ['80', '81'] }, { id: '1', rol: 'admin' }
+    );
+    assert.deepEqual(result, { message: 'Se registraron 2 devoluciones' });
+    assert.deepEqual(returnRows, [[80, '1'], [81, '1']]);
+    assert.deepEqual(notebookUpdates, [['11'], ['12']]);
+    assert.equal(loans.get('80').estado, 'devuelto');
+    assert.equal(loans.get('81').estado, 'devuelto');
+    await assert.rejects(
+      apiService.adminReturnLoans({ loanIds: [80] }, { id: '1', rol: 'admin' }),
+      (error) => error.status === 409 && /ya fue devuelto/.test(error.message)
+    );
+    await assert.rejects(
+      apiService.adminReturnLoans({ loanIds: [999] }, { id: '1', rol: 'admin' }),
+      (error) => error.status === 404 && /no encontrado/.test(error.message)
+    );
+  } finally {
+    db.query = originalQuery;
+    db.transaction = originalTransaction;
+  }
+});
+
 test('la confirmación de devoluciones antiguas sigue usando la ruta compatible', async () => {
   const originalQuery = db.query;
   const originalTransaction = db.transaction;
@@ -1684,7 +1887,7 @@ test('la confirmación de devoluciones antiguas sigue usando la ruta compatible'
   }
 });
 
-test('los recordatorios no se envían ni se marcan hasta integrar Gmail', async () => {
+test('los recordatorios automáticos aún no se envían ni se marcan como enviados', async () => {
   const originalQuery = db.query;
   const originalTransaction = db.transaction;
   const previousSecret = process.env.CRON_SECRET;
@@ -1711,7 +1914,7 @@ test('los recordatorios no se envían ni se marcan hasta integrar Gmail', async 
     const request = { headers: { 'x-cron-secret': process.env.CRON_SECRET } };
     await assert.rejects(
       apiService.sendReturnReminders(request),
-      (error) => error.status === 503 && /Gmail/.test(error.message)
+      (error) => error.status === 503 && /recordatorios/.test(error.message)
     );
     await assert.rejects(
       apiService.runAdminReminders({}, { id: 2, rol: 'alumno' }),
@@ -1719,7 +1922,7 @@ test('los recordatorios no se envían ni se marcan hasta integrar Gmail', async 
     );
     await assert.rejects(
       apiService.runAdminReminders({}, { id: 1, rol: 'admin' }),
-      (error) => error.status === 503 && /Gmail/.test(error.message)
+      (error) => error.status === 503 && /recordatorios/.test(error.message)
     );
     assert.equal(queries, 0);
     assert.equal(transactions, 0);
@@ -1740,8 +1943,11 @@ test('los tickets solo aceptan notebooks del historial, profesor consulta respue
   const calls = [];
   db.query = async (sql, params) => {
     calls.push({ sql, params });
-    if (sql.includes('MAX(l.retirada_at)')) {
-      return { rowCount: 1, rows: [{ codigo: 'NB-011', ultimo_uso: new Date('2026-10-25T10:00:00Z') }] };
+    if (sql.includes('SELECT l.id AS loan_id, n.codigo')) {
+      return { rowCount: 1, rows: [{
+        loan_id: '80', codigo: 'NB-011', retirada_at: new Date('2026-10-25T10:00:00Z'),
+        estado: 'devuelto'
+      }] };
     }
     if (sql.includes('latest_admin_reply_at')) {
       return { rowCount: 1, rows: [{ id: 'TCK-1', latest_admin_reply_at: new Date('2026-11-09T10:00:00Z') }] };
@@ -1753,10 +1959,17 @@ test('los tickets solo aceptan notebooks del historial, profesor consulta respue
   db.transaction = async (callback) => callback({
     query: async (sql, params) => {
       calls.push({ sql: sql.replace(/\s+/g, ' '), params });
-      if (sql.includes('EXISTS (SELECT 1 FROM loans l WHERE l.notebook_id = n.id')) {
-        return exists ? { rowCount: 1, rows: [{ id: '11', in_history: inHistory }] } : { rowCount: 0, rows: [] };
+      if (sql.includes('FROM notebooks n WHERE n.codigo = $1 FOR UPDATE OF n')) {
+        return exists ? { rowCount: 1, rows: [{ id: '11', loan_id: inHistory ? '80' : null }] } : { rowCount: 0, rows: [] };
       }
-      if (sql.includes('INSERT INTO tickets')) return { rowCount: 1, rows: [{ id: 'TCK-1', estado: 'abierto' }] };
+      if (sql.includes('FROM loans l JOIN notebooks n')) {
+        return params[0] === 80
+          ? { rowCount: 1, rows: [{ id: '80', notebook_id: '11', codigo: 'NB-011' }] }
+          : { rowCount: 0, rows: [] };
+      }
+      if (sql.includes('INSERT INTO tickets')) {
+        return { rowCount: 1, rows: [{ id: 'TCK-1', estado: 'abierto', loan_id: params[1], notebook_id: params[2] }] };
+      }
       if (sql.includes('UPDATE notebooks SET')) return { rowCount: 1, rows: [] };
       if (sql.includes('SELECT id, owner_id FROM tickets')) {
         return { rowCount: 1, rows: [{ id: '9', owner_id: '7' }] };
@@ -1770,8 +1983,9 @@ test('los tickets solo aceptan notebooks del historial, profesor consulta respue
   try {
     const history = await apiService.ticketNotebooks({}, { id: 7, rol: 'alumno' });
     assert.equal(history.notebooks[0].codigo, 'NB-011');
-    assert.match(calls.find(({ sql }) => sql.includes('MAX(l.retirada_at)')).sql, /GROUP BY n\.id, n\.codigo\s+ORDER BY MAX\(l\.retirada_at\) DESC/);
-    assert.deepEqual(calls.find(({ sql }) => sql.includes('MAX(l.retirada_at)')).params, [7]);
+    assert.equal(history.notebooks[0].loan_id, '80');
+    assert.match(calls.find(({ sql }) => sql.includes('SELECT l.id AS loan_id, n.codigo')).sql, /WHERE l\.user_id = \$1 ORDER BY l\.retirada_at DESC, l\.id DESC/);
+    assert.deepEqual(calls.find(({ sql }) => sql.includes('SELECT l.id AS loan_id, n.codigo')).params, [7]);
     await assert.rejects(
       apiService.createTicket({ notebook: 'NB-011', motivo: 'Falla', descripcion: 'No inicia' }, { id: 7, rol: 'alumno' }),
       (error) => error.status === 400 && /historial/.test(error.message)
@@ -1785,8 +1999,15 @@ test('los tickets solo aceptan notebooks del historial, profesor consulta respue
     inHistory = true;
     await apiService.createTicket({ notebook: 'NB-011', motivo: 'Falla', descripcion: 'No inicia' }, { id: 7, rol: 'alumno' });
     const ticketInsert = calls.find(({ sql }) => sql.includes('INSERT INTO tickets'));
-    assert.equal(ticketInsert.params[2], 7);
+    assert.equal(ticketInsert.params[1], '80');
+    assert.equal(ticketInsert.params[2], '11');
+    assert.equal(ticketInsert.params[3], 7);
     assert.match(calls.find(({ sql }) => sql.includes('UPDATE notebooks SET')).sql, /CASE WHEN estado = 'disponible' THEN 'mantenimiento'/);
+
+    await assert.rejects(
+      apiService.createTicket({ loanId: 81, notebook: 'NB-011', motivo: 'Falla', descripcion: 'No inicia' }, { id: 7, rol: 'alumno' }),
+      (error) => error.status === 400 && /no pertenece a tu historial/.test(error.message)
+    );
 
     await assert.rejects(
       apiService.createTicketReply({ mensaje: '   ' }, { id: 7, rol: 'alumno' }, { code: 'TCK-1' }),
@@ -1829,7 +2050,7 @@ test('los tickets solo aceptan notebooks del historial, profesor consulta respue
     );
     assert.deepEqual(await apiService.ticketReplies({}, { id: 1, rol: 'admin' }, { code: 'TCK-1' }), { replies });
     const ownTickets = await apiService.tickets({}, { id: 7, rol: 'alumno' });
-    assert.ok(ownTickets.tickets[0].latest_admin_reply_at);
+    assert.ok(ownTickets.tickets[0].latestAdminReplyAt);
     assert.match(calls.find(({ sql }) => sql.includes('latest_admin_reply_at')).sql, /author\.rol = 'admin'/);
   } finally {
     db.query = originalQuery;
@@ -1837,21 +2058,15 @@ test('los tickets solo aceptan notebooks del historial, profesor consulta respue
   }
 });
 
-test('la migración 011 y el esquema incluyen ubicaciones, recordatorios y respuestas sin modificar migraciones aplicadas', () => {
+test('la migración 013 vincula tickets a préstamos y conserva datos anteriores', () => {
   const root = path.resolve(__dirname, '..', '..');
-  const migration = fs.readFileSync(path.join(root, 'database', 'migrations', '011-ubicaciones-recordatorios-y-respuestas.sql'), 'utf8');
+  const migration = fs.readFileSync(path.join(root, 'database', 'migrations', '013-ticket-loan-link.sql'), 'utf8');
   const schema = fs.readFileSync(path.join(root, 'database', 'schema.sql'), 'utf8');
   const runner = fs.readFileSync(path.join(root, 'backend', 'scripts', 'db.js'), 'utf8');
-  assert.match(migration, /CREATE TABLE IF NOT EXISTS ubicaciones/i);
-  assert.match(migration, /DROP CONSTRAINT IF EXISTS carros_ubicacion_check/i);
-  assert.match(migration, /FOREIGN KEY \(ubicacion\) REFERENCES ubicaciones\(slug\)/i);
-  assert.match(migration, /ADD COLUMN IF NOT EXISTS reminder_sent_at TIMESTAMPTZ/i);
-  assert.match(migration, /CREATE TABLE IF NOT EXISTS ticket_replies/i);
+  assert.match(migration, /ADD COLUMN loan_id BIGINT REFERENCES loans\(id\) ON DELETE SET NULL/i);
+  assert.match(migration, /CREATE INDEX tickets_loan_idx/i);
+  assert.match(schema, /loan_id BIGINT REFERENCES loans\(id\) ON DELETE SET NULL/);
   assert.match(schema, /CREATE TABLE ticket_replies/);
-  assert.match(schema, /reminder_sent_at TIMESTAMPTZ/);
-  assert.match(schema, /NEW\.devuelta_at > NEW\.vence_at/);
-  assert.match(schema, /AFTER UPDATE OF estado, devuelta_at ON loans/);
   assert.match(fs.readFileSync(path.join(root, 'backend', 'services', 'api-service.js'), 'utf8'), /\$1::ticket_status/);
-  assert.match(fs.readFileSync(path.join(root, 'backend', 'services', 'api-service.js'), 'utf8'), /\$1::bigint/);
-  assert.match(runner, /'011-ubicaciones-recordatorios-y-respuestas\.sql'/);
+  assert.match(runner, /'013-ticket-loan-link\.sql'/);
 });

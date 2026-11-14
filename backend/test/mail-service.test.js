@@ -48,28 +48,11 @@ test('GAS envía JSON, sigue redirecciones y requiere respuesta ok', async () =>
   });
 });
 
-test('Brevo usa api-key y requiere respuesta HTTP satisfactoria', async () => {
-  await withMailEnvironment({
-    NODE_ENV: 'production',
-    MAIL_PROVIDER: 'brevo',
-    MAIL_API_KEY: 'unit-test-api-key',
-    MAIL_FROM_EMAIL: 'netmo@example.test',
-    MAIL_FROM_NAME: 'NetMO'
-  }, async () => {
-    global.fetch = async (url, options) => {
-      assert.equal(url, 'https://api.brevo.com/v3/smtp/email');
-      assert.equal(options.headers['api-key'], process.env.MAIL_API_KEY);
-      assert.deepEqual(JSON.parse(options.body), {
-        sender: { email: 'netmo@example.test', name: 'NetMO' },
-        to: [{ email: 'person@example.test' }],
-        subject: 'Aviso',
-        htmlContent: '<p>Prueba</p>'
-      });
-      return { ok: false, status: 503 };
-    };
+test('GAS y console son los únicos proveedores válidos', async () => {
+  await withMailEnvironment({ NODE_ENV: 'production', MAIL_PROVIDER: 'gmail' }, async () => {
     await assert.rejects(
       sendMail({ to: 'person@example.test', subject: 'Aviso', html: '<p>Prueba</p>' }),
-      /HTTP 503/
+      /MAIL_PROVIDER debe ser gas o console/
     );
   });
 });

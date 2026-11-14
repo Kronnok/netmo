@@ -51,11 +51,20 @@ sesiones. La migración 010 conserva los identificadores actuales al renombrar
 La migración 011 agrega el catálogo administrable de ubicaciones, recordatorios
 previos al vencimiento y respuestas de tickets. La migración 012 agrega IDs
 estables para carros y ubicaciones, manteniendo el número y el slug como valores
-editables. El envío de recordatorios permanece deshabilitado hasta integrar
-Gmail; otros correos no se ven afectados.
+editables. Los recordatorios automáticos aún están deshabilitados. La migración
+013 vincula cada reporte de falla con el préstamo
+seleccionado y conserva los reportes anteriores. Las cuentas nuevas tienen rol
+Profesor por defecto; los usuarios con rol Alumno existentes mantienen su
+historial y pueden desactivarse desde administración.
 `npm run db:seed` registra la aplicación del seed para evitar ejecutarlo una
 segunda vez. Las credenciales se suministran mediante variables de entorno y no
 deben guardarse en el repositorio.
+
+Las cuentas nuevas de alumnos y profesores usan `@alu.bue.edu.ar`,
+`@bue.edu.ar` o `@gmail.com`; las cuentas históricas no se modifican. El rol se
+deriva del dominio institucional y se puede elegir para `@gmail.com`. La
+recuperación y las notificaciones usan `MAIL_PROVIDER=gas` (Google Apps Script)
+o, solo en desarrollo, `console`; configurá sus variables en `.env.example`.
 
 La instalación no publica credenciales de ejemplo. Configurá contraseñas
 privadas mediante `.env.example` y las variables de entorno del seed; si una

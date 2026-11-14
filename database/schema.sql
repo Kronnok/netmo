@@ -181,6 +181,7 @@ CREATE TABLE returns (
 CREATE TABLE tickets (
   id BIGSERIAL PRIMARY KEY,
   codigo VARCHAR(32) NOT NULL UNIQUE,
+  loan_id BIGINT REFERENCES loans(id) ON DELETE SET NULL,
   notebook_id BIGINT REFERENCES notebooks(id),
   owner_id BIGINT NOT NULL REFERENCES users(id),
   motivo VARCHAR(240) NOT NULL,
@@ -214,6 +215,7 @@ CREATE TABLE late_returns (
 CREATE INDEX reservations_owner_idx ON reservations(owner_id, retiro_at);
 CREATE INDEX reservation_notebooks_active_idx ON reservation_notebooks(notebook_id) WHERE active;
 CREATE INDEX tickets_owner_idx ON tickets(owner_id, created_at DESC);
+CREATE INDEX tickets_loan_idx ON tickets(loan_id);
 CREATE INDEX tickets_active_idx ON tickets(estado) WHERE estado <> 'resuelto';
 CREATE INDEX ticket_replies_ticket_idx ON ticket_replies(ticket_id, created_at);
 CREATE INDEX late_returns_user_idx ON late_returns(user_id, returned_at DESC);
