@@ -193,6 +193,8 @@
   <!-- ============ VIEW: INICIO ============ -->
   <section class="view active" id="view-inicio">
 
+    <div class="role-home-banner" id="roleHomeBanner"></div>
+
     <!-- ---- ADMIN: panel completo de inventario ---- -->
     <div id="statsGridAdmin" class="stats-grid">
       <div class="stat-card"><div class="stat-icon icon-green">💻</div><div class="stat-info"><span>Disponibles</span><h3 id="statDisponibles">0</h3><p>En este momento</p></div></div>
@@ -336,13 +338,13 @@
               <label for="resCantidad">Cantidad de equipos</label>
               <input type="number" id="resCantidad" min="1" max="2" step="1" value="1" required>
             </div>
-            <div class="field" data-roles-el="profesor">
+            <div class="field" data-roles-el="alumno,profesor">
               <label>Curso / división</label>
               <div class="form-grid">
                 <div class="field"><label for="resCursoAnio">Año</label><input type="number" id="resCursoAnio" min="1" max="7" step="1" placeholder="2"></div>
                 <div class="field"><label for="resCursoDivision">División</label><input type="number" id="resCursoDivision" min="1" max="99" step="1" placeholder="14"></div>
               </div>
-              <span id="resCursoPreview" class="hint">Se enviará como A°D° (por ejemplo, 2°14°).</span>
+              <span id="resCursoPreview" class="hint">Obligatorio en cada reserva. Se envía como A°D° (por ejemplo, 2°14°).</span>
             </div>
             <div class="field">
               <label for="resUbicacion">Ubicación</label>
@@ -588,6 +590,15 @@
       <table>
         <thead><tr><th>Nombre</th><th>Correo</th><th>DNI</th><th>Rol</th><th>Tipo de correo</th><th>Cambiar rol</th><th>Cuenta</th><th>Acción</th></tr></thead>
         <tbody id="administradoresTable"></tbody>
+      </table>
+    </div>
+    <div class="card" style="margin-top:1.5rem;">
+      <div class="card-header">
+        <div><h3>Cuentas eliminadas</h3><p>Las cuentas dadas de baja no pueden iniciar sesión, pero conservan su historial. Podés restaurarlas cuando quieras.</p></div>
+      </div>
+      <table>
+        <thead><tr><th>Nombre</th><th>Correo</th><th>DNI</th><th>Rol y fecha de baja</th><th>Acción</th></tr></thead>
+        <tbody id="cuentasEliminadasTable"></tbody>
       </table>
     </div>
   </section>

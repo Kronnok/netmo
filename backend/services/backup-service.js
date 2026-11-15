@@ -63,6 +63,7 @@ const ENUMS = {
 
 const NULLABLE_FIELDS = new Set([
   'users.baneado_hasta',
+  'users.eliminado_at',
   'carros.ubicacion_id',
   'notebooks.carro_id', 'notebooks.prestado_a',
   'reservations.carro', 'reservations.curso', 'reservations.hora_devolucion',

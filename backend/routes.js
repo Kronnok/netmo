@@ -53,6 +53,8 @@ const routes = [
   ['GET', /^\/api\/admin\/backup$/, 'downloadAdminBackup'],
   ['POST', /^\/api\/admin\/restore$/, 'restoreAdminBackup'],
   ['PATCH', /^\/api\/admin\/users\/([^/]+)$/, 'updateUser', ['dni']],
+  ['DELETE', /^\/api\/admin\/users\/([^/]+)$/, 'deleteUser', ['dni']],
+  ['POST', /^\/api\/admin\/users\/([^/]+)\/restore$/, 'restoreUser', ['dni']],
   ['PATCH', /^\/api\/admin\/users\/([^/]+)\/rol$/, 'updateUserRole', ['dni']]
 ];
 

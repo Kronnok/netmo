@@ -379,6 +379,8 @@ test('todos los servicios detrás de rutas admin rechazan alumnos y aceptan admi
     ['GET', '/api/admin/tickets'],
     ['GET', '/api/admin/late-returns'],
     ['PATCH', '/api/admin/users/U-8'],
+    ['DELETE', '/api/admin/users/U-8'],
+    ['POST', '/api/admin/users/U-8/restore'],
     ['PATCH', '/api/admin/users/U-8/rol']
   ];
   const originalQuery = db.query;
@@ -578,12 +580,139 @@ test('la administración filtra usuarios por dominio de correo', async () => {
   };
   try {
     await apiService.users({}, { id: '1', rol: 'admin' }, {}, new URLSearchParams('tipoCorreo=gmail'));
-    assert.deepEqual(queries[0].params, [null, 'gmail']);
+    assert.deepEqual(queries[0].params, [null, 'gmail', false]);
     assert.match(queries[0].sql, /split_part\(lower\(email::text\), '@', 2\)/);
     await assert.rejects(
       apiService.users({}, { id: '1', rol: 'admin' }, {}, new URLSearchParams('tipoCorreo=invalid')),
       (error) => error.status === 400
     );
+  } finally {
+    db.query = originalQuery;
+  }
+});
+
+test('toda reserva exige un curso válido, también para alumnos', async () => {
+  const retiroAt = new Date();
+  retiroAt.setUTCDate(retiroAt.getUTCDate() + 1);
+  while (['Sat', 'Sun'].includes(new Intl.DateTimeFormat('en-US', {
+    timeZone: TIME_ZONE, weekday: 'short'
+  }).format(retiroAt))) {
+    retiroAt.setUTCDate(retiroAt.getUTCDate() + 1);
+  }
+  retiroAt.setUTCHours(14, 0, 0, 0);
+  const base = {
+    tipo: 'individual', cantidad: 1, carro: '2', ubicacion: 'todas',
+    retiroAt: retiroAt.toISOString(), horaDevolucion: '17:00'
+  };
+  for (const curso of [undefined, '', '6°', 'Curso test', '8°14°']) {
+    const body = { ...base };
+    if (curso !== undefined) body.curso = curso;
+    await assert.rejects(
+      apiService.createReservation(body, { id: '7', rol: 'alumno' }),
+      (error) => error.status === 400 && /curso/i.test(error.message),
+      `el curso ${String(curso)} debe rechazarse`
+    );
+  }
+});
+
+test('el listado de usuarios separa las cuentas activas de las dadas de baja', async () => {
+  const originalQuery = db.query;
+  const queries = [];
+  db.query = async (sql, params) => {
+    queries.push({ sql, params });
+    return { rows: [], rowCount: 0 };
+  };
+  try {
+    await apiService.users({}, { id: '1', rol: 'admin' }, {}, new URLSearchParams('eliminados=si'));
+    assert.equal(queries[0].params[2], true);
+    assert.match(queries[0].sql, /eliminado_at IS NOT NULL/);
+    queries.length = 0;
+    await apiService.users({}, { id: '1', rol: 'admin' }, {}, new URLSearchParams());
+    assert.equal(queries[0].params[2], false);
+    assert.match(queries[0].sql, /eliminado_at IS NULL/);
+    await assert.rejects(
+      apiService.users({}, { id: '1', rol: 'admin' }, {}, new URLSearchParams('eliminados=quizas')),
+      (error) => error.status === 400
+    );
+  } finally {
+    db.query = originalQuery;
+  }
+});
+
+test('la baja de usuarios es lógica, restaurable y protege a los administradores', async () => {
+  const originalQuery = db.query;
+  const calls = [];
+  db.query = async (sql, params) => {
+    calls.push({ sql, params });
+    if (sql.includes('SELECT id, rol, eliminado_at FROM users WHERE dni')) {
+      return { rowCount: 1, rows: [{ id: '9', rol: 'alumno', eliminado_at: null }] };
+    }
+    if (sql.includes('UPDATE users SET eliminado_at = now()')) {
+      return { rowCount: 1, rows: [{ dni: '1234567', nombre: 'Ana', email: 'ana@example.test', rol: 'alumno', eliminado_at: new Date() }] };
+    }
+    if (sql.includes('UPDATE users SET eliminado_at = NULL')) {
+      return { rowCount: 1, rows: [{ dni: '1234567', nombre: 'Ana', email: 'ana@example.test', rol: 'alumno', eliminado_at: null }] };
+    }
+    return { rowCount: 0, rows: [] };
+  };
+  try {
+    const deleted = await apiService.deleteUser({}, { id: '1', rol: 'admin' }, { dni: '1234567' });
+    assert.ok(deleted.user.eliminado_at);
+    assert.match(calls.at(-1).sql, /UPDATE users SET eliminado_at = now\(\)/);
+    const restored = await apiService.restoreUser({}, { id: '1', rol: 'admin' }, { dni: '1234567' });
+    assert.equal(restored.user.eliminado_at, null);
+    await assert.rejects(
+      apiService.deleteUser({}, { id: '1', rol: 'alumno' }, { dni: '1234567' }),
+      (error) => error.status === 403
+    );
+    db.query = async (sql) => {
+      if (sql.includes('SELECT id, rol, eliminado_at FROM users WHERE dni')) {
+        return { rowCount: 1, rows: [{ id: '9', rol: 'admin', eliminado_at: null }] };
+      }
+      return { rowCount: 0, rows: [] };
+    };
+    await assert.rejects(
+      apiService.deleteUser({}, { id: '1', rol: 'admin' }, { dni: '1234567' }),
+      (error) => error.status === 403 && /administradora/.test(error.message)
+    );
+  } finally {
+    db.query = originalQuery;
+  }
+});
+
+test('las cuentas dadas de baja no pueden iniciar sesión', async () => {
+  const originalQuery = db.query;
+  const statements = [];
+  db.query = async (sql) => {
+    statements.push(sql);
+    return { rowCount: 0, rows: [] };
+  };
+  loginRateLimiter.reset();
+  try {
+    await assert.rejects(
+      authService.login({ email: 'ana@example.test', password: 'secret123' }, { headers: {}, socket: { remoteAddress: '127.0.0.1' } }),
+      (error) => error.status === 401
+    );
+    assert.ok(statements.some((sql) => /eliminado_at IS NULL/.test(sql)));
+  } finally {
+    loginRateLimiter.reset();
+    db.query = originalQuery;
+  }
+});
+
+test('el historial de préstamos se ordena del más reciente al más antiguo', async () => {
+  const originalQuery = db.query;
+  const statements = [];
+  db.query = async (sql) => {
+    statements.push(sql);
+    return { rowCount: 0, rows: [] };
+  };
+  try {
+    await apiService.loans({}, { id: '7', rol: 'alumno' });
+    assert.match(statements[0], /WHERE l\.user_id = \$1 ORDER BY l\.retirada_at DESC, l\.id DESC/);
+    statements.length = 0;
+    await apiService.adminLoans({}, { id: '1', rol: 'admin' }, {}, new URLSearchParams('estado=todos'));
+    assert.match(statements[0], /ORDER BY l\.retirada_at DESC, l\.id DESC/);
   } finally {
     db.query = originalQuery;
   }
@@ -1499,6 +1628,24 @@ test('la interfaz muestra selector reabrible, contador de texto, carro y curso e
   assert.match(app, /if\(!passwordsMatch\) return/);
   assert.match(app, /passwordConfirmation\}\)/);
   assert.match(api, /typeof body\.passwordConfirmation !== 'string' \|\| password !== body\.passwordConfirmation/);
+  assert.match(html, /<div class="field" data-roles-el="alumno,profesor">[\s\S]*?id="resCursoAnio"/);
+  assert.match(html, /Obligatorio en cada reserva/);
+  assert.match(app, /function guardarCursoRecordado\(/);
+  assert.match(app, /function cargarCursoRecordado\(/);
+  assert.match(app, /netmo_curso_/);
+  assert.match(api, /const curso = courseDivision\(body\.curso\)/);
+  assert.match(html, /id="cuentasEliminadasTable"/);
+  assert.match(app, /function darBajaUsuario\(/);
+  assert.match(app, /function restaurarUsuario\(/);
+  assert.match(app, /\/restore`/);
+  assert.match(html, /id="roleHomeBanner"/);
+  assert.match(app, /document\.documentElement\.dataset\.role = rolActivo/);
+  assert.match(styles, /html\[data-role="alumno"\]/);
+  assert.match(styles, /html\[data-role="profesor"\]/);
+  assert.match(styles, /html\[data-role="admin"\]/);
+  assert.match(styles, /\.role-home-banner\{/);
+  assert.doesNotMatch(app, /<th>Slug<\/th>/);
+  assert.doesNotMatch(app, /<td class="mono">\$\{escapeHtml\(location\.slug\)\}<\/td>/);
 });
 
 test('el catálogo de ubicaciones valida nombres, genera slugs únicos y no elimina ubicaciones en uso', async () => {

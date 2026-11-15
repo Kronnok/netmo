@@ -244,6 +244,8 @@ async function adminPermissions(admin, adminUserId, professor, student) {
     ['GET', '/api/admin/backup', undefined],
     ['POST', '/api/admin/restore', {}],
     ['PATCH', '/api/admin/users/999999', {}],
+    ['DELETE', '/api/admin/users/999999', undefined],
+    ['POST', '/api/admin/users/999999/restore', {}],
     ['PATCH', '/api/admin/users/999999/rol', {}]
   ];
   for (const [method, pathname, body] of paths) {
@@ -334,6 +336,11 @@ async function runFlows(users) {
     }, tokens.student);
     assert.equal(missingReturnHour.status, 400);
     assert.match(missingReturnHour.payload.error, /hora de devolución/);
+    const missingCourse = await request('POST', '/api/reservations', {
+      retiroAt: reservationTime, horaDevolucion: '17:30', cantidad: 1
+    }, tokens.student);
+    assert.equal(missingCourse.status, 400);
+    assert.match(missingCourse.payload.error, /curso/i);
     const studentLot = await request('POST', '/api/reservations', {
       tipo: 'lote', retiroAt: reservationTime, horaDevolucion: '17:30', cantidad: 3, curso: 'Curso test'
     }, tokens.student);
@@ -342,7 +349,7 @@ async function runFlows(users) {
 
   const reservationResponse = await report('reserva individual pendiente de aprobación', async () => {
     const result = await request('POST', '/api/reservations', {
-      retiroAt: reservationTime, horaDevolucion: '17:30', cantidad: 1, motivo: 'Prueba de integración'
+      retiroAt: reservationTime, horaDevolucion: '17:30', cantidad: 1, curso: '6°14°', motivo: 'Prueba de integración'
     }, tokens.student);
     assert.equal(result.status, 201);
     assert.equal(result.payload.reservation.estado, 'pendiente_aprobacion');
@@ -659,7 +666,7 @@ async function runFlows(users) {
 
   await report('cancelación de reserva', async () => {
     const created = await request('POST', '/api/reservations', {
-      retiroAt: reservationTime, horaDevolucion: '17:30', cantidad: 1
+      retiroAt: reservationTime, horaDevolucion: '17:30', cantidad: 1, curso: '6°14°'
     }, tokens.cancel);
     assert.equal(created.status, 201);
     const code = created.payload.reservation.id_codigo;
@@ -693,6 +700,27 @@ async function runFlows(users) {
       dni: '9900011', rol: 'alumno', password: 'new-user-pass-2026'
     }, tokens.admin);
     assert.equal(duplicate.status, 409);
+  });
+
+  await report('baja lógica y restauración de usuario', async () => {
+    const created = await request('POST', '/api/admin/users', {
+      nombre: 'Baja', apellido: 'Temporal', email: 'baja-temporal@gmail.com',
+      dni: '9900020', rol: 'alumno', password: 'baja-temp-pass-2026'
+    }, tokens.admin);
+    assert.equal(created.status, 201);
+    const dni = created.payload.user.dni;
+    assert.equal((await request('DELETE', `/api/admin/users/${dni}`, undefined, tokens.admin)).status, 200);
+    const activeUsers = await request('GET', '/api/admin/users', undefined, tokens.admin);
+    assert.ok(!activeUsers.payload.users.some((item) => item.dni === dni));
+    const deletedUsers = await request('GET', '/api/admin/users?eliminados=si', undefined, tokens.admin);
+    assert.ok(deletedUsers.payload.users.some((item) => item.dni === dni));
+    assert.equal((await request('POST', '/api/auth/login', {
+      email: 'baja-temporal@gmail.com', password: 'baja-temp-pass-2026'
+    })).status, 401);
+    assert.equal((await request('POST', `/api/admin/users/${dni}/restore`, {}, tokens.admin)).status, 200);
+    assert.equal((await request('POST', '/api/auth/login', {
+      email: 'baja-temporal@gmail.com', password: 'baja-temp-pass-2026'
+    })).status, 200);
   });
 
   await report('login no aplica las reglas de formato de claves nuevas', async () => {

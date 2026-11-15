@@ -23,10 +23,11 @@ function createValidBackup() {
     password_hash: 'hash',
     baneado: false,
     baneado_hasta: null,
+    eliminado_at: null,
     created_at: '2026-10-25T10:00:00.000Z'
   }];
   const columns = Object.fromEntries(tableNames.map((table) => [table, new Set([
-    'id', 'dni', 'nombre', 'email', 'rol', 'password_hash', 'baneado', 'baneado_hasta',
+    'id', 'dni', 'nombre', 'email', 'rol', 'password_hash', 'baneado', 'baneado_hasta', 'eliminado_at',
     'created_at', 'user_id', 'email_notifications', 'return_reminder_minutes', 'updated_at', 'slug', 'nombre',
     'numero', 'ubicacion_id', 'codigo', 'estado', 'ubicacion', 'carro_id', 'prestado_a', 'owner_id', 'tipo',
     'carro', 'curso', 'cantidad', 'retiro_at', 'motivo', 'reservation_id', 'notebook_id',

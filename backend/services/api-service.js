@@ -246,9 +246,7 @@ function reservationPayload(body, user) {
   if (type === 'lote' && user.rol !== 'profesor') throw new AppError('Solo profesores pueden solicitar lotes', 403);
   if (type === 'lote' && (quantity < 3 || quantity > 10)) throw new AppError('Un lote debe tener entre 3 y 10 notebooks', 400);
   if (type === 'individual' && quantity > 2) throw new AppError('Una reserva individual admite como máximo 2 notebooks', 400);
-  const curso = user.rol === 'profesor'
-    ? courseDivision(body.curso)
-    : null;
+  const curso = courseDivision(body.curso);
   let motivo = 'Sin especificar';
   if (body.motivo !== undefined && body.motivo !== null && body.motivo !== '') {
     motivo = requiredText(body.motivo, 'El motivo');
@@ -284,7 +282,8 @@ const actions = {
   },
   async professors(_body, user) {
     requireAdmin(user, 'Solo admin puede consultar profesores');
-    const result = await db.query("SELECT dni, nombre, email FROM users WHERE rol = 'profesor' ORDER BY nombre");
+    const result = await db.query(`SELECT dni, nombre, email FROM users
+      WHERE rol = 'profesor' AND eliminado_at IS NULL ORDER BY nombre`);
     return { professors: result.rows };
   },
   async users(_body, user, _params, query) {
@@ -295,7 +294,11 @@ const actions = {
     if (emailType && !['profesor', 'alumno', 'gmail', 'otro'].includes(emailType)) {
       throw new AppError('Tipo de correo inválido', 400);
     }
-    const result = await db.query(`SELECT dni, nombre, email, rol,
+    const deleted = query?.get('eliminados');
+    if (deleted && !['si', 'no'].includes(deleted)) {
+      throw new AppError('El filtro de cuentas eliminadas no es válido', 400);
+    }
+    const result = await db.query(`SELECT dni, nombre, email, rol, eliminado_at,
       (baneado AND (baneado_hasta IS NULL OR baneado_hasta > now())) AS baneado,
       baneado_hasta,
       CASE split_part(lower(email::text), '@', 2)
@@ -312,7 +315,9 @@ const actions = {
           WHEN 'gmail.com' THEN 'gmail'
           ELSE 'otro'
         END = $2)
-      ORDER BY nombre`, [role || null, emailType || null]);
+        AND ($3::boolean IS TRUE OR eliminado_at IS NULL)
+        AND ($3::boolean IS NOT TRUE OR eliminado_at IS NOT NULL)
+      ORDER BY nombre`, [role || null, emailType || null, deleted === 'si']);
     return { users: result.rows };
   },
   async createUser(body, user) {
@@ -742,7 +747,7 @@ const actions = {
       (l.estado IN ('activo', 'devolucion_pendiente') AND l.vence_at <= now()) AS vencido FROM loans l
       JOIN notebooks n ON n.id = l.notebook_id LEFT JOIN returns r ON r.loan_id = l.id
       LEFT JOIN reservations res ON res.id = l.reservation_id
-      WHERE l.user_id = $1 ORDER BY l.retirada_at, l.id`, [user.id]);
+      WHERE l.user_id = $1 ORDER BY l.retirada_at DESC, l.id DESC`, [user.id]);
     return { loans: result.rows };
   },
   async adminLoans(_body, user, _params, query) {
@@ -830,7 +835,7 @@ const actions = {
       LEFT JOIN ubicaciones ub ON ub.id = c.ubicacion_id
       LEFT JOIN returns r ON r.loan_id = l.id
       LEFT JOIN reservations res ON res.id = l.reservation_id
-      ${where} ORDER BY l.retirada_at, l.id`, values);
+      ${where} ORDER BY l.retirada_at DESC, l.id DESC`, values);
     return { loans: result.rows };
   },
   async adminReturnLoan(_body, user, { id }) {
@@ -1096,6 +1101,7 @@ const actions = {
     const users = await db.query(`SELECT summary.*, (u.baneado AND (u.baneado_hasta IS NULL OR u.baneado_hasta > now())) AS baneado,
       u.baneado_hasta
       FROM user_late_return_summary summary JOIN users u ON u.id = summary.id
+      WHERE u.eliminado_at IS NULL
       ORDER BY summary.tardanzas DESC, summary.nombre`);
     const history = await db.query(`SELECT u.nombre, u.rol, u.dni, n.codigo AS notebook_id,
       lr.returned_at AS fecha FROM late_returns lr JOIN users u ON u.id = lr.user_id
@@ -1108,7 +1114,7 @@ const actions = {
       const email = accountEmail(body.email);
       try {
         return await db.transaction(async (client) => {
-          const current = await client.query('SELECT id, rol FROM users WHERE dni = $1 FOR UPDATE', [dni]);
+          const current = await client.query('SELECT id, rol FROM users WHERE dni = $1 AND eliminado_at IS NULL FOR UPDATE', [dni]);
           if (!current.rowCount) throw new AppError('Usuario no encontrado o no modificable', 404);
           const nextRole = current.rows[0].rol === 'admin' ? 'admin' : roleFromEmail(email);
           const updated = await client.query(`UPDATE users SET email = $1, rol = $2
@@ -1128,10 +1134,32 @@ const actions = {
     }
     const result = await db.query(`UPDATE users SET baneado = $1,
       baneado_hasta = CASE WHEN NOT $1 OR $3::integer IS NULL THEN NULL ELSE now() + ($3::text || ' days')::interval END
-      WHERE dni = $2 AND rol <> 'admin'
+      WHERE dni = $2 AND rol <> 'admin' AND eliminado_at IS NULL
       RETURNING dni, nombre, baneado, baneado_hasta`, [body.baneado, dni, duration]);
     if (!result.rowCount) throw new AppError('Usuario no encontrado o no modificable', 404);
     return { user: result.rows[0] };
+  },
+  async deleteUser(_body, user, { dni }) {
+    requireAdmin(user, 'Solo admin puede dar de baja usuarios');
+    const target = await db.query('SELECT id, rol, eliminado_at FROM users WHERE dni = $1', [dni]);
+    if (!target.rowCount) throw new AppError('Usuario no encontrado', 404);
+    const found = target.rows[0];
+    if (String(found.id) === String(user.id)) throw new AppError('No podés dar de baja tu propia cuenta', 403);
+    if (found.rol === 'admin') throw new AppError('No se puede dar de baja una cuenta administradora', 403);
+    if (found.eliminado_at) throw new AppError('La cuenta ya estaba dada de baja', 409);
+    const result = await db.query(`UPDATE users SET eliminado_at = now(), baneado = FALSE, baneado_hasta = NULL
+      WHERE id = $1 AND eliminado_at IS NULL
+      RETURNING dni, nombre, email, rol, eliminado_at`, [found.id]);
+    if (!result.rowCount) throw new AppError('La cuenta ya estaba dada de baja', 409);
+    return { user: result.rows[0], message: 'Cuenta dada de baja' };
+  },
+  async restoreUser(_body, user, { dni }) {
+    requireAdmin(user, 'Solo admin puede restaurar usuarios');
+    const result = await db.query(`UPDATE users SET eliminado_at = NULL
+      WHERE dni = $1 AND eliminado_at IS NOT NULL
+      RETURNING dni, nombre, email, rol, eliminado_at`, [dni]);
+    if (!result.rowCount) throw new AppError('La cuenta no está dada de baja', 404);
+    return { user: result.rows[0], message: 'Cuenta restaurada' };
   },
   async updateUserRole(body, user, { dni }) {
     requireAdmin(user, 'Solo admin puede cambiar roles');
@@ -1140,7 +1168,7 @@ const actions = {
     }
     return db.transaction(async (client) => {
       await client.query('LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE');
-      const current = await client.query('SELECT id, dni, nombre, email, rol FROM users WHERE dni = $1 FOR UPDATE', [dni]);
+      const current = await client.query('SELECT id, dni, nombre, email, rol FROM users WHERE dni = $1 AND eliminado_at IS NULL FOR UPDATE', [dni]);
       if (!current.rowCount) throw new AppError('Usuario no encontrado', 404);
       const target = current.rows[0];
       if (String(target.id) === String(user.id)) throw new AppError('No podés cambiar tu propio rol', 403);

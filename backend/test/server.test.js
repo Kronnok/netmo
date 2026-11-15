@@ -35,6 +35,8 @@ test('resuelve rutas de API y sus parámetros', () => {
   assert.deepEqual(routes.resolve('PATCH', '/api/admin/carros/12').params, { numero: '12' });
   assert.deepEqual(routes.resolve('DELETE', '/api/admin/carros/12').params, { numero: '12' });
   assert.deepEqual(routes.resolve('PATCH', '/api/admin/users/1234567').params, { dni: '1234567' });
+  assert.equal(routes.resolve('DELETE', '/api/admin/users/1234567').action, 'deleteUser');
+  assert.equal(routes.resolve('POST', '/api/admin/users/1234567/restore').action, 'restoreUser');
   assert.deepEqual(routes.resolve('PATCH', '/api/admin/users/1234567/rol').params, { dni: '1234567' });
   assert.equal(routes.resolve('POST', '/api/admin/notebooks').action, 'createNotebooks');
   assert.equal(routes.resolve('GET', '/api/tickets/notebooks').action, 'ticketNotebooks');

@@ -66,7 +66,8 @@ async function requestForgot(body, request) {
   try {
     issued = await db.transaction(async (client) => {
       const result = await client.query(`SELECT id, email FROM users
-        WHERE email = $1 AND (NOT baneado OR (baneado_hasta IS NOT NULL AND baneado_hasta <= now()))
+        WHERE email = $1 AND eliminado_at IS NULL
+          AND (NOT baneado OR (baneado_hasta IS NOT NULL AND baneado_hasta <= now()))
         FOR UPDATE`, [normalizedEmail]);
       if (!result.rowCount) return null;
       const cooldown = await client.query(`SELECT 1 FROM password_resets
@@ -137,8 +138,8 @@ async function applyPasswordChange({ email, userId, purpose, code, password, req
   try {
     const updated = await db.transaction(async (client) => {
       const userResult = email
-        ? await client.query('SELECT id FROM users WHERE email = $1 FOR UPDATE', [email])
-        : await client.query('SELECT id FROM users WHERE id = $1 FOR UPDATE', [userId]);
+        ? await client.query('SELECT id FROM users WHERE email = $1 AND eliminado_at IS NULL FOR UPDATE', [email])
+        : await client.query('SELECT id FROM users WHERE id = $1 AND eliminado_at IS NULL FOR UPDATE', [userId]);
       if (!userResult.rowCount) throw new Error('invalid request');
       const targetUserId = userResult.rows[0].id;
       const resetResult = await client.query(`SELECT id, code_hash, attempts, expires_at, used_at
@@ -187,7 +188,7 @@ async function changePasswordWithCurrentPassword(body, user, request) {
   try {
     const updated = await db.transaction(async (client) => {
       const result = await client.query(`SELECT id FROM users
-        WHERE id = $1 AND password_hash = crypt($2, password_hash) FOR UPDATE`, [user.id, body.currentPassword]);
+        WHERE id = $1 AND eliminado_at IS NULL AND password_hash = crypt($2, password_hash) FOR UPDATE`, [user.id, body.currentPassword]);
       if (!result.rowCount) return false;
       await client.query("UPDATE users SET password_hash = crypt($1, gen_salt('bf')) WHERE id = $2", [body.password, user.id]);
       await client.query(`UPDATE password_resets SET used_at = now()

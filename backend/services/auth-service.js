@@ -13,7 +13,7 @@ async function authenticate(request) {
     RETURNING id`, [session.userId]);
   const userResult = await db.query(`SELECT id, dni, nombre, email, rol,
     (baneado AND (baneado_hasta IS NULL OR baneado_hasta > now())) AS baneado
-    FROM users WHERE id = $1`, [session.userId]);
+    FROM users WHERE id = $1 AND eliminado_at IS NULL`, [session.userId]);
   const user = userResult.rows[0];
   if (!user || user.baneado) throw new AppError('Cuenta no autorizada', 403);
   return user;
@@ -34,7 +34,8 @@ async function login(body, request) {
      )
      SELECT id, dni, nombre, email, rol,
       (baneado AND (baneado_hasta IS NULL OR baneado_hasta > now())) AS baneado
-      FROM users WHERE email = $1 AND password_hash = crypt($2, password_hash)`,
+      FROM users WHERE email = $1 AND eliminado_at IS NULL
+        AND password_hash = crypt($2, password_hash)`,
     [email, body.password]
   );
   const user = result.rows[0];

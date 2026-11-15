@@ -14,9 +14,9 @@ Los permisos de la interfaz se presentan por rol, pero la autorización efectiva
 
 | Rol | Permisos observados |
 |---|---|
-| `alumno` | Consultar inventario; administrar sus preferencias, reservas, préstamos y tickets; reservar una notebook por vez; reportar fallas y responder sus tickets. |
-| `profesor` | Las funciones comunes; además, informar curso, reservar más de una notebook y solicitar lotes de al menos tres equipos. Los lotes requieren aprobación administrativa. |
-| `admin` | Crear cuentas; administrar roles, carros, ubicaciones y notebooks; ver reservas y préstamos, registrar entregas y devoluciones; administrar tickets y respuestas; revisar demoras y banear usuarios con vencimiento. |
+| `alumno` | Consultar inventario; administrar sus preferencias, reservas, préstamos y tickets; reservar una notebook por vez indicando su curso; reportar fallas y responder sus tickets. |
+| `profesor` | Las funciones comunes; además, reservar más de una notebook y solicitar lotes de al menos tres equipos indicando el curso. Los lotes requieren aprobación administrativa. |
+| `admin` | Crear cuentas; administrar roles, carros, ubicaciones y notebooks; ver reservas y préstamos, registrar entregas y devoluciones; administrar tickets y respuestas; revisar demoras, banear usuarios con vencimiento y dar de baja o restaurar cuentas. |
 
 El seed contiene cuentas de ejemplo para instalaciones nuevas. No hay registro público: el administrador crea las cuentas nuevas de alumnos y profesores. Los usuarios existentes conservan sus credenciales y los valores de su DNI; el DNI solo se muestra al propio usuario y a administración.
 
@@ -30,7 +30,7 @@ El seed contiene cuentas de ejemplo para instalaciones nuevas. No hay registro p
 | Reservas | Crea reservas individuales o solicitudes de lote filtrando equipos por ubicación del carro, muestra las propias y permite cancelar las que aún son cancelables. |
 | Reportar falla / Mis tickets | Crea reportes asociados a notebooks del historial propio o a “Otra / no sé”; muestra el seguimiento y el hilo de respuestas. |
 | Perfil | Muestra los datos de cuenta y permite configurar notificaciones por correo y minutos de recordatorio (0 desactiva el aviso). |
-| Administración: Usuarios | Crea cuentas con correo institucional o `@gmail.com`, consulta las listas reales, permite cambiar roles y banear cuentas. |
+| Administración: Usuarios | Crea cuentas con correo institucional o `@gmail.com`, consulta las listas reales, permite cambiar roles, banear cuentas y dar de baja o restaurar cuentas sin perder el historial. |
 | Administración: Inventario | Lista y filtra notebooks; administra carros y ubicaciones editables, renumera carros y da de alta o mueve notebooks. |
 | Administración: Entregas y devoluciones | Busca usuarios y préstamos activos, registra devoluciones individuales o de un lote y actualiza la lista periódicamente. |
 | Administración: Préstamos | Lista reservas individuales y por lote, permite aprobar lotes y registrar entrega; notebooks disponibles pueden asignarse al entregar. |
@@ -50,11 +50,13 @@ El seed contiene cuentas de ejemplo para instalaciones nuevas. No hay registro p
 
 Las altas y cambios de correo de alumnos/profesores aceptan únicamente `@alu.bue.edu.ar`, `@bue.edu.ar` y `@gmail.com`. El rol institucional se valida; con `@gmail.com` se elige alumno o profesor. No se migran ni bloquean cuentas existentes.
 
+Las cuentas de alumno y profesor pueden darse de baja de forma lógica desde Usuarios. La cuenta queda inactiva (`users.eliminado_at`), no puede iniciar sesión, recuperar ni cambiar su contraseña y desaparece de los listados, pero conserva préstamos, devoluciones, tickets y tardanzas. El panel Cuentas eliminadas permite restaurarlas. No se puede dar de baja la propia cuenta ni una cuenta administradora.
+
 ### Reservas
 
-1. El usuario autenticado elige fecha, horario, ubicación (o todas), carro disponible, cantidad, motivo y, si es profesor, curso; para lote también indica cantidad y curso. Los carros se filtran por ubicación y muestran las unidades disponibles.
+1. El usuario autenticado elige fecha, horario, ubicación (o todas), carro disponible, cantidad, motivo y curso (año y división); para lote también indica cantidad y curso. Los carros se filtran por ubicación y muestran las unidades disponibles. La interfaz recuerda el último curso usado por DNI para autocompletarlo.
 2. Solo se admiten fechas futuras del año actual, de lunes a viernes, entre 08:00–11:50 o 13:30–17:40, hora de Buenos Aires.
-3. La cantidad debe ser de 1 a 40; alumnos solo pueden pedir una unidad. Un lote solo lo pide un profesor y debe tener al menos tres unidades; el curso es obligatorio para profesores.
+3. La cantidad debe ser de 1 a 40; alumnos solo pueden pedir una unidad. Un lote solo lo pide un profesor y debe tener al menos tres unidades; el curso es obligatorio en toda reserva, con formato `A°D°`.
 4. No se aceptan nuevas solicitudes mientras el usuario tenga un préstamo abierto o una reserva en estados `confirmada`, `pendiente_aprobacion` o `aprobada`.
 5. La API reserva equipos disponibles bajo transacción; si no alcanza la disponibilidad responde conflicto. La reserva individual queda `confirmada`; el lote queda `pendiente_aprobacion`.
 6. El administrador puede aprobar el lote. No hay acción API para rechazarlo ni liberar equipos al rechazar.
@@ -141,10 +143,13 @@ Salvo health y login, las rutas requieren `Authorization: Bearer <token>`. Los e
 | POST | `/api/auth/change-password` | Autenticado | `{currentPassword, password}` o `{code, password}` | Cambia la contraseña; el Perfil usa la contraseña actual y el código se conserva por compatibilidad. |
 | GET | `/api/me` | Autenticado | — | `{user}`. |
 | GET | `/api/admin/professors` | Admin | — | `{professors}`. |
-| GET | `/api/admin/users` | Admin | — | Usuarios de todos los roles en `{users}`. |
-| GET | `/api/admin/users?rol=alumno\|profesor\|admin` | Admin | — | Filtra las cuentas por rol. |
+| GET | `/api/admin/users` | Admin | — | Usuarios activos de todos los roles en `{users}`. |
+| GET | `/api/admin/users?rol=alumno\|profesor\|admin` | Admin | — | Filtra las cuentas activas por rol. |
+| GET | `/api/admin/users?eliminados=si` | Admin | — | Lista solo las cuentas dadas de baja. |
 | POST | `/api/admin/users` | Admin | `{nombre, apellido, email, dni, rol, password}` | Crea cuenta y preferencias; HTTP 201. |
 | PATCH | `/api/admin/users/:dni` | Admin | `{baneado, duracionDias?}` | `{user}`; duración 1, 3, 7, 15, 30 días o indefinida; no modifica administradores. |
+| DELETE | `/api/admin/users/:dni` | Admin | — | Baja lógica: completa `eliminado_at`; no borra historial ni permite administradores o la propia cuenta. |
+| POST | `/api/admin/users/:dni/restore` | Admin | — | Restaura una cuenta dada de baja. |
 | PATCH | `/api/admin/users/:dni/rol` | Admin | `{rol, password?}` | `{user}`; no permite cambiar el propio rol ni eliminar el último admin; al ascender exige contraseña. |
 | GET | `/api/carros` | Autenticado | — | `{carros}` con `numero`, `ubicacion`, `total` y `disponibles`. |
 | GET | `/api/admin/ubicaciones` | Admin | — | `{ubicaciones}`. |
@@ -161,7 +166,7 @@ Salvo health y login, las rutas requieren `Authorization: Bearer <token>`. Los e
 | GET | `/api/notebooks` | Autenticado | — | `{notebooks}`. |
 | PATCH | `/api/notebooks/:codigo` | Admin | `{estado?, carro?}` | `{notebook}`; permite cambiar estado o moverla a otro carro. |
 | GET | `/api/reservations` | Autenticado | — | Reservas propias en `{reservations}`. |
-| POST | `/api/reservations` | Autenticado | `{tipo, cantidad, curso?, carro?, ubicacion?, retiroAt, motivo?}` | `{reservation}`; valida que el carro corresponda a la ubicación; HTTP 201. |
+| POST | `/api/reservations` | Autenticado | `{tipo, cantidad, curso, carro?, ubicacion?, retiroAt, motivo?}` | `{reservation}`; exige curso `A°D°` y valida que el carro corresponda a la ubicación; HTTP 201. |
 | DELETE | `/api/reservations/:codigo` | Autenticado; solo propietario | — | `{message}`. |
 | GET | `/api/admin/reservations` | Admin | — | Todas las reservas en `{reservations}`. |
 | GET | `/api/admin/reservations?q=texto` | Admin | — | Reservas pendientes de entrega coincidentes; hasta 50 resultados. |
@@ -193,7 +198,7 @@ PostgreSQL usa `citext` para emails y `pgcrypto` para hash de contraseñas. Las 
 
 | Tabla | Columnas principales (tipo) y relaciones |
 |---|---|
-| `users` | `id BIGSERIAL PK`; `dni VARCHAR(32) UNIQUE`; `nombre VARCHAR(120)`; `email CITEXT UNIQUE`; `rol user_role`; `password_hash TEXT`; `baneado BOOLEAN`; `baneado_hasta TIMESTAMPTZ nullable`; `created_at TIMESTAMPTZ`. |
+| `users` | `id BIGSERIAL PK`; `dni VARCHAR(32) UNIQUE`; `nombre VARCHAR(120)`; `email CITEXT UNIQUE`; `rol user_role`; `password_hash TEXT`; `baneado BOOLEAN`; `baneado_hasta TIMESTAMPTZ nullable`; `eliminado_at TIMESTAMPTZ nullable`; `created_at TIMESTAMPTZ`. La baja lógica completa `eliminado_at` y conserva todo el historial. |
 | `user_preferences` | `user_id BIGINT PK/FK → users(id)`; `email_notifications BOOLEAN`; `return_reminder_minutes INTEGER` con valores permitidos 0/15/30/60; `updated_at TIMESTAMPTZ`. |
 | `ubicaciones` | `slug VARCHAR(32) PK`; `nombre VARCHAR(50)`; catálogo editable con las ubicaciones iniciales. |
 | `carros` | `numero INTEGER PK` entre 1 y 999; `ubicacion VARCHAR(20) nullable FK → ubicaciones(slug)`; `created_at TIMESTAMPTZ`. |
@@ -209,7 +214,7 @@ PostgreSQL usa `citext` para emails y `pgcrypto` para hash de contraseñas. Las 
 
 Enums: `user_role` = alumno/profesor/admin; `notebook_status` = disponible/prestada/mantenimiento/pendiente_devolucion; `reservation_type` = individual/lote; `reservation_status` = confirmada/pendiente_aprobacion/aprobada/retirada/rechazada/cancelada; `loan_status` = activo/devolucion_pendiente/devuelto; `ticket_status` = abierto/progreso/resuelto.
 
-La vista `user_late_return_summary` cuenta tardanzas y marca `candidato_a_sancion` desde tres, excluyendo administradores. Hay triggers para año, horario y fecha futura de reservas y para registrar devoluciones tardías.
+La vista `user_late_return_summary` cuenta tardanzas y marca `candidato_a_sancion` desde tres, excluyendo administradores. Al consultar tardanzas se excluyen las cuentas dadas de baja, aunque su historial permanece registrado. Hay triggers para año, horario y fecha futura de reservas y para registrar devoluciones tardías.
 
 ## 8. Autenticación y seguridad
 

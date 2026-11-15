@@ -2,6 +2,7 @@
    ESTADO EN MEMORIA
 ====================================================================== */
 let usuariosRegistrados = [];
+let usuariosEliminados = [];
 let usuariosConTardanzas = [];
 
 let currentUser = null;
@@ -403,7 +404,8 @@ async function cargarEstadoAPI(){
   }else{
     requests.push(
       ['lateReturns', apiRequest('/api/admin/late-returns')],
-      ['users', apiRequest('/api/admin/users')]
+      ['users', apiRequest('/api/admin/users')],
+      ['deletedUsers', apiRequest('/api/admin/users?eliminados=si')]
     );
   }
   const loaded = Object.fromEntries(await Promise.all(requests.map(async([key, promise])=>[key, await promise])));
@@ -449,6 +451,7 @@ async function cargarEstadoAPI(){
   }));
   if(esAdmin){
     usuariosRegistrados = loaded.users.users;
+    usuariosEliminados = loaded.deletedUsers?.users || [];
     usuariosConTardanzas = loaded.lateReturns.users;
     historialTardanzas = loaded.lateReturns.history.map(item=>({
       ...item, notebookId:item.notebook_id, fecha:formatBusinessDateTime(item.fecha)
@@ -746,8 +749,9 @@ function renderProfesoresTable(){
         <option value="admin" ${usuario.rol==='admin'?'selected':''}>Administrador</option>
       </select></td>
       <td>${usuario.rol==='admin'?'—':usuario.baneado?'Bloqueada':'Activa'}</td>
-      <td>${usuario.rol==='admin'?'—':`<button class="btn btn-sm ${usuario.baneado?'btn-success-outline':'btn-danger-outline'}"
-        onclick="cambiarEstadoCuenta(${escapeHtml(JSON.stringify(usuario.dni))}, ${!usuario.baneado})">${usuario.baneado?'Desbloquear':'Bloquear'}</button>`}</td>
+      <td>${usuario.rol==='admin'?'—':`<div class="inventory-actions"><button class="btn btn-sm ${usuario.baneado?'btn-success-outline':'btn-danger-outline'}"
+        onclick="cambiarEstadoCuenta(${escapeHtml(JSON.stringify(usuario.dni))}, ${!usuario.baneado})">${usuario.baneado?'Desbloquear':'Bloquear'}</button>
+        <button class="btn btn-sm btn-danger-outline" onclick="darBajaUsuario(${escapeHtml(JSON.stringify(usuario.dni))})">Dar de baja</button></div>`}</td>
     </tr>`).join('');
   }
 }
@@ -832,6 +836,51 @@ async function cambiarEstadoCuenta(dni, baneado){
   }
 }
 
+async function darBajaUsuario(dni){
+  const usuario = usuariosRegistrados.find(item=>item.dni===dni);
+  if(!usuario || usuario.rol==='admin') return;
+  if(!window.confirm(`¿Dar de baja la cuenta de ${usuario.nombre}? No podrá iniciar sesión, pero su historial de préstamos, devoluciones y tickets se conservará.`)) return;
+  try{
+    await apiRequest(`/api/admin/users/${encodeURIComponent(dni)}`, {method:'DELETE'});
+    await cargarEstadoAPI();
+    renderAll();
+    showToast(`Cuenta de ${usuario.nombre} dada de baja.`, 'success');
+  }catch(error){
+    showToast(error.message, 'warn');
+  }
+}
+
+async function restaurarUsuario(dni){
+  const usuario = usuariosEliminados.find(item=>item.dni===dni);
+  if(!usuario) return;
+  if(!window.confirm(`¿Restaurar la cuenta de ${usuario.nombre}? Volverá a poder iniciar sesión.`)) return;
+  try{
+    await apiRequest(`/api/admin/users/${encodeURIComponent(dni)}/restore`, {method:'POST'});
+    await cargarEstadoAPI();
+    renderAll();
+    showToast(`Cuenta de ${usuario.nombre} restaurada.`, 'success');
+  }catch(error){
+    showToast(error.message, 'warn');
+  }
+}
+
+function renderCuentasEliminadas(){
+  const tbody = document.getElementById('cuentasEliminadasTable');
+  if(!tbody) return;
+  if(!usuariosEliminados.length){
+    tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state"><p>No hay cuentas dadas de baja.</p></div></td></tr>`;
+    return;
+  }
+  tbody.innerHTML = usuariosEliminados.map(usuario=>`
+    <tr>
+      <td>${escapeHtml(usuario.nombre)}</td>
+      <td>${escapeHtml(usuario.email)}</td>
+      <td class="mono">${escapeHtml(usuario.dni)}</td>
+      <td>${escapeHtml(rolLabel[usuario.rol] || usuario.rol)} · ${formatBusinessDateTime(usuario.eliminado_at)}</td>
+      <td><button class="btn btn-sm btn-success-outline" onclick="restaurarUsuario(${escapeHtml(JSON.stringify(usuario.dni))})">Restaurar</button></td>
+    </tr>`).join('');
+}
+
 async function cambiarCorreoUsuario(dni){
   const input = document.getElementById(`user-email-${dni}`);
   if(!input) return;
@@ -906,21 +955,69 @@ function applyRoleVisibility(){
     el.style.display = roles.includes(rolActivo) ? '' : 'none';
   });
   toggleInicioParaRol();
+  renderRoleHomeBanner();
+  document.documentElement.dataset.role = rolActivo || '';
   const pill = document.getElementById('sidebarRolePill');
   pill.textContent = rolLabel[rolActivo];
   pill.className = 'role-pill role-' + rolActivo;
 }
 
+function renderRoleHomeBanner(){
+  const banner = document.getElementById('roleHomeBanner');
+  if(!banner) return;
+  const nombre = currentUser ? currentUser.nombre.split(' ')[0] : '';
+  const config = {
+    alumno: {
+      icon: '🎒',
+      title: `Hola${nombre ? ', '+escapeHtml(nombre) : ''}. Este es tu espacio`,
+      text: 'Reservá una notebook indicando tu curso, seguí tus préstamos y reportá fallas.'
+    },
+    profesor: {
+      icon: '📚',
+      title: `Panel docente${nombre ? ' · '+escapeHtml(nombre) : ''}`,
+      text: 'Gestioná reservas individuales y lotes para tus cursos, y revisá la actividad de tus equipos.'
+    },
+    admin: {
+      icon: '🛠️',
+      title: 'Panel de administración',
+      text: 'Controlá inventario, usuarios, entregas, devoluciones y copias de seguridad del sistema.'
+    }
+  }[rolActivo];
+  if(!config){ banner.innerHTML = ''; banner.hidden = true; return; }
+  banner.hidden = false;
+  banner.innerHTML = `<div class="banner-icon">${config.icon}</div><div><h3>${config.title}</h3><p>${config.text}</p></div>`;
+}
+
 function toggleProfesorUI(){
   const isProf = rolActivo === 'profesor';
   document.getElementById('loteToggleWrap').style.display = isProf ? 'flex' : 'none';
-  document.getElementById('resCursoAnio').required = isProf;
-  document.getElementById('resCursoDivision').required = isProf;
+  document.getElementById('resCursoAnio').required = true;
+  document.getElementById('resCursoDivision').required = true;
   if(!isProf){
     document.getElementById('loteToggle').checked = false;
     toggleLoteBlock();
   }
+  cargarCursoRecordado();
   actualizarControlesReserva();
+}
+
+function cargarCursoRecordado(){
+  if(!currentUser) return;
+  const anioInput = document.getElementById('resCursoAnio');
+  const divisionInput = document.getElementById('resCursoDivision');
+  if(!anioInput || !divisionInput || anioInput.value || divisionInput.value) return;
+  let curso = '';
+  try{ curso = localStorage.getItem('netmo_curso_'+currentUser.dni) || ''; }catch(err){ /* ignorar */ }
+  const match = curso.match(/^([1-7])°(\d{1,2})°$/);
+  if(!match) return;
+  anioInput.value = match[1];
+  divisionInput.value = match[2];
+  document.getElementById('resCursoPreview').textContent = `Curso: ${curso}`;
+}
+
+function guardarCursoRecordado(curso){
+  if(!currentUser || !curso) return;
+  try{ localStorage.setItem('netmo_curso_'+currentUser.dni, curso); }catch(err){ /* ignorar */ }
 }
 
 function abrirReservaLote(){
@@ -939,8 +1036,8 @@ function toggleLoteBlock(){
   const checked = document.getElementById('loteToggle').checked;
   document.getElementById('loteBlock').classList.toggle('show', checked);
   document.getElementById('resCantidadWrap').style.display = checked ? 'none' : 'flex';
-  document.getElementById('resCursoAnio').required = rolActivo==='profesor';
-  document.getElementById('resCursoDivision').required = rolActivo==='profesor';
+  document.getElementById('resCursoAnio').required = true;
+  document.getElementById('resCursoDivision').required = true;
   document.getElementById('resSubmitBtn').textContent = checked ? 'Enviar solicitud de lote' : 'Enviar solicitud';
   actualizarControlesReserva();
 }
@@ -1019,7 +1116,7 @@ function actualizarResumenReserva(){
     `${cantidad} ${Number(cantidad)===1?'notebook':'notebooks'}`,
     fecha ? `${formatFecha(fecha)}${hora ? ` · ${hora}` : ''}` : 'Elegí el día y horario',
     horaDevolucion ? `Devolución ${horaDevolucion}` : '',
-    esLote ? curso : ''
+    curso && !curso.startsWith('Obligatorio') ? curso : ''
   ].filter(Boolean).join(' · ');
 }
 
@@ -1039,11 +1136,15 @@ function switchView(name){
   const firstName = currentUser ? currentUser.nombre.split(' ')[0] : '';
   document.getElementById('pageTitle').textContent = titleTpl.replace('{NOMBRE}', firstName ? ', '+firstName : '');
   document.getElementById('pageSubtitle').textContent =
-    name==='inicio' && rolActivo==='profesor'
-      ? 'Consultá tus reservas, préstamos y pedidos de lote para tus cursos.'
-      : name==='reservas' && rolActivo==='profesor'
-        ? 'Programá el retiro individual de hasta 2 equipos o solicitá un lote para un curso completo.'
-        : sub;
+    name==='inicio' && rolActivo==='alumno'
+      ? 'Consultá la disponibilidad, reservá tu notebook indicando tu curso y seguí tus préstamos.'
+      : name==='inicio' && rolActivo==='profesor'
+        ? 'Consultá tus reservas, préstamos y pedidos de lote para tus cursos.'
+        : name==='reservas' && rolActivo==='alumno'
+          ? 'Programá el retiro de una notebook indicando siempre tu curso y división.'
+          : name==='reservas' && rolActivo==='profesor'
+            ? 'Programá el retiro individual de hasta 2 equipos o solicitá un lote para un curso completo.'
+            : sub;
   window.scrollTo({top:0, behavior:'smooth'});
 
   if(name==='inicio' && rolActivo!=='admin') renderMiActividad();
@@ -1227,6 +1328,7 @@ function renderAll(){
   renderTicketsPropios();
   renderPerfil();
   renderProfesoresTable();
+  renderCuentasEliminadas();
   renderAdminInventario();
   renderDevoluciones();
   renderLotes();
@@ -1270,9 +1372,8 @@ function renderUbicacionesManager(){
   const list = document.getElementById('ubicacionesList');
   if(!list) return;
   list.innerHTML = ubicaciones.length
-    ? `<div class="inventory-table-scroll"><table class="inventory-table inventory-table-locations"><thead><tr><th>Ubicación</th><th>Slug</th><th>Acciones</th></tr></thead><tbody>${ubicaciones.map(location=>`
+    ? `<div class="inventory-table-scroll"><table class="inventory-table inventory-table-locations"><thead><tr><th>Ubicación</th><th>Acciones</th></tr></thead><tbody>${ubicaciones.map(location=>`
       <tr><td><input class="inventory-input" id="ubicacion-${escapeHtml(location.slug)}" type="text" maxlength="50" minlength="2" value="${escapeHtml(location.nombre)}" aria-label="Nombre de ${escapeHtml(location.nombre)}"></td>
-      <td class="mono">${escapeHtml(location.slug)}</td>
       <td><div class="inventory-actions"><button class="btn btn-sm" onclick="renombrarUbicacion(${escapeHtml(JSON.stringify(location.slug))})">Guardar</button>
       <button class="btn btn-sm btn-danger-outline" onclick="eliminarUbicacion(${escapeHtml(JSON.stringify(location.slug))})">Eliminar</button></div></td></tr>`).join('')}</tbody></table></div>`
     : '<p class="empty-state">Todavía no hay ubicaciones.</p>';
@@ -1949,7 +2050,7 @@ async function crearReservaAPI(e){
   const cantidad = esLote ? Number(document.getElementById('loteCantidad').value) : (rolActivo==='profesor' ? Number(document.getElementById('resCantidad').value) : 1);
   const anio = document.getElementById('resCursoAnio').value;
   const division = document.getElementById('resCursoDivision').value;
-  const curso = rolActivo==='profesor' && anio && division ? `${anio}°${division}°` : null;
+  const curso = anio && division ? `${anio}°${division}°` : null;
   const motivoInput = document.getElementById('resMotivo').value;
   const motivo = motivoInput.trim();
   const carro = document.getElementById('resCarro').value;
@@ -1963,7 +2064,7 @@ async function crearReservaAPI(e){
     showToast(errorBox.textContent, 'warn');
     return;
   }
-  if(rolActivo==='profesor' && (!curso || !/^[1-7]°(?:[1-9]|[1-9]\d)°$/.test(curso))){
+  if(!curso || !/^[1-7]°(?:[1-9]|[1-9]\d)°$/.test(curso)){
     errorBox.textContent = 'Ingresá un año de 1 a 7 y una división de 1 a 99.';
     showToast(errorBox.textContent, 'warn');
     return;
@@ -1995,6 +2096,7 @@ async function crearReservaAPI(e){
     })});
     document.getElementById('reservaForm').reset();
     document.getElementById('loteToggle').checked = false;
+    guardarCursoRecordado(curso);
     toggleLoteBlock();
     await cargarEstadoAPI();
     renderAll();
@@ -2837,8 +2939,9 @@ document.getElementById('resHora').addEventListener('input', updateReservationMi
   document.getElementById(id).addEventListener('change', actualizarResumenReserva);
 });
 document.getElementById('reservaForm').addEventListener('reset', ()=>{
-  document.getElementById('resCursoPreview').textContent = 'Se enviará como A°D° (por ejemplo, 2°14°).';
+  document.getElementById('resCursoPreview').textContent = 'Obligatorio en cada reserva. Se envía como A°D° (por ejemplo, 2°14°).';
   setTimeout(()=>{
+    cargarCursoRecordado();
     updateReservationMinima();
     actualizarResumenReserva();
   });
@@ -2854,7 +2957,7 @@ actualizarContadorUbicacion();
     const division = document.getElementById('resCursoDivision').value;
     document.getElementById('resCursoPreview').textContent = anio && division
       ? `Curso: ${anio}°${division}°`
-      : 'Se enviará como A°D° (por ejemplo, 2°14°).';
+      : 'Obligatorio en cada reserva. Se envía como A°D° (por ejemplo, 2°14°).';
     actualizarResumenReserva();
   });
 });

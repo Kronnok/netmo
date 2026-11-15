@@ -57,6 +57,8 @@ Fuera de alcance:
 - Las cuentas nuevas deben aparecer en el listado administrativo de profesores.
 - Una cuenta nueva no debe guardar curso en `users`.
 - El curso se conserva en la reserva y se copia al préstamo cuando se crea.
+- Toda reserva, individual o por lote, debe exigir un curso con formato `A°D°` tanto para alumnos como para profesores.
+- La interfaz recuerda el último curso usado por DNI en el navegador para autocompletar la próxima reserva.
 - La vista administrativa de profesores solo lista cuentas existentes y permite buscarlas por nombre, email o legajo.
 - No se deben devolver hashes ni contraseñas desde ningún endpoint.
 
@@ -129,6 +131,22 @@ Fuera de alcance:
 - La eliminacion aplica a reservas individuales de alumnos, reservas individuales de profesores y lotes de profesores.
 - Deben conservarse las validaciones de ano, fecha no pasada, dias habiles y horario permitido.
 
+### 8. Baja logica de usuarios
+
+- Un administrador puede dar de baja cuentas de alumno o profesor desde la vista Usuarios.
+- La baja es logica: `users.eliminado_at` se completa y no se borra ningun registro.
+- Una cuenta dada de baja no puede iniciar sesion, refrescar sesion, recuperar ni cambiar su contrasena.
+- Las cuentas dadas de baja no aparecen en los listados de usuarios ni en el resumen de tardanzas, pero su historial de prestamos, devoluciones y tickets se conserva.
+- El panel Cuentas eliminadas lista las cuentas inactivas y permite restaurarlas.
+- No se puede dar de baja la propia cuenta ni una cuenta administradora.
+
+### 9. Historial y presentacion
+
+- El historial de prestamos del alumno y del administrador se ordena del mas reciente al mas antiguo (`retirada_at DESC, id DESC`).
+- La tabla de ubicaciones ya no muestra la columna Slug; el slug se conserva internamente para las rutas.
+- La interfaz aplica un acento visual por rol: verde para alumno, violeta para profesor y rojo para administrador.
+- El inicio muestra un banner distinto segun el rol y conserva paneles especificos sin duplicar toda la interfaz.
+
 ## Archivos y componentes afectados
 
 - `index.html`
@@ -145,7 +163,9 @@ Fuera de alcance:
   - baneo por legajo;
   - validaciones de reservas.
 - `database/schema.sql`
-  - solo si la implementacion requiere una restriccion adicional. No se preve migracion para el alcance actual.
+  - agregar `users.eliminado_at` y su índice para la baja lógica.
+- `database/migrations/015-soft-delete-users.sql`
+  - migración incremental de la baja lógica de usuarios.
 - `documentacion-netmo.txt`
   - actualizar solo para describir el comportamiento finalmente implementado y validado.
 
@@ -180,6 +200,10 @@ Fuera de alcance:
 - CA-12: Inventario no ofrece `reservada` como estado manual y permite cambiar los cuatro estados soportados por la base de datos cuando el usuario es administrador.
 - CA-13: una cuenta alumno o profesor recibe `403` al intentar modificar tickets, notebooks o baneos.
 - CA-14: demo y API muestran resultados equivalentes para los flujos cubiertos.
+- CA-15: toda reserva sin curso valido recibe `400` y la interfaz exige ano y division antes de enviarla.
+- CA-16: una cuenta dada de baja no puede iniciar sesion y puede restaurarse desde Cuentas eliminadas sin perder su historial.
+- CA-17: el historial de prestamos se muestra con el movimiento mas reciente primero.
+- CA-18: el acento visual y el banner de inicio cambian segun el rol activo.
 
 ## Estrategia de validacion
 
