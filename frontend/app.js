@@ -2637,12 +2637,11 @@ function updateAdminTicketsBadge(){
    ADMIN · DEVOLUCIONES TARDÍAS Y SANCIONES
 ====================================================================== */
 function renderTardanzas(){
-  const wrap = document.getElementById('usuariosTardiosWrap');
   const blockedWrap = document.getElementById('usuariosBloqueadosWrap');
   const tbody = document.getElementById('historialTardanzasTable');
   const porUsuarioBody = document.getElementById('historialPorUsuarioTable');
   const badge = document.getElementById('tardanzasBadge');
-  if(!wrap || !tbody) return;
+  if(!tbody) return;
 
   const query = normalizeSearchText(document.getElementById('lateReturnsSearch')?.value);
   const todosUsuarios = usuariosConTardanzas.filter(user=>normalizeSearchText([
@@ -2670,36 +2669,6 @@ function renderTardanzas(){
     }
   }
 
-  const blockDurationControl = u => `<select class="inventory-select" id="block-duration-${escapeHtml(u.dni)}" aria-label="Duración del bloqueo para ${escapeHtml(u.nombre)}">
-    <option value="1">1 día</option><option value="3">3 días</option><option value="7">7 días</option>
-    <option value="15">15 días</option><option value="30">30 días</option><option value="indefinido">Indefinido</option>
-  </select>`;
-  const blockAction = u => u.baneado
-    ? `<button class="btn btn-sm btn-success-outline" onclick="cambiarBaneo(${escapeHtml(JSON.stringify(u.dni))}, false)">Desbloquear usuario</button>`
-    : `${blockDurationControl(u)}<button class="btn btn-sm btn-danger-outline" onclick="cambiarBaneo(${escapeHtml(JSON.stringify(u.dni))}, true, document.getElementById('block-duration-${escapeHtml(u.dni)}').value)">Bloquear usuario</button>`;
-
-  const ordenados = todosUsuarios
-    .filter(u=>!u.baneado && Number(u.tardanzas) > 0)
-    .sort((a,b)=>(b.tardanzas||0)-(a.tardanzas||0) || a.nombre.localeCompare(b.nombre));
-  if(ordenados.length===0){
-    wrap.innerHTML = `<div class="empty-state">
-      <div class="glyph">✅</div><h4>No hay entregas tardías pendientes</h4><p>${usuariosConTardanzas.some(u=>Number(u.tardanzas)>0 && !u.baneado) ? 'No hay usuarios que coincidan con la búsqueda.' : 'Cuando se registren demoras vas a poder evaluar un bloqueo desde acá.'}</p>
-    </div>`;
-  } else {
-    wrap.innerHTML = ordenados.map(u=>{
-      const until = u.baneado_hasta ? ` · bloqueado hasta ${formatBusinessDateTime(u.baneado_hasta)}` : '';
-      return `
-      <div class="action-card" style="cursor:default;margin-bottom:.8rem;${u.tardanzas>=3 ? 'border-color:var(--red-text);' : ''}">
-        <div class="action-icon" style="${u.tardanzas>=3 ? 'background:var(--red-bg);color:var(--red-text);' : 'background:var(--orange-bg);color:var(--orange-text);'}">⏰</div>
-        <div class="action-info">
-          <h4>${escapeHtml(u.nombre)} <span class="hint">(${escapeHtml(rolLabel[u.rol] || u.rol)} · ${escapeHtml(u.dni)})</span></h4>
-          <p>${escapeHtml(u.tardanzas ?? 0)} entrega${u.tardanzas===1?'':'s'} tardía${u.tardanzas===1?'':'s'} registrada${u.tardanzas===1?'':'s'}${u.tardanzas>=3 ? ' · candidato a bloqueo' : ''}${escapeHtml(until)}</p>
-        </div>
-        ${blockAction(u)}
-      </div>`;
-    }).join('');
-  }
-
   const bloqueados = todosUsuarios
     .filter(u=>u.baneado)
     .sort((a,b)=>a.nombre.localeCompare(b.nombre));
@@ -2714,7 +2683,7 @@ function renderTardanzas(){
             <h4>${escapeHtml(u.nombre)} <span class="hint">(${escapeHtml(rolLabel[u.rol] || u.rol)} · ${escapeHtml(u.dni)})</span></h4>
             <p>${escapeHtml(until)} · ${escapeHtml(u.tardanzas ?? 0)} entrega${u.tardanzas===1?'':'s'} tardía${u.tardanzas===1?'':'s'}</p>
           </div>
-          ${blockAction(u)}
+          <button class="btn btn-sm btn-success-outline" onclick="cambiarBaneo(${escapeHtml(JSON.stringify(u.dni))}, false)">Desbloquear usuario</button>
         </div>`;
       }).join('')
       : `<div class="empty-state"><div class="glyph">🔓</div><h4>No hay usuarios bloqueados</h4><p>${usuariosConTardanzas.some(u=>u.baneado) ? 'No hay usuarios bloqueados que coincidan con la búsqueda.' : 'Las cuentas bloqueadas van a aparecer en este panel.'}</p></div>`;

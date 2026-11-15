@@ -756,13 +756,6 @@
     <div class="search-bar-wrap"><input type="search" id="lateReturnsSearch" class="search-bar" maxlength="50" placeholder="Buscar por usuario, DNI, equipo o rol" oninput="filterLateReturns()">
       <button type="button" class="btn btn-sm" onclick="document.getElementById('lateReturnsSearch').value='';filterLateReturns()">Limpiar</button><span id="lateReturnsResultsCount" class="hint" aria-live="polite"></span></div>
     <div class="card" style="margin-bottom:1.5rem;">
-      <div class="card-header">
-        <div><h3>Usuarios con entregas tardías</h3><p>A partir de 3 demoras registradas, el sistema te avisa para que evalúes un bloqueo. Los usuarios bloqueados se muestran en el panel siguiente.</p></div>
-      </div>
-      <div id="usuariosTardiosWrap"></div>
-    </div>
-
-    <div class="card" style="margin-bottom:1.5rem;">
       <div class="card-header"><div><h3>Usuarios bloqueados</h3><p>Cuentas que no pueden reservar ni retirar equipos hasta que las desbloquees o venza el plazo.</p></div></div>
       <div id="usuariosBloqueadosWrap"></div>
     </div>
