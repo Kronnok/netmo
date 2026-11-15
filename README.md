@@ -63,8 +63,9 @@ deben guardarse en el repositorio.
 Las cuentas nuevas de alumnos y profesores usan `@alu.bue.edu.ar`,
 `@bue.edu.ar` o `@gmail.com`; las cuentas históricas no se modifican. El rol se
 deriva del dominio institucional y se puede elegir para `@gmail.com`. La
-recuperación y las notificaciones usan `MAIL_PROVIDER=gas` (Google Apps Script)
-o, solo en desarrollo, `console`; configurá sus variables en `.env.example`.
+recuperación y las notificaciones usan `MAIL_PROVIDER=brevo` (Brevo) o
+`MAIL_PROVIDER=gas` (Google Apps Script), o `console` solo en desarrollo;
+configurá sus variables en `.env.example`.
 
 La instalación no publica credenciales de ejemplo. Configurá contraseñas
 privadas mediante `.env.example` y las variables de entorno del seed; si una

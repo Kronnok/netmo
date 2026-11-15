@@ -9,13 +9,13 @@ usuario correspondiente; y configuración/documentación de despliegue.
 
 ## Comportamiento esperado
 
-- El servicio de correo usa las variables `MAIL_PROVIDER`,
+- El servicio de correo usa las variables `MAIL_PROVIDER`, `MAIL_API_KEY`,
   `MAIL_GAS_URL`, `MAIL_GAS_SECRET`, `MAIL_FROM_EMAIL` y `MAIL_FROM_NAME`.
-  Soporta `gas` y `console`; el proveedor GAS sigue redirecciones,
-  corta a los 15 segundos y acepta solamente respuesta HTTP satisfactoria con
-  cuerpo `ok`; consola solo en desarrollo. Faltantes de
-  configuración en producción producen errores explícitos, sin exponer
-  secretos ni interrumpir operaciones de negocio que notifican.
+  Soporta `brevo`, `gas` y `console`; Brevo usa su API HTTPS con el encabezado
+  `api-key`; GAS sigue redirecciones, corta a los 15 segundos y acepta solamente
+  respuesta HTTP satisfactoria con cuerpo `ok`; consola solo en desarrollo.
+  Faltantes de configuración en producción producen errores explícitos, sin
+  exponer secretos ni interrumpir operaciones de negocio que notifican.
 - `npm run mail:test -- destino@correo.com` envía un mensaje de prueba.
 - Al confirmar una reserva o devolución, se envía aviso únicamente si la
   preferencia `email_notifications` del usuario es verdadera. Un fallo de
