@@ -15,7 +15,9 @@ usuario correspondiente; y configuración/documentación de despliegue.
   `api-key`; GAS sigue redirecciones, corta a los 15 segundos y acepta solamente
   respuesta HTTP satisfactoria con cuerpo `ok`; consola solo en desarrollo.
   Faltantes de configuración en producción producen errores explícitos, sin
-  exponer secretos ni interrumpir operaciones de negocio que notifican.
+  exponer secretos ni interrumpir operaciones de negocio que notifican. Los
+  errores HTTP del proveedor incluyen su mensaje para diagnóstico en el
+  servidor, nunca en la respuesta al cliente.
 - `npm run mail:test -- destino@correo.com` envía un mensaje de prueba.
 - Al confirmar una reserva o devolución, se envía aviso únicamente si la
   preferencia `email_notifications` del usuario es verdadera. Un fallo de
@@ -33,12 +35,19 @@ usuario correspondiente; y configuración/documentación de despliegue.
   cinco intentos; comparan el hash en tiempo constante; exigen contraseña de
   ocho o más caracteres sin espacios y actualizan el hash con `crypt` y
   `gen_salt('bf')` transaccionalmente. Los errores de reset son genéricos.
-- El cambio requiere sesión y dispone de rutas de solicitud y confirmación.
-  Estos endpoints usan limitación de intentos coherente con el limitador
+- El cambio requiere sesión y dispone de la ruta de confirmación. El Perfil
+  pide la contraseña actual y una nueva, sin depender del correo. Las rutas
+  `/api/auth/change-password/request` y `{code, password}` se conservan por
+  compatibilidad. Si el código no se pudo enviar, la solicitud de cambio
+  responde 503 y el código emitido se invalida.
+- Para “Olvidé mi contraseña”, un fallo de envío conserva la respuesta genérica
+  y registra el detalle en el servidor; el código emitido se invalida y no
+  queda utilizable.
+- Estos endpoints usan limitación de intentos coherente con el limitador
   existente.
 - El login ofrece recuperación mediante correo, código, contraseña nueva con
-  repetición, mostrar/ocultar y reenvío. Perfil ofrece cambio de contraseña.
-  Los valores dinámicos en HTML se escapan.
+  repetición, mostrar/ocultar y reenvío. Perfil ofrece cambio de contraseña con
+  la contraseña actual. Los valores dinámicos en HTML se escapan.
 - `.env.example` lista únicamente nombres; `render.yaml` declara las nuevas
   variables privadas con `sync: false`; `DEPLOY.md` documenta Apps Script sin
   publicar secretos.

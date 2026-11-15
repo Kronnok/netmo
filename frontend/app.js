@@ -598,22 +598,16 @@ async function restablecerPassword(){
   }
 }
 
-async function solicitarCambioPassword(){
-  const message = document.getElementById('changePasswordMessage');
-  try{
-    const result = await apiRequest('/api/auth/change-password/request', {method:'POST', body:'{}'});
-    document.getElementById('changePasswordForm').hidden = false;
-    message.textContent = result.message;
-  }catch(error){
-    message.textContent = error.message;
-  }
-}
-
 async function cambiarPassword(event){
   event.preventDefault();
-  const form = document.getElementById('changePasswordForm');
+  const form = event.currentTarget;
   const message = document.getElementById('changePasswordMessage');
+  const currentPassword = document.getElementById('changePasswordCurrent').value;
   const password = document.getElementById('changePasswordNew').value;
+  if(!currentPassword){
+    message.textContent = 'Ingresá tu contraseña actual.';
+    return;
+  }
   if(password !== document.getElementById('changePasswordRepeat').value){
     message.textContent = 'Las contraseñas no coinciden.';
     return;
@@ -622,17 +616,21 @@ async function cambiarPassword(event){
     message.textContent = 'La contraseña debe tener al menos 8 caracteres y no contener espacios.';
     return;
   }
+  const submitButton = form.querySelector('button[type="submit"]');
+  submitButton.disabled = true;
+  message.textContent = '';
   try{
     const result = await apiRequest('/api/auth/change-password', {
       method:'POST',
-      body:JSON.stringify({code:document.getElementById('changePasswordCode').value.trim(), password})
+      body:JSON.stringify({currentPassword, password})
     });
     form.reset();
-    form.hidden = true;
     message.textContent = result.message;
     showToast(result.message, 'success');
   }catch(error){
     message.textContent = error.message;
+  }finally{
+    submitButton.disabled = false;
   }
 }
 

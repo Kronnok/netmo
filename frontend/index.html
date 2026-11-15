@@ -495,13 +495,12 @@
         </div>
       </div>
       <div class="card">
-        <div class="card-header"><div><h3>Cambiar contraseña</h3><p>Solicitá un código de verificación para actualizar tu contraseña.</p></div></div>
+        <div class="card-header"><div><h3>Cambiar contraseña</h3><p>Ingresá tu contraseña actual y elegí una nueva.</p></div></div>
         <div id="changePasswordMessage" class="field-error" role="status"></div>
-        <button type="button" id="changePasswordRequestButton" class="btn btn-primary" onclick="solicitarCambioPassword()">Enviar código</button>
-        <form id="changePasswordForm" onsubmit="cambiarPassword(event)" hidden>
+        <form id="changePasswordForm" onsubmit="cambiarPassword(event)">
           <div class="field">
-            <label for="changePasswordCode">Código de 6 dígitos</label>
-            <input id="changePasswordCode" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required autocomplete="one-time-code">
+            <label for="changePasswordCurrent">Contraseña actual</label>
+            <div class="password-input-wrap"><input type="password" id="changePasswordCurrent" maxlength="50" required autocomplete="current-password"><button type="button" class="btn btn-sm" onclick="togglePasswordVisibility('changePasswordCurrent', this)">Mostrar</button></div>
           </div>
           <div class="field">
             <label for="changePasswordNew">Nueva contraseña</label>
@@ -512,7 +511,6 @@
             <div class="password-input-wrap"><input type="password" id="changePasswordRepeat" maxlength="50" minlength="8" required autocomplete="new-password"><button type="button" class="btn btn-sm" onclick="togglePasswordVisibility('changePasswordRepeat', this)">Mostrar</button></div>
           </div>
           <button type="submit" class="btn btn-primary">Cambiar contraseña</button>
-          <button type="button" class="btn btn-sm" onclick="solicitarCambioPassword()">Reenviar código</button>
         </form>
       </div>
     </div>

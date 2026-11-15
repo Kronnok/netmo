@@ -66,7 +66,15 @@ Render a partir del manifiesto. Después de cambiar el esquema, volvé a ejecuta
 **Brevo:** verificá el remitente en Brevo, generá una API key y cargala como
 `MAIL_API_KEY` en Render. Usá `MAIL_PROVIDER=brevo` y configurá
 `MAIL_FROM_EMAIL` y `MAIL_FROM_NAME`. La API sigue redirecciones y espera como
-máximo 15 segundos.
+máximo 15 segundos. Si la clave tiene “Restrict to IP addresses”, desactivala:
+el plan free de Render no tiene una IP de salida fija. Después de cambiar
+cualquier variable `MAIL_*`, guardá los cambios y hacé un **Manual Deploy**
+para que el servicio reinicie con la configuración nueva.
+
+El Perfil cambia la contraseña pidiendo la contraseña actual, así que ese flujo
+no depende del correo. Si el envío de un código falla, la API responde 503 y el
+código emitido queda invalidado; “Olvidé mi contraseña” mantiene una respuesta
+genérica y registra el detalle real solo en los logs del servidor.
 
 **Google Apps Script:** creá un proyecto con una función `doPost` que lea el
 JSON recibido (`secret`, `to`, `subject`, `html`), compare `secret` con un
@@ -101,8 +109,10 @@ por cada usuario y no reenvía un recordatorio ya marcado.
 - **Netlify:** importá el proyecto; [`netlify.toml`](./netlify.toml) configura
   el directorio estático.
 
-En [`frontend/config.js`](./frontend/config.js), establece `apiBaseUrl` con la
-URL HTTPS del servicio Render. Repetí exactamente el origen del frontend en
+En [`frontend/config.js`](./frontend/config.js), `apiBaseUrl` usa
+`http://localhost:3000` cuando la página se abre desde `localhost` o
+`127.0.0.1`, y la URL HTTPS de Render en cualquier otro host. Verificá la URL de
+Render antes de desplegar. Repetí exactamente el origen del frontend en
 `CORS_ORIGIN` de Render y desplegá de nuevo. No agregues rutas ni una barra
 final al origen CORS.
 

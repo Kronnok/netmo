@@ -23,14 +23,19 @@ function generateCode() {
 }
 
 async function sendIssuedCode({ email, purpose, code }) {
+  await sendMail({
+    to: email,
+    subject: purpose === 'reset' ? 'Recuperar contraseña de NetMO' : 'Cambiar contraseña de NetMO',
+    html: `<p>Tu código de verificación es:</p><p style="font-size:24px;font-weight:bold;letter-spacing:4px">${code}</p><p>Vence en 10 minutos. Si no solicitaste este cambio, ignorá este correo.</p>`
+  });
+}
+
+async function invalidateIssuedCode(id) {
+  if (!id) return;
   try {
-    await sendMail({
-      to: email,
-      subject: purpose === 'reset' ? 'Recuperar contraseña de NetMO' : 'Cambiar contraseña de NetMO',
-      html: `<p>Tu código de verificación es:</p><p style="font-size:24px;font-weight:bold;letter-spacing:4px">${code}</p><p>Vence en 10 minutos. Si no solicitaste este cambio, ignorá este correo.</p>`
-    });
-  } catch {
-    console.error('No se pudo enviar un correo de recuperación.');
+    await db.query('UPDATE password_resets SET used_at = now() WHERE id = $1 AND used_at IS NULL', [id]);
+  } catch (error) {
+    console.error('No se pudo invalidar un código de verificación.', error);
   }
 }
 
@@ -57,8 +62,9 @@ async function requestForgot(body, request) {
     return GENERIC_FORGOT_RESPONSE;
   }
 
+  let issued = null;
   try {
-    const issued = await db.transaction(async (client) => {
+    issued = await db.transaction(async (client) => {
       const result = await client.query(`SELECT id, email FROM users
         WHERE email = $1 AND (NOT baneado OR (baneado_hasta IS NOT NULL AND baneado_hasta <= now()))
         FOR UPDATE`, [normalizedEmail]);
@@ -71,13 +77,14 @@ async function requestForgot(body, request) {
       const codeHash = digestCode(code, result.rows[0].id);
       await client.query(`UPDATE password_resets SET used_at = now()
         WHERE user_id = $1 AND purpose = 'reset' AND used_at IS NULL`, [result.rows[0].id]);
-      await client.query(`INSERT INTO password_resets (user_id, code_hash, purpose, expires_at)
-        VALUES ($1, $2, 'reset', now() + interval '10 minutes')`, [result.rows[0].id, codeHash]);
-      return { ...result.rows[0], code, codeHash };
+      const inserted = await client.query(`INSERT INTO password_resets (user_id, code_hash, purpose, expires_at)
+        VALUES ($1, $2, 'reset', now() + interval '10 minutes') RETURNING id`, [result.rows[0].id, codeHash]);
+      return { ...result.rows[0], code, id: inserted.rows[0].id };
     });
     if (issued) await sendIssuedCode({ email: issued.email, purpose: 'reset', code: issued.code });
   } catch (error) {
-    console.error('No se pudo procesar una solicitud de recuperación de contraseña.');
+    console.error('No se pudo procesar una solicitud de recuperación de contraseña.', error);
+    if (issued) await invalidateIssuedCode(issued.id);
   }
   return GENERIC_FORGOT_RESPONSE;
 }
@@ -98,15 +105,21 @@ async function requestChange(body, user, request) {
       const codeHash = digestCode(code, user.id);
       await client.query(`UPDATE password_resets SET used_at = now()
         WHERE user_id = $1 AND purpose = 'change' AND used_at IS NULL`, [user.id]);
-      await client.query(`INSERT INTO password_resets (user_id, code_hash, purpose, expires_at)
-        VALUES ($1, $2, 'change', now() + interval '10 minutes')`, [user.id, codeHash]);
-      return { code, codeHash };
+      const inserted = await client.query(`INSERT INTO password_resets (user_id, code_hash, purpose, expires_at)
+        VALUES ($1, $2, 'change', now() + interval '10 minutes') RETURNING id`, [user.id, codeHash]);
+      return { code, id: inserted.rows[0].id };
     });
-    await sendIssuedCode({ email: user.email, purpose: 'change', code: issued.code });
-    return { message: 'Si el envío se completó, recibirás un código en tu correo.' };
+    try {
+      await sendIssuedCode({ email: user.email, purpose: 'change', code: issued.code });
+    } catch (error) {
+      console.error('No se pudo enviar un código para cambiar la contraseña.', error);
+      await invalidateIssuedCode(issued.id);
+      throw new AppError('No se pudo enviar el código. Intentá nuevamente más tarde.', 503);
+    }
+    return { message: 'Te enviamos un código de verificación a tu correo.' };
   } catch (error) {
     if (error.status) throw error;
-    console.error('No se pudo enviar un código para cambiar la contraseña.');
+    console.error('No se pudo generar un código para cambiar la contraseña.', error);
     throw new AppError('No se pudo enviar el código. Intentá nuevamente más tarde.', 503);
   }
 }
@@ -158,12 +171,48 @@ async function applyPasswordChange({ email, userId, purpose, code, password, req
   }
 }
 
+async function changePasswordWithCurrentPassword(body, user, request) {
+  const email = user.email.toLowerCase();
+  const namespace = 'password-change-current';
+  if (!recordRequest(request, email, namespace)) {
+    throw new AppError(rateLimitMessage(request, email, namespace, 'Demasiados intentos.'), 429);
+  }
+  accountPassword(body.password);
+  if (typeof body.currentPassword !== 'string' || !body.currentPassword) {
+    throw new AppError('Ingresá tu contraseña actual', 400);
+  }
+  if (body.currentPassword.length > 50) {
+    throw new AppError('La contraseña actual no es correcta', 400);
+  }
+  try {
+    const updated = await db.transaction(async (client) => {
+      const result = await client.query(`SELECT id FROM users
+        WHERE id = $1 AND password_hash = crypt($2, password_hash) FOR UPDATE`, [user.id, body.currentPassword]);
+      if (!result.rowCount) return false;
+      await client.query("UPDATE users SET password_hash = crypt($1, gen_salt('bf')) WHERE id = $2", [body.password, user.id]);
+      await client.query(`UPDATE password_resets SET used_at = now()
+        WHERE user_id = $1 AND used_at IS NULL`, [user.id]);
+      return true;
+    });
+    if (!updated) throw new AppError('La contraseña actual no es correcta', 400);
+    rateLimiter.clearFailures(request, email, namespace);
+    return { message: 'La contraseña se actualizó correctamente.' };
+  } catch (error) {
+    if (error.status) throw error;
+    console.error('No se pudo cambiar la contraseña con la contraseña actual.', error);
+    throw new AppError('No se pudo cambiar la contraseña. Intentá nuevamente más tarde.', 500);
+  }
+}
+
 async function resetPassword(body, request) {
   const email = normalizeEmail(body.email, 50);
   return applyPasswordChange({ email, purpose: 'reset', code: body.code, password: body.password, request });
 }
 
 async function changePassword(body, user, request) {
+  if (body && body.currentPassword !== undefined) {
+    return changePasswordWithCurrentPassword(body, user, request);
+  }
   return applyPasswordChange({
     userId: user.id,
     email: user.email.toLowerCase(),

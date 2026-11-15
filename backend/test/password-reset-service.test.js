@@ -7,15 +7,18 @@ process.env.MAIL_PROVIDER = 'console';
 
 const db = require('../data/database');
 const rateLimiter = require('../services/login-rate-limiter');
-const { requestForgot, resetPassword } = require('../services/password-reset-service');
+const { requestForgot, resetPassword, requestChange, changePassword } = require('../services/password-reset-service');
 
 async function withResetStore({ exists = true, email = 'legacy@example.test' } = {}, callback) {
   const originalTransaction = db.transaction;
   const originalInfo = console.info;
+  const originalError = console.error;
   const state = {
     user: exists ? { id: '44', email } : null,
     reset: null,
     passwordChanged: false,
+    currentPasswordValid: true,
+    invalidated: false,
     transactions: 0
   };
   let issuedEmail;
@@ -26,6 +29,12 @@ async function withResetStore({ exists = true, email = 'legacy@example.test' } =
         if (sql.includes('SELECT id, email FROM users')) {
           return state.user ? { rowCount: 1, rows: [state.user] } : { rowCount: 0, rows: [] };
         }
+        if (sql.includes('SELECT id FROM users') && sql.includes('password_hash = crypt')) {
+          return state.currentPasswordValid ? { rowCount: 1, rows: [{ id: state.user.id }] } : { rowCount: 0, rows: [] };
+        }
+        if (sql.includes('SELECT id FROM users WHERE id = $1 FOR UPDATE')) {
+          return state.user ? { rowCount: 1, rows: [{ id: state.user.id }] } : { rowCount: 0, rows: [] };
+        }
         if (sql.includes('SELECT 1 FROM password_resets')) return { rowCount: 0, rows: [] };
         if (sql.includes('INSERT INTO password_resets')) {
           state.reset = {
@@ -35,7 +44,7 @@ async function withResetStore({ exists = true, email = 'legacy@example.test' } =
             expires_at: new Date(Date.now() + 10 * 60_000),
             used_at: null
           };
-          return { rowCount: 1, rows: [] };
+          return { rowCount: 1, rows: [{ id: '8' }] };
         }
         if (sql.includes('SELECT id FROM users WHERE email')) {
           return state.user ? { rowCount: 1, rows: [{ id: state.user.id }] } : { rowCount: 0, rows: [] };
@@ -52,6 +61,11 @@ async function withResetStore({ exists = true, email = 'legacy@example.test' } =
           state.passwordChanged = true;
           return { rowCount: 1, rows: [] };
         }
+        if (sql.includes('WHERE user_id = $1 AND used_at IS NULL')) {
+          state.invalidated = true;
+          if (state.reset) state.reset.used_at = new Date();
+          return { rowCount: 1, rows: [] };
+        }
         if (sql.includes('UPDATE password_resets SET used_at')) {
           if (state.reset && params[0] === state.reset.id) state.reset.used_at = new Date();
           return { rowCount: 1, rows: [] };
@@ -60,7 +74,17 @@ async function withResetStore({ exists = true, email = 'legacy@example.test' } =
       }
     });
   };
+  const originalQuery = db.query;
+  db.query = async (sql, params = []) => {
+    if (sql.includes('UPDATE password_resets SET used_at') && sql.includes('WHERE id = $1')) {
+      state.invalidated = true;
+      if (state.reset) state.reset.used_at = new Date();
+      return { rowCount: 1, rows: [] };
+    }
+    return originalQuery.call(db, sql, params);
+  };
   console.info = (...args) => { issuedEmail = args; };
+  console.error = () => {};
   rateLimiter.reset();
   try {
     await callback({
@@ -72,7 +96,9 @@ async function withResetStore({ exists = true, email = 'legacy@example.test' } =
     });
   } finally {
     db.transaction = originalTransaction;
+    db.query = originalQuery;
     console.info = originalInfo;
+    console.error = originalError;
     rateLimiter.reset();
   }
 }
@@ -164,5 +190,65 @@ test('cinco códigos incorrectos agotan intentos, se limita el pedido y valida l
     }
     assert.equal(state.reset.attempts, 5);
     assert.ok(state.reset.used_at);
+  });
+});
+
+test('forgot mantiene la respuesta genérica e invalida el código si el correo falla', async () => {
+  await withResetStore({}, async ({ state }) => {
+    const originalProvider = process.env.MAIL_PROVIDER;
+    const originalKey = process.env.MAIL_API_KEY;
+    process.env.MAIL_PROVIDER = 'brevo';
+    delete process.env.MAIL_API_KEY;
+    try {
+      const response = await requestForgot({ email: 'legacy@example.test' }, request());
+      assert.equal(response.message, 'Si el correo está registrado, recibirás instrucciones para continuar.');
+      assert.equal(state.invalidated, true);
+      assert.ok(state.reset?.used_at);
+    } finally {
+      process.env.MAIL_PROVIDER = originalProvider;
+      if (originalKey === undefined) delete process.env.MAIL_API_KEY;
+      else process.env.MAIL_API_KEY = originalKey;
+    }
+  });
+});
+
+test('el cambio autenticado responde 503 e invalida el código si el correo falla', async () => {
+  await withResetStore({}, async ({ state }) => {
+    const originalProvider = process.env.MAIL_PROVIDER;
+    const originalKey = process.env.MAIL_API_KEY;
+    process.env.MAIL_PROVIDER = 'brevo';
+    delete process.env.MAIL_API_KEY;
+    try {
+      await assert.rejects(
+        requestChange({}, { id: '44', email: 'legacy@example.test' }, request()),
+        (error) => error.status === 503 && /No se pudo enviar el código/.test(error.message)
+      );
+      assert.equal(state.invalidated, true);
+      assert.ok(state.reset?.used_at);
+    } finally {
+      process.env.MAIL_PROVIDER = originalProvider;
+      if (originalKey === undefined) delete process.env.MAIL_API_KEY;
+      else process.env.MAIL_API_KEY = originalKey;
+    }
+  });
+});
+
+test('cambia la contraseña con la contraseña actual sin depender del correo', async () => {
+  await withResetStore({}, async ({ state }) => {
+    const user = { id: '44', email: 'legacy@example.test' };
+    const changed = await changePassword({
+      currentPassword: 'old-password-123', password: 'new-password-123'
+    }, user, request());
+    assert.equal(changed.message, 'La contraseña se actualizó correctamente.');
+    assert.equal(state.passwordChanged, true);
+    assert.equal(state.invalidated, true);
+
+    state.passwordChanged = false;
+    state.currentPasswordValid = false;
+    await assert.rejects(
+      changePassword({ currentPassword: 'wrong-password', password: 'new-password-123' }, user, request('192.0.2.46')),
+      (error) => error.status === 400 && /contraseña actual no es correcta/i.test(error.message)
+    );
+    assert.equal(state.passwordChanged, false);
   });
 });

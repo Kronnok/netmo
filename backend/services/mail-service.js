@@ -66,7 +66,22 @@ async function sendMail({ to, subject, html }) {
     }
     throw new Error('No se pudo conectar con el proveedor de correo');
   }
-  if (!response.ok) throw new Error(`El proveedor de correo respondió HTTP ${response.status}`);
+  if (!response.ok) {
+    let detail = '';
+    try {
+      const raw = await response.text();
+      try {
+        const parsed = JSON.parse(raw);
+        detail = parsed.message || parsed.code || '';
+      } catch {
+        detail = raw.trim().slice(0, 200);
+      }
+    } catch {
+      detail = '';
+    }
+    const suffix = detail ? `: ${detail}` : '';
+    throw new Error(`El proveedor de correo respondió HTTP ${response.status}${suffix}`);
+  }
   if (provider === 'gas' && (await response.text()).trim() !== 'ok') {
     throw new Error('El proveedor GAS devolvió una respuesta no válida');
   }

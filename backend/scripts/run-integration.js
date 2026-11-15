@@ -840,6 +840,18 @@ async function runFlows(users) {
     assert.equal((await request('POST', '/api/auth/login', {
       email: users.student.email, password: 'changed-pass-2026'
     })).status, 200);
+
+    const wrongCurrentPassword = await request('POST', '/api/auth/change-password', {
+      currentPassword: 'contraseña-incorrecta', password: 'final-pass-2026'
+    }, tokens.student);
+    assert.equal(wrongCurrentPassword.status, 400);
+    const currentPasswordChange = await request('POST', '/api/auth/change-password', {
+      currentPassword: 'changed-pass-2026', password: 'final-pass-2026'
+    }, tokens.student);
+    assert.equal(currentPasswordChange.status, 200);
+    assert.equal((await request('POST', '/api/auth/login', {
+      email: users.student.email, password: 'final-pass-2026'
+    })).status, 200);
   });
 
   const originalBackupResponse = await report('backup con metadata y checksum', async () => {
