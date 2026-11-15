@@ -149,7 +149,7 @@
       Fallas reportadas <span class="nav-badge" id="adminTicketsBadge" style="display:none;">0</span></button></li>
     <li data-roles="admin"><button class="nav-item" data-view="admin-tardanzas" onclick="switchView('admin-tardanzas')">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-      Devoluciones tardías <span class="nav-badge" id="tardanzasBadge" style="display:none;">0</span></button></li>
+      Devoluciones y bloqueos <span class="nav-badge" id="tardanzasBadge" style="display:none;">0</span></button></li>
     <li data-roles="admin"><button class="nav-item" data-view="admin-backup" onclick="switchView('admin-backup')">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 19h14"/></svg>
       Copias de seguridad</button></li>
@@ -250,6 +250,11 @@
           <div class="action-info"><h4>Pedir notebooks</h4><p>Elegí carro, día y horario</p></div>
           <span class="action-arrow">›</span>
         </button>
+        <button class="action-card" data-roles="profesor" onclick="abrirReservaLote()">
+          <div class="action-icon" style="background:var(--purple-bg);color:var(--purple-text);">👥</div>
+          <div class="action-info"><h4>Pedir lote para un curso</h4><p>Hasta 10 equipos para tus clases</p></div>
+          <span class="action-arrow">›</span>
+        </button>
         <button class="action-card" data-roles="alumno,profesor" onclick="switchView('prestamos')">
           <div class="action-icon" style="background:var(--blue-bg);color:var(--blue-text);">💻</div>
           <div class="action-info"><h4>Mis préstamos</h4><p>La devolución la registra el administrador</p></div>
@@ -320,6 +325,9 @@
           <input type="checkbox" id="loteToggle" onchange="toggleLoteBlock()">
           <label for="loteToggle" style="margin:0;">Solicitar un <b>lote</b> de notebooks para un curso completo</label>
         </div>
+        <p id="reservaProfesorHint" class="hint" data-roles-el="profesor" style="margin-bottom:1.1rem;">
+          Como profesor podés reservar hasta 2 equipos individuales o solicitar un lote de 3 a 10 equipos indicando año y división.
+        </p>
 
         <form id="reservaForm" onsubmit="crearReserva(event)">
           <h4 class="form-step-heading">1. Carro y cantidad</h4>
@@ -551,7 +559,7 @@
     </div>
     <div class="card" style="margin-top:1.5rem;">
       <div class="card-header">
-        <div><h3>Usuarios</h3><p>Las cuentas desactivadas conservan el historial de préstamos.</p></div>
+        <div><h3>Usuarios</h3><p>Las cuentas bloqueadas no pueden reservar ni retirar equipos, pero conservan su historial de préstamos.</p></div>
         <div class="search-bar-wrap">
           <input type="search" id="profesoresSearchInput" class="search-bar" maxlength="50" placeholder="Buscar por nombre, correo, DNI, rol o bloqueo" oninput="filterProfesores()" aria-label="Buscar usuario">
           <button type="button" class="btn btn-sm" onclick="document.getElementById('profesoresSearchInput').value='';filterProfesores()">Limpiar</button>
@@ -743,21 +751,26 @@
     </div>
   </section>
 
-  <!-- ============ VIEW: ADMIN · DEVOLUCIONES TARDÍAS / SANCIONES ============ -->
+  <!-- ============ VIEW: ADMIN · DEVOLUCIONES TARDÍAS / BLOQUEOS ============ -->
   <section class="view" id="view-admin-tardanzas">
     <div class="search-bar-wrap"><input type="search" id="lateReturnsSearch" class="search-bar" maxlength="50" placeholder="Buscar por usuario, DNI, equipo o rol" oninput="filterLateReturns()">
       <button type="button" class="btn btn-sm" onclick="document.getElementById('lateReturnsSearch').value='';filterLateReturns()">Limpiar</button><span id="lateReturnsResultsCount" class="hint" aria-live="polite"></span></div>
     <div class="card" style="margin-bottom:1.5rem;">
       <div class="card-header">
-        <div><h3>Usuarios con entregas tardías</h3><p>A partir de 3 demoras registradas, el sistema te avisa para que evalúes una sanción.</p></div>
+        <div><h3>Usuarios con entregas tardías</h3><p>A partir de 3 demoras registradas, el sistema te avisa para que evalúes un bloqueo. Los usuarios bloqueados se muestran en el panel siguiente.</p></div>
       </div>
       <div id="usuariosTardiosWrap"></div>
     </div>
 
     <div class="card" style="margin-bottom:1.5rem;">
-      <div class="card-header"><div><h3>Resumen por usuario</h3><p>Demoras registradas y elegibilidad para evaluación de sanción.</p></div></div>
+      <div class="card-header"><div><h3>Usuarios bloqueados</h3><p>Cuentas que no pueden reservar ni retirar equipos hasta que las desbloquees o venza el plazo.</p></div></div>
+      <div id="usuariosBloqueadosWrap"></div>
+    </div>
+
+    <div class="card" style="margin-bottom:1.5rem;">
+      <div class="card-header"><div><h3>Resumen por usuario</h3><p>Demoras registradas, estado de la cuenta y elegibilidad para evaluación de sanción.</p></div></div>
       <table>
-        <thead><tr><th>Usuario</th><th>Rol</th><th>DNI</th><th>Devoluciones tardías</th><th>Candidato a sanción</th></tr></thead>
+        <thead><tr><th>Usuario</th><th>Rol</th><th>DNI</th><th>Devoluciones tardías</th><th>Candidato a sanción</th><th>Cuenta</th></tr></thead>
         <tbody id="historialPorUsuarioTable"></tbody>
       </table>
     </div>
@@ -851,7 +864,8 @@
     <form id="ticketReplyForm" hidden onsubmit="enviarRespuestaTicket(event)">
       <div class="field"><label for="ticketReplyMessage">Respuesta</label>
         <textarea id="ticketReplyMessage" maxlength="500" data-no-counter disabled required oninput="actualizarContadorRespuesta()"></textarea>
-        <span id="ticketReplyCounter" class="hint">0/500</span></div>
+        <span id="ticketReplyCounter" class="hint">0/500</span>
+        <span id="ticketReplyHint" class="hint"></span></div>
     </form>
     <div class="modal-actions">
       <button type="button" class="btn" onclick="closeModal('ticketRepliesModal')">Cerrar</button>

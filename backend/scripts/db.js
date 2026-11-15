@@ -16,7 +16,8 @@ const migrations = [
   '010-dni-carros-y-sesiones.sql',
   '011-ubicaciones-recordatorios-y-respuestas.sql',
   '012-stable-carro-location-ids.sql',
-  '013-ticket-loan-link.sql'
+  '013-ticket-loan-link.sql',
+  '014-ticket-automatic-replies.sql'
 ];
 
 async function migrate() {

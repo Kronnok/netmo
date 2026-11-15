@@ -451,11 +451,13 @@ async function runFlows(users) {
     }, tokens.professor);
     assert.equal(ticketOne.status, 201);
     const ticketReplyPath = `/api/tickets/${ticketOne.payload.ticket.id}/replies`;
-    assert.equal((await request('POST', ticketReplyPath, { mensaje: 'Respuesta administrativa' }, tokens.professor)).status, 403);
+    assert.equal((await request('POST', ticketReplyPath, { mensaje: 'Información adicional del profesor' }, tokens.professor)).status, 200);
     assert.equal((await request('POST', ticketReplyPath, { mensaje: 'Respuesta administrativa' }, tokens.admin)).status, 200);
     const professorReplies = await request('GET', ticketReplyPath, undefined, tokens.professor);
     assert.equal(professorReplies.status, 200);
-    assert.equal(professorReplies.payload.replies[0].mensaje, 'Respuesta administrativa');
+    assert.ok(professorReplies.payload.replies.some((reply) => reply.mensaje === 'Respuesta administrativa'));
+    assert.ok(professorReplies.payload.replies.some((reply) => reply.author_role === 'sistema'
+      && /Recibimos tu reporte/.test(reply.mensaje)));
     let notebook = await pool.query(`SELECT n.estado, n.prestado_a FROM loans l
       JOIN notebooks n ON n.id = l.notebook_id WHERE l.id = $1`, [loan.id]);
     assert.equal(notebook.rows[0].estado, 'prestada');

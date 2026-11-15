@@ -254,7 +254,7 @@ function validateRows(backup, availableTables, columnsByTable) {
     ['tickets', 'owner_id', 'users', false],
     ['tickets', 'resolved_by', 'users', true],
     ['ticket_replies', 'ticket_id', 'tickets', false],
-    ['ticket_replies', 'author_id', 'users', false],
+    ['ticket_replies', 'author_id', 'users', true],
     ['late_returns', 'loan_id', 'loans', false],
     ['late_returns', 'user_id', 'users', false],
     ['late_returns', 'notebook_id', 'notebooks', false]

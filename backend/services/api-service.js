@@ -20,6 +20,8 @@ const {
 const { sendMail } = require('./mail-service');
 const { mapTicketRow } = require('./ticket-mapper');
 
+const TICKET_AUTO_REPLY_MESSAGE = 'Recibimos tu reporte. El equipo de NetMO lo va a revisar y te responderá por este medio. Si querés, podés agregar más información en esta conversación.';
+
 async function notifyByEmail(userId, subject, html) {
   try {
     const result = await db.query(`SELECT u.email FROM users u
@@ -889,7 +891,7 @@ const actions = {
           OR translate(lower(coalesce(receiver.nombre, '')), 'áéíóúüñàèìòùäëïöüç', 'aeiouunaeiouaeiouc') LIKE ${pattern} ESCAPE '\\')`;
       }
       const result = await db.query(`SELECT r.id AS return_id, l.id AS loan_id, n.codigo AS notebook,
-        u.dni, u.nombre, l.curso, r.confirmado_at AS devuelta_at, l.vence_at,
+        u.dni, u.nombre, l.curso, l.retirada_at, r.confirmado_at AS devuelta_at, l.vence_at,
         r.confirmado_por AS receptor_id, receiver.nombre AS recibido_por,
         (r.confirmado_at > l.vence_at) AS demorada
         FROM returns r JOIN loans l ON l.id = r.loan_id
@@ -998,14 +1000,17 @@ const actions = {
       }
       const result = await client.query(`INSERT INTO tickets
         (codigo, loan_id, notebook_id, owner_id, motivo, descripcion)
-        VALUES ($1, $2, $3, $4, $5, $6) RETURNING codigo AS id, estado, loan_id, notebook_id`,
+        VALUES ($1, $2, $3, $4, $5, $6) RETURNING id AS ticket_id, codigo AS id, estado, loan_id, notebook_id`,
       [`TCK-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`, relatedLoanId,
         notebookId, user.id, motivo, descripcion]);
+      const { ticket_id: ticketId, ...ticket } = result.rows[0];
+      await client.query(`INSERT INTO ticket_replies (ticket_id, author_id, mensaje)
+        VALUES ($1, NULL, $2)`, [ticketId, TICKET_AUTO_REPLY_MESSAGE]);
       if (notebookId) {
         await client.query(`UPDATE notebooks SET estado = CASE WHEN estado = 'disponible' THEN 'mantenimiento' ELSE estado END,
           updated_at = now() WHERE id = $1`, [notebookId]);
       }
-      return { ticket: result.rows[0] };
+      return { ticket };
     });
   },
   async ticketReplies(_body, user, { code }) {
@@ -1015,18 +1020,21 @@ const actions = {
       throw new AppError('No podés consultar las respuestas de este ticket', 403);
     }
     const result = await db.query(`SELECT r.id, r.mensaje, r.created_at,
-      u.id AS author_id, u.nombre AS autor, u.rol AS author_role
-      FROM ticket_replies r JOIN users u ON u.id = r.author_id
+      u.id AS author_id, COALESCE(u.nombre, 'NetMO') AS autor,
+      COALESCE(u.rol::text, 'sistema') AS author_role
+      FROM ticket_replies r LEFT JOIN users u ON u.id = r.author_id
       WHERE r.ticket_id = $1 ORDER BY r.created_at, r.id`, [ticket.rows[0].id]);
     return { replies: result.rows };
   },
   async createTicketReply(body, user, { code }) {
-    requireAdmin(user, 'Solo admin puede responder tickets');
     const message = requiredText(body.mensaje, 'El mensaje', 500);
     const result = await db.transaction(async (client) => {
       const ticket = await client.query('SELECT id, owner_id FROM tickets WHERE codigo = $1 FOR UPDATE', [code]);
       if (!ticket.rowCount) throw new AppError('Ticket no encontrado', 404);
       const record = ticket.rows[0];
+      if (user.rol !== 'admin' && String(record.owner_id) !== String(user.id)) {
+        throw new AppError('No podés responder este ticket', 403);
+      }
       const inserted = await client.query(`INSERT INTO ticket_replies (ticket_id, author_id, mensaje)
         VALUES ($1, $2, $3) RETURNING id, mensaje, created_at`,
       [record.id, user.id, message]);

@@ -48,7 +48,7 @@ const badgeLabel = {disponible:'Disponible', prestada:'Prestada', reservada:'Res
 const estadosNotebookManuales = ['disponible','mantenimiento'];
 const ticketBadgeClass = {abierto:'badge-abierto', progreso:'badge-progreso', resuelto:'badge-resuelto'};
 const ticketBadgeLabel = {abierto:'Abierto', progreso:'En progreso', resuelto:'Resuelto'};
-const rolLabel = {alumno:'Alumno', profesor:'Profesor', admin:'Administrador'};
+const rolLabel = {alumno:'Alumno', profesor:'Profesor', admin:'Administrador', sistema:'NetMO · automático'};
 const emailTypeLabel = {
   alumno:'Correo institucional de alumno',
   profesor:'Correo institucional de profesor',
@@ -56,6 +56,69 @@ const emailTypeLabel = {
   otro:'Otro correo'
 };
 const BUSINESS_TIME_ZONE = 'America/Argentina/Buenos_Aires';
+const FILTER_STORAGE_PREFIX = 'netmo_filter:';
+const persistedFiltersByView = {
+  inicio: ['searchInput', 'filterEstado'],
+  prestamos: ['myLoansSearch', 'myLoansState'],
+  tickets: ['myTicketsSearch', 'myTicketsState'],
+  'admin-profesores': ['profesoresSearchInput', 'usersEmailType'],
+  'admin-inventario': ['adminSearchInput', 'adminFilterEstado'],
+  'admin-devoluciones': ['returnsHistorySearch'],
+  'admin-circulation': [
+    'circulationSearch', 'circulationState', 'circulationOverdue', 'circulationDateFrom',
+    'circulationDateTo', 'circulationReason', 'circulationUser', 'circulationEquipment',
+    'circulationCarro', 'circulationLocation'
+  ],
+  'admin-lotes': ['adminReservationsSearch'],
+  'admin-tickets': ['adminTicketsSearch', 'adminTicketsState'],
+  'admin-tardanzas': ['lateReturnsSearch']
+};
+const filterViewById = Object.fromEntries(Object.entries(persistedFiltersByView)
+  .flatMap(([view, ids])=>ids.map(id=>[id, view])));
+
+function filterElementValue(element){
+  if(!element) return '';
+  if(element.type==='checkbox' || element.type==='radio') return element.checked ? '1' : '';
+  return element.value;
+}
+
+function saveFiltersForView(view){
+  const ids = persistedFiltersByView[view];
+  if(!ids) return;
+  for(const id of ids){
+    const element = document.getElementById(id);
+    if(!element) continue;
+    try{
+      const value = filterElementValue(element);
+      if(value) localStorage.setItem(FILTER_STORAGE_PREFIX+id, value);
+      else localStorage.removeItem(FILTER_STORAGE_PREFIX+id);
+    }catch{}
+  }
+}
+
+function restoreFiltersForView(view){
+  const ids = persistedFiltersByView[view];
+  if(!ids) return;
+  for(const id of ids){
+    const element = document.getElementById(id);
+    if(!element) continue;
+    try{
+      const value = localStorage.getItem(FILTER_STORAGE_PREFIX+id);
+      if(value===null) continue;
+      if(element.type==='checkbox' || element.type==='radio') element.checked = value==='1';
+      else element.value = value;
+    }catch{}
+  }
+}
+
+function restoreAllFilters(){
+  Object.keys(persistedFiltersByView).forEach(restoreFiltersForView);
+}
+
+function saveFilterFromEvent(event){
+  const view = filterViewById[event.target?.id];
+  if(view) saveFiltersForView(view);
+}
 
 function normalizeSearchText(value){
   return String(value ?? '').normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase().trim();
@@ -183,7 +246,7 @@ const pageMeta = {
   'admin-circulation':  ['Entregas y devoluciones', 'Registrá las entregas y devoluciones de notebooks.'],
   'admin-lotes':        ['Préstamos', 'Aprobá y registrá el retiro de las solicitudes de préstamo (individuales o por lote).'],
   'admin-tickets':      ['Fallas reportadas', 'Tickets enviados por alumnos y profesores. Actualizá el estado del equipo según corresponda.'],
-  'admin-tardanzas':    ['Devoluciones tardías', 'Historial de demoras y sanciones a alumnos y profesores.'],
+  'admin-tardanzas':    ['Devoluciones y bloqueos', 'Historial de demoras, evaluación de sanciones y cuentas bloqueadas.'],
   'admin-backup':       ['Copias de seguridad', 'Descargá una copia o restaurá los datos del sistema.'],
 };
 
@@ -684,9 +747,9 @@ function renderProfesoresTable(){
         ${roleOptionsForUser(usuario).map(role=>`<option value="${role}" ${usuario.rol===role?'selected':''}>${escapeHtml(rolLabel[role])}</option>`).join('')}
         <option value="admin" ${usuario.rol==='admin'?'selected':''}>Administrador</option>
       </select></td>
-      <td>${usuario.rol==='admin'?'—':usuario.baneado?'Desactivada':'Activa'}</td>
+      <td>${usuario.rol==='admin'?'—':usuario.baneado?'Bloqueada':'Activa'}</td>
       <td>${usuario.rol==='admin'?'—':`<button class="btn btn-sm ${usuario.baneado?'btn-success-outline':'btn-danger-outline'}"
-        onclick="cambiarEstadoCuenta(${escapeHtml(JSON.stringify(usuario.dni))}, ${!usuario.baneado})">${usuario.baneado?'Reactivar':'Desactivar'}</button>`}</td>
+        onclick="cambiarEstadoCuenta(${escapeHtml(JSON.stringify(usuario.dni))}, ${!usuario.baneado})">${usuario.baneado?'Desbloquear':'Bloquear'}</button>`}</td>
     </tr>`).join('');
   }
 }
@@ -723,6 +786,7 @@ function actualizarRolPorCorreo(){
 }
 
 function filterProfesores(){
+  saveFiltersForView('admin-profesores');
   debounceSearch('users', renderProfesoresTable);
 }
 
@@ -756,7 +820,7 @@ async function cambiarRol(dni, rol, select){
 async function cambiarEstadoCuenta(dni, baneado){
   const usuario = usuariosRegistrados.find(item=>item.dni===dni);
   if(!usuario || usuario.rol==='admin') return;
-  const action = baneado ? 'desactivar' : 'reactivar';
+  const action = baneado ? 'bloquear' : 'desbloquear';
   if(!window.confirm(`¿${action[0].toUpperCase()+action.slice(1)} la cuenta de ${usuario.nombre}? El historial de préstamos se conservará.`)) return;
   try{
     await apiRequest(`/api/admin/users/${encodeURIComponent(dni)}`, {
@@ -764,7 +828,7 @@ async function cambiarEstadoCuenta(dni, baneado){
     });
     await cargarEstadoAPI();
     renderAll();
-    showToast(`Cuenta de ${usuario.nombre} ${baneado?'desactivada':'reactivada'}.`, 'success');
+    showToast(`Cuenta de ${usuario.nombre} ${baneado?'bloqueada':'desbloqueada'}.`, 'success');
   }catch(error){
     showToast(error.message, 'warn');
   }
@@ -799,6 +863,7 @@ async function cambiarCorreoUsuario(dni){
 function iniciarSesion(){
   document.getElementById('auth-shell').classList.add('hidden');
   document.getElementById('app-root').classList.add('active');
+  restoreAllFilters();
   renderAll();
   applyRoleVisibility();
   switchView('inicio');
@@ -858,6 +923,18 @@ function toggleProfesorUI(){
     toggleLoteBlock();
   }
   actualizarControlesReserva();
+}
+
+function abrirReservaLote(){
+  if(rolActivo!=='profesor') return;
+  switchView('reservas');
+  const toggle = document.getElementById('loteToggle');
+  if(toggle && !toggle.disabled){
+    toggle.checked = true;
+    toggleLoteBlock();
+  }else{
+    showToast('No hay suficientes notebooks disponibles para solicitar un lote.', 'warn');
+  }
 }
 
 function toggleLoteBlock(){
@@ -954,6 +1031,7 @@ function actualizarResumenReserva(){
 function switchView(name){
   const target = document.getElementById('view-'+name);
   if(!target) return;
+  restoreFiltersForView(name);
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
   target.classList.add('active');
   document.getElementById('resCarro').required = false;
@@ -962,7 +1040,12 @@ function switchView(name){
   const [titleTpl, sub] = pageMeta[name];
   const firstName = currentUser ? currentUser.nombre.split(' ')[0] : '';
   document.getElementById('pageTitle').textContent = titleTpl.replace('{NOMBRE}', firstName ? ', '+firstName : '');
-  document.getElementById('pageSubtitle').textContent = sub;
+  document.getElementById('pageSubtitle').textContent =
+    name==='inicio' && rolActivo==='profesor'
+      ? 'Consultá tus reservas, préstamos y pedidos de lote para tus cursos.'
+      : name==='reservas' && rolActivo==='profesor'
+        ? 'Programá el retiro individual de hasta 2 equipos o solicitá un lote para un curso completo.'
+        : sub;
   window.scrollTo({top:0, behavior:'smooth'});
 
   if(name==='inicio' && rolActivo!=='admin') renderMiActividad();
@@ -987,7 +1070,11 @@ function switchView(name){
       void buscarHistorialDevoluciones(query);
     }
   }
-  if(name==='admin-lotes') renderLotes();
+  if(name==='admin-lotes'){
+    renderLotes();
+    const reservationsQuery = document.getElementById('adminReservationsSearch')?.value || '';
+    buscarReservasAdmin(reservationsQuery);
+  }
   if(name==='admin-tickets') renderAdminTickets();
   if(name==='admin-backup'){
     document.getElementById('backupFile').value = '';
@@ -1473,8 +1560,22 @@ function renderMiActividad(){
   const ticketsAbiertos = tickets.filter(t=>t.ownerDni===currentUser.dni && t.estado!=='resuelto').length;
   const prestamos = prestamosActivos[currentUser.dni] || [];
   const prestamo = prestamos[0];
+  const lotesProfesor = rolActivo==='profesor'
+    ? reservas.filter(r=>r.ownerDni===currentUser.dni && r.tipo==='lote' && !['rechazada','cancelada'].includes(r.estado))
+    : [];
+  const cursosProfesor = [...new Set(lotesProfesor.map(r=>r.curso).filter(Boolean))];
 
   let html = '';
+
+  if(rolActivo==='profesor'){
+    html += `
+      <div class="action-card" style="cursor:default;margin-bottom:.8rem;">
+        <div class="action-icon" style="background:var(--purple-bg);color:var(--purple-text);">👩‍🏫</div>
+        <div class="action-info"><h4>Resumen docente</h4>
+          <p>${lotesProfesor.length} lote${lotesProfesor.length===1?'':'s'} activo${lotesProfesor.length===1?'':'s'} · ${cursosProfesor.length} curso${cursosProfesor.length===1?'':'s'} · ${prestamos.length} equipo${prestamos.length===1?'':'s'} a cargo</p>
+        </div>
+      </div>`;
+  }
 
   if(prestamo && !prestamo.pendiente){
     html += `
@@ -1534,6 +1635,7 @@ function applyNotebookFilters(){
 }
 
 function filterNotebooks(){
+  saveFiltersForView('inicio');
   debounceSearch('notebooks', applyNotebookFilters);
 }
 
@@ -1636,6 +1738,7 @@ function applyAdminNotebookFilters(){
 }
 
 function filterAdminNotebooks(){
+  saveFiltersForView('admin-inventario');
   debounceSearch('admin-inventory', applyAdminNotebookFilters);
 }
 
@@ -1717,6 +1820,7 @@ function renderHistorialPrestamos(){
 }
 
 function filterMyLoans(){
+  saveFiltersForView('prestamos');
   debounceSearch('my-loans', renderHistorialPrestamos);
 }
 
@@ -1749,12 +1853,13 @@ function renderDevoluciones(message=''){
   const counter = document.getElementById('returnsHistoryResultsCount');
   if(counter) counter.textContent = `${historialDevoluciones.length} resultados`;
   wrap.innerHTML = `<div class="inventory-table-scroll"><table class="inventory-table">
-    <thead><tr><th>Notebook</th><th>Devolvió</th><th>DNI</th><th>Préstamo</th><th>Recibió</th><th>Fecha y hora</th><th>Estado</th></tr></thead>
+    <thead><tr><th>Notebook</th><th>Devolvió</th><th>DNI</th><th>Préstamo</th><th>Entrega</th><th>Recibió</th><th>Fecha y hora</th><th>Estado</th></tr></thead>
     <tbody>${historialDevoluciones.map(item=>{
       const state = item.demorada ? 'Devuelta con demora' : 'Devuelta a tiempo';
       return `<tr><td class="mono">${escapeHtml(item.notebook)}</td>
         <td>${escapeHtml(item.nombre)}</td><td>${escapeHtml(item.dni)}</td>
         <td class="mono">#${escapeHtml(item.loan_id)}</td>
+        <td>${escapeHtml(item.retirada_at ? formatBusinessDateTime(item.retirada_at) : '—')}</td>
         <td>${escapeHtml(item.recibido_por || '—')}</td>
         <td>${escapeHtml(item.devuelta_at ? formatBusinessDateTime(item.devuelta_at) : '—')}</td>
         <td><span class="badge ${item.demorada?'badge-vencido':'badge-resuelto'}">${state}</span></td></tr>`;
@@ -1777,6 +1882,7 @@ async function buscarHistorialDevoluciones(query=''){
 }
 
 function programarBusquedaHistorialDevoluciones(value){
+  saveFiltersForView('admin-devoluciones');
   debounceSearch('return-history', ()=>void buscarHistorialDevoluciones(value), 250);
 }
 
@@ -2023,6 +2129,7 @@ async function aprobarYEntregar(id){
 }
 
 function buscarReservasAdmin(value){
+  saveFiltersForView('admin-lotes');
   if(reservationsSearchTimer) clearTimeout(reservationsSearchTimer);
   const query = value.trim();
   const results = document.getElementById('adminReservationSearchWrap');
@@ -2064,6 +2171,7 @@ function buscarReservasAdmin(value){
 }
 
 function programarBusquedaPrestamos(){
+  saveFiltersForView('admin-circulation');
   debounceSearch('circulation', ()=>void buscarPrestamosAdmin(), 250);
 }
 
@@ -2287,8 +2395,12 @@ async function crearTicket(e){
     showToast('Completá la notebook, el motivo y la descripción.', 'warn');
     return;
   }
-  if(motivo.length>50 || desc.length>50){
-    showToast('El motivo y la descripción admiten hasta 50 caracteres.', 'warn');
+  if(motivo.length>50){
+    showToast('El motivo admite hasta 50 caracteres.', 'warn');
+    return;
+  }
+  if(desc.length>4000){
+    showToast('La descripción admite hasta 4000 caracteres.', 'warn');
     return;
   }
   try{
@@ -2346,6 +2458,7 @@ function renderTicketsPropios(){
 }
 
 function filterMyTickets(){
+  saveFiltersForView('tickets');
   debounceSearch('my-tickets', renderTicketsPropios);
 }
 
@@ -2417,6 +2530,7 @@ function renderAdminTickets(){
 }
 
 function filterAdminTickets(){
+  saveFiltersForView('admin-tickets');
   debounceSearch('admin-tickets', renderAdminTickets);
 }
 
@@ -2425,7 +2539,7 @@ async function abrirRespuestasTicket(code){
   document.getElementById('ticketRepliesTitle').textContent = `Respuestas · ${code}`;
   document.getElementById('ticketReplyMessage').value = '';
   actualizarContadorRespuesta();
-  const canReply = currentUser?.rol==='admin';
+  const canReply = Boolean(currentUser?.rol);
   const form = document.getElementById('ticketReplyForm');
   const submit = document.getElementById('ticketReplySubmit');
   form.hidden = !canReply;
@@ -2433,6 +2547,12 @@ async function abrirRespuestasTicket(code){
   form.querySelectorAll('textarea, button').forEach(control=>{ control.disabled = !canReply; });
   submit.hidden = !canReply;
   submit.disabled = !canReply;
+  const hint = document.getElementById('ticketReplyHint');
+  if(hint){
+    hint.textContent = currentUser?.rol==='admin'
+      ? 'La respuesta se envía al dueño del ticket y queda registrada en el historial.'
+      : 'Podés agregar información o responderle al equipo de NetMO.';
+  }
   openModal('ticketRepliesModal');
   await cargarRespuestasTicket();
 }
@@ -2447,7 +2567,8 @@ async function cargarRespuestasTicket(){
     if(activeTicketRepliesCode!==code) return;
     thread.innerHTML = data.replies.length
       ? data.replies.map(reply=>`<div class="action-card" style="cursor:default;margin:.5rem 0">
-          <div class="action-info"><h4>${escapeHtml(reply.autor || '—')} · ${escapeHtml(rolLabel[reply.author_role] || reply.author_role || '—')}</h4>
+          <div class="action-info"><h4>${escapeHtml(reply.autor || '—')} · ${escapeHtml(rolLabel[reply.author_role] || reply.author_role || '—')}
+            ${reply.author_role==='sistema' ? '<span class="badge badge-progreso">Automático</span>' : ''}</h4>
             <p>${escapeHtml(Number.isFinite(Date.parse(reply.created_at)) ? formatBusinessDateTime(reply.created_at) : '—')}</p><p>${escapeHtml(reply.mensaje || '—')}</p></div>
         </div>`).join('')
       : '<p class="hint">Todavía no hay respuestas.</p>';
@@ -2464,7 +2585,7 @@ function actualizarContadorRespuesta(){
 
 async function enviarRespuestaTicket(event){
   event.preventDefault();
-  if(currentUser?.rol!=='admin') return;
+  if(!currentUser?.rol) return;
   const input = document.getElementById('ticketReplyMessage');
   const mensaje = input.value.trim();
   const code = activeTicketRepliesCode;
@@ -2517,6 +2638,7 @@ function updateAdminTicketsBadge(){
 ====================================================================== */
 function renderTardanzas(){
   const wrap = document.getElementById('usuariosTardiosWrap');
+  const blockedWrap = document.getElementById('usuariosBloqueadosWrap');
   const tbody = document.getElementById('historialTardanzasTable');
   const porUsuarioBody = document.getElementById('historialPorUsuarioTable');
   const badge = document.getElementById('tardanzasBadge');
@@ -2524,7 +2646,7 @@ function renderTardanzas(){
 
   const query = normalizeSearchText(document.getElementById('lateReturnsSearch')?.value);
   const todosUsuarios = usuariosConTardanzas.filter(user=>normalizeSearchText([
-    user.nombre, user.rol, rolLabel[user.rol], user.dni, user.baneado ? 'bloqueada' : 'activa'
+    user.nombre, user.rol, rolLabel[user.rol], user.dni, user.baneado ? 'bloqueada bloqueado' : 'activa'
   ].join(' ')).includes(query));
   const filteredHistory = historialTardanzas.filter(item=>normalizeSearchText([
     item.nombre, item.rol, rolLabel[item.rol], item.dni, item.notebookId, item.fecha
@@ -2534,7 +2656,7 @@ function renderTardanzas(){
 
   if(porUsuarioBody){
     if(todosUsuarios.length===0){
-      porUsuarioBody.innerHTML = `      <tr><td colspan="5"><div class="empty-state"><p>${usuariosConTardanzas.length ? 'No hay usuarios que coincidan.' : 'Todavía no hay alumnos ni profesores registrados.'}</p></div></td></tr>`;
+      porUsuarioBody.innerHTML = `<tr><td colspan="6"><div class="empty-state"><p>${usuariosConTardanzas.length ? 'No hay usuarios que coincidan.' : 'Todavía no hay alumnos ni profesores registrados.'}</p></div></td></tr>`;
     } else {
       porUsuarioBody.innerHTML = todosUsuarios.map(u=>`
         <tr>
@@ -2543,38 +2665,62 @@ function renderTardanzas(){
           <td class="mono">${escapeHtml(u.dni)}</td>
           <td>${escapeHtml(u.tardanzas ?? 0)}</td>
           <td>${(u.candidato_a_sancion ?? (u.tardanzas >= 3)) ? 'Sí' : 'No'}</td>
+          <td><span class="badge ${u.baneado ? 'badge-vencido' : 'badge-resuelto'}">${u.baneado ? 'Bloqueada' : 'Activa'}</span></td>
         </tr>`).join('');
     }
   }
 
-  const ordenados = [...todosUsuarios].sort((a,b)=>(b.tardanzas||0)-(a.tardanzas||0) || a.nombre.localeCompare(b.nombre));
+  const blockDurationControl = u => `<select class="inventory-select" id="block-duration-${escapeHtml(u.dni)}" aria-label="Duración del bloqueo para ${escapeHtml(u.nombre)}">
+    <option value="1">1 día</option><option value="3">3 días</option><option value="7">7 días</option>
+    <option value="15">15 días</option><option value="30">30 días</option><option value="indefinido">Indefinido</option>
+  </select>`;
+  const blockAction = u => u.baneado
+    ? `<button class="btn btn-sm btn-success-outline" onclick="cambiarBaneo(${escapeHtml(JSON.stringify(u.dni))}, false)">Desbloquear usuario</button>`
+    : `${blockDurationControl(u)}<button class="btn btn-sm btn-danger-outline" onclick="cambiarBaneo(${escapeHtml(JSON.stringify(u.dni))}, true, document.getElementById('block-duration-${escapeHtml(u.dni)}').value)">Bloquear usuario</button>`;
+
+  const ordenados = todosUsuarios
+    .filter(u=>!u.baneado && Number(u.tardanzas) > 0)
+    .sort((a,b)=>(b.tardanzas||0)-(a.tardanzas||0) || a.nombre.localeCompare(b.nombre));
   if(ordenados.length===0){
     wrap.innerHTML = `<div class="empty-state">
-      <div class="glyph">✅</div><h4>No hay alumnos ni profesores registrados</h4><p>Las cuentas creadas desde Usuarios aparecerán acá.</p>
+      <div class="glyph">✅</div><h4>No hay entregas tardías pendientes</h4><p>${usuariosConTardanzas.some(u=>Number(u.tardanzas)>0 && !u.baneado) ? 'No hay usuarios que coincidan con la búsqueda.' : 'Cuando se registren demoras vas a poder evaluar un bloqueo desde acá.'}</p>
     </div>`;
   } else {
     wrap.innerHTML = ordenados.map(u=>{
-      const durationControl = `<select class="ban-duration" id="ban-duration-${escapeHtml(u.dni)}" aria-label="Duración del baneo para ${escapeHtml(u.nombre)}">
-        <option value="1">1 día</option><option value="3">3 días</option><option value="7">7 días</option>
-        <option value="15">15 días</option><option value="30">30 días</option><option value="indefinido">Indefinido</option>
-      </select>`;
-      const banAction = u.baneado
-        ? `<button class="btn btn-sm btn-success-outline" onclick="cambiarBaneo(${escapeHtml(JSON.stringify(u.dni))}, false)">Desbanear</button>`
-        : `${durationControl}<button class="btn btn-sm btn-danger-outline" onclick="cambiarBaneo(${escapeHtml(JSON.stringify(u.dni))}, true, document.getElementById('ban-duration-${escapeHtml(u.dni)}').value)">Banear</button>`;
-      const until = u.baneado ? (u.baneado_hasta ? ` · hasta ${formatBusinessDateTime(u.baneado_hasta)}` : ' · indefinido') : '';
+      const until = u.baneado_hasta ? ` · bloqueado hasta ${formatBusinessDateTime(u.baneado_hasta)}` : '';
       return `
-      <div class="action-card" style="cursor:default;margin-bottom:.8rem;${u.tardanzas>=3 && !u.baneado ? 'border-color:var(--red-text);' : ''}">
-        <div class="action-icon" style="${u.tardanzas>=3 ? 'background:var(--red-bg);color:var(--red-text);' : 'background:var(--orange-bg);color:var(--orange-text);'}">${u.baneado ? '🚫' : '⏰'}</div>
+      <div class="action-card" style="cursor:default;margin-bottom:.8rem;${u.tardanzas>=3 ? 'border-color:var(--red-text);' : ''}">
+        <div class="action-icon" style="${u.tardanzas>=3 ? 'background:var(--red-bg);color:var(--red-text);' : 'background:var(--orange-bg);color:var(--orange-text);'}">⏰</div>
         <div class="action-info">
           <h4>${escapeHtml(u.nombre)} <span class="hint">(${escapeHtml(rolLabel[u.rol] || u.rol)} · ${escapeHtml(u.dni)})</span></h4>
-          <p>${escapeHtml(u.tardanzas ?? 0)} entrega${u.tardanzas===1?'':'s'} tardía${u.tardanzas===1?'':'s'} registrada${u.tardanzas===1?'':'s'}${u.tardanzas>=3 ? ' · candidato a sanción' : ''}${escapeHtml(until)}</p>
+          <p>${escapeHtml(u.tardanzas ?? 0)} entrega${u.tardanzas===1?'':'s'} tardía${u.tardanzas===1?'':'s'} registrada${u.tardanzas===1?'':'s'}${u.tardanzas>=3 ? ' · candidato a bloqueo' : ''}${escapeHtml(until)}</p>
         </div>
-        ${banAction}
+        ${blockAction(u)}
       </div>`;
     }).join('');
   }
 
-  const pendientesAviso = ordenados.filter(u=>u.tardanzas>=3 && !u.baneado).length;
+  const bloqueados = todosUsuarios
+    .filter(u=>u.baneado)
+    .sort((a,b)=>a.nombre.localeCompare(b.nombre));
+  if(blockedWrap){
+    blockedWrap.innerHTML = bloqueados.length
+      ? bloqueados.map(u=>{
+        const until = u.baneado_hasta ? `Hasta ${formatBusinessDateTime(u.baneado_hasta)}` : 'Bloqueo indefinido';
+        return `
+        <div class="action-card" style="cursor:default;margin-bottom:.8rem;">
+          <div class="action-icon" style="background:var(--red-bg);color:var(--red-text);">🚫</div>
+          <div class="action-info">
+            <h4>${escapeHtml(u.nombre)} <span class="hint">(${escapeHtml(rolLabel[u.rol] || u.rol)} · ${escapeHtml(u.dni)})</span></h4>
+            <p>${escapeHtml(until)} · ${escapeHtml(u.tardanzas ?? 0)} entrega${u.tardanzas===1?'':'s'} tardía${u.tardanzas===1?'':'s'}</p>
+          </div>
+          ${blockAction(u)}
+        </div>`;
+      }).join('')
+      : `<div class="empty-state"><div class="glyph">🔓</div><h4>No hay usuarios bloqueados</h4><p>${usuariosConTardanzas.some(u=>u.baneado) ? 'No hay usuarios bloqueados que coincidan con la búsqueda.' : 'Las cuentas bloqueadas van a aparecer en este panel.'}</p></div>`;
+  }
+
+  const pendientesAviso = usuariosConTardanzas.filter(u=>u.tardanzas>=3 && !u.baneado).length;
   if(pendientesAviso>0){ badge.style.display='inline-flex'; badge.textContent = pendientesAviso; }
   else{ badge.style.display='none'; }
 
@@ -2592,6 +2738,7 @@ function renderTardanzas(){
 }
 
 function filterLateReturns(){
+  saveFiltersForView('admin-tardanzas');
   debounceSearch('late-returns', renderTardanzas);
 }
 
@@ -2604,7 +2751,7 @@ async function cambiarBaneo(dni, baneado, duracion){
       method:'PATCH', body:JSON.stringify({baneado, duracionDias})
     });
     await refreshAdminLateReturns();
-    showToast(baneado ? `Baneo de ${u.nombre} actualizado.` : `Baneo de ${u.nombre} quitado.`, baneado ? 'error' : 'success');
+    showToast(baneado ? `${u.nombre} fue bloqueado.` : `${u.nombre} fue desbloqueado.`, baneado ? 'error' : 'success');
   }catch(error){
     showToast(error.message, 'warn');
   }
@@ -2730,6 +2877,8 @@ document.getElementById('reservaForm').addEventListener('reset', ()=>{
   });
 });
 initializeTextLimits();
+document.addEventListener('input', saveFilterFromEvent);
+document.addEventListener('change', saveFilterFromEvent);
 document.getElementById('ubicacionNombre').addEventListener('input', actualizarContadorUbicacion);
 actualizarContadorUbicacion();
 ['resCursoAnio', 'resCursoDivision'].forEach(id=>{

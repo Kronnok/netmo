@@ -1425,11 +1425,14 @@ test('la interfaz muestra selector reabrible, contador de texto, carro y curso e
   assert.match(app, /function ticketTieneRespuestaAdminSinLeer/);
   assert.match(app, /Respuesta nueva/);
   assert.match(app, /Ver respuestas/);
-  assert.match(app, /const canReply = currentUser\?\.rol==='admin';[\s\S]*form\.hidden = !canReply;[\s\S]*submit\.disabled = !canReply/);
+  assert.match(app, /const canReply = Boolean\(currentUser\?\.rol\);[\s\S]*form\.hidden = !canReply;[\s\S]*submit\.disabled = !canReply/);
   assert.match(html, /<form id="ticketReplyForm" hidden/);
   assert.match(html, /id="ticketReplyMessage"[^>]*disabled/);
   assert.match(html, /id="ticketReplySubmit"[^>]*hidden disabled/);
-  assert.match(api, /requireAdmin\(user, 'Solo admin puede responder tickets'\)/);
+  assert.match(api, /TICKET_AUTO_REPLY_MESSAGE/);
+  assert.match(api, /VALUES \(\$1, NULL, \$2\)/);
+  assert.match(api, /No podés responder este ticket/);
+  assert.doesNotMatch(api, /requireAdmin\(user, 'Solo admin puede responder tickets'\)/);
   assert.doesNotMatch(api, /UPDATE tickets SET estado = 'abierto', resolved_at = NULL/);
   assert.match(html, /id="ubicacionNombreCounter"[^>]*>0\/50/);
   assert.match(app, /function actualizarContadorUbicacion/);
@@ -1934,7 +1937,7 @@ test('los recordatorios automáticos aún no se envían ni se marcan como enviad
   }
 });
 
-test('los tickets solo aceptan notebooks del historial, profesor consulta respuestas y solo admin responde', async () => {
+test('los tickets aceptan notebooks del historial, generan respuesta automática y permiten responder al dueño y al admin', async () => {
   const originalQuery = db.query;
   const originalTransaction = db.transaction;
   let exists = true;
@@ -1968,7 +1971,7 @@ test('los tickets solo aceptan notebooks del historial, profesor consulta respue
           : { rowCount: 0, rows: [] };
       }
       if (sql.includes('INSERT INTO tickets')) {
-        return { rowCount: 1, rows: [{ id: 'TCK-1', estado: 'abierto', loan_id: params[1], notebook_id: params[2] }] };
+        return { rowCount: 1, rows: [{ ticket_id: '9', id: 'TCK-1', estado: 'abierto', loan_id: params[1], notebook_id: params[2] }] };
       }
       if (sql.includes('UPDATE notebooks SET')) return { rowCount: 1, rows: [] };
       if (sql.includes('SELECT id, owner_id FROM tickets')) {
@@ -2003,6 +2006,9 @@ test('los tickets solo aceptan notebooks del historial, profesor consulta respue
     assert.equal(ticketInsert.params[2], '11');
     assert.equal(ticketInsert.params[3], 7);
     assert.match(calls.find(({ sql }) => sql.includes('UPDATE notebooks SET')).sql, /CASE WHEN estado = 'disponible' THEN 'mantenimiento'/);
+    const autoReply = calls.find(({ sql }) => sql.includes('INSERT INTO ticket_replies'));
+    assert.equal(autoReply.params[0], '9');
+    assert.match(autoReply.params[1], /Recibimos tu reporte/);
 
     await assert.rejects(
       apiService.createTicket({ loanId: 81, notebook: 'NB-011', motivo: 'Falla', descripcion: 'No inicia' }, { id: 7, rol: 'alumno' }),
@@ -2011,32 +2017,25 @@ test('los tickets solo aceptan notebooks del historial, profesor consulta respue
 
     await assert.rejects(
       apiService.createTicketReply({ mensaje: '   ' }, { id: 7, rol: 'alumno' }, { code: 'TCK-1' }),
-      (error) => error.status === 403
+      (error) => error.status === 400
     );
     await assert.rejects(
       apiService.createTicketReply({ mensaje: 'x'.repeat(501) }, { id: 7, rol: 'alumno' }, { code: 'TCK-1' }),
-      (error) => error.status === 403
+      (error) => error.status === 400
     );
     await assert.rejects(
       apiService.createTicketReply({ mensaje: 'respuesta' }, { id: 8, rol: 'alumno' }, { code: 'TCK-1' }),
       (error) => error.status === 403
     );
-    const replyInsertCount = calls.filter(({ sql }) => sql.includes('INSERT INTO ticket_replies')).length;
-    await assert.rejects(
-      apiService.createTicketReply({ mensaje: ' respuesta válida ' }, { id: 7, rol: 'alumno' }, { code: 'TCK-1' }),
-      (error) => error.status === 403
-    );
-    await assert.rejects(
-      apiService.createTicketReply({ mensaje: 'respuesta del profesor' }, { id: 7, rol: 'profesor' }, { code: 'TCK-1' }),
-      (error) => error.status === 403
-    );
-    assert.equal(calls.filter(({ sql }) => sql.includes('INSERT INTO ticket_replies')).length, replyInsertCount);
+    await apiService.createTicketReply({ mensaje: ' respuesta del alumno ' }, { id: 7, rol: 'alumno' }, { code: 'TCK-1' });
+    assert.equal(calls.filter(({ sql }) => sql.includes('INSERT INTO ticket_replies')).at(-1).params[2], 'respuesta del alumno');
+    await apiService.createTicketReply({ mensaje: 'respuesta del profesor' }, { id: 7, rol: 'profesor' }, { code: 'TCK-1' });
     await assert.rejects(
       apiService.createTicketReply({ mensaje: 'x'.repeat(501) }, { id: 1, rol: 'admin' }, { code: 'TCK-1' }),
       (error) => error.status === 400
     );
     await apiService.createTicketReply({ mensaje: ' respuesta válida ' }, { id: 1, rol: 'admin' }, { code: 'TCK-1' });
-    assert.equal(calls.find(({ sql }) => sql.includes('INSERT INTO ticket_replies')).params[2], 'respuesta válida');
+    assert.equal(calls.filter(({ sql }) => sql.includes('INSERT INTO ticket_replies')).at(-1).params[2], 'respuesta válida');
     assert.ok(!calls.some(({ sql }) => sql.includes("UPDATE tickets SET estado = 'abierto'")));
     await assert.rejects(
       apiService.ticketReplies({}, { id: 8, rol: 'alumno' }, { code: 'TCK-1' }),
@@ -2069,4 +2068,14 @@ test('la migración 013 vincula tickets a préstamos y conserva datos anteriores
   assert.match(schema, /CREATE TABLE ticket_replies/);
   assert.match(fs.readFileSync(path.join(root, 'backend', 'services', 'api-service.js'), 'utf8'), /\$1::ticket_status/);
   assert.match(runner, /'013-ticket-loan-link\.sql'/);
+});
+
+test('la migración 014 permite respuestas automáticas sin autor humano', () => {
+  const root = path.resolve(__dirname, '..', '..');
+  const migration = fs.readFileSync(path.join(root, 'database', 'migrations', '014-ticket-automatic-replies.sql'), 'utf8');
+  const schema = fs.readFileSync(path.join(root, 'database', 'schema.sql'), 'utf8');
+  const runner = fs.readFileSync(path.join(root, 'backend', 'scripts', 'db.js'), 'utf8');
+  assert.match(migration, /ALTER TABLE ticket_replies ALTER COLUMN author_id DROP NOT NULL/i);
+  assert.match(schema, /CREATE TABLE ticket_replies[\s\S]*?author_id BIGINT REFERENCES users\(id\) ON DELETE CASCADE/);
+  assert.match(runner, /'014-ticket-automatic-replies\.sql'/);
 });
