@@ -140,7 +140,7 @@ Salvo health y login, las rutas requieren `Authorization: Bearer <token>`. Los e
 | POST | `/api/auth/forgot` | Público | `{email}` | Respuesta genérica; envía un código si la cuenta existe y el correo se pudo enviar. |
 | POST | `/api/auth/reset` | Público | `{email, code, password}` | Restablece la contraseña con un código de un solo uso. |
 | POST | `/api/auth/change-password/request` | Autenticado | — | Emite un código de cambio; responde 503 e invalida el código si el correo no se pudo enviar. |
-| POST | `/api/auth/change-password` | Autenticado | `{currentPassword, password}` o `{code, password}` | Cambia la contraseña; el Perfil usa la contraseña actual y el código se conserva por compatibilidad. |
+| POST | `/api/auth/change-password` | Autenticado | `{code, password}` o `{currentPassword, password}` | Cambia la contraseña; el Perfil solicita un código al correo y la variante con contraseña actual se conserva por compatibilidad. |
 | GET | `/api/me` | Autenticado | — | `{user}`. |
 | GET | `/api/admin/professors` | Admin | — | `{professors}`. |
 | GET | `/api/admin/users` | Admin | — | Usuarios activos de todos los roles en `{users}`. |
@@ -224,7 +224,7 @@ La vista `user_late_return_summary` cuenta tardanzas y marca `candidato_a_sancio
 - CORS usa `CORS_ORIGIN`; acepta una lista de orígenes. En producción exige que la variable contenga al menos uno; en desarrollo, si no se indica, permite `*`.
 - Se limita el cuerpo JSON a 1 MiB, se rechazan cuerpos no-objeto o JSON inválido y se usan consultas parametrizadas. El login limita cinco fallos por IP/correo durante dos minutos por defecto; `LOGIN_LOCK_MINUTES` permite configurar la ventana con mínimo de un minuto.
 - Se envían `X-Content-Type-Options`, `X-Frame-Options` y `Referrer-Policy`; las vistas escapan los valores dinámicos que interpolan en `innerHTML`.
-- Las altas nuevas validan nombres Unicode, DNI numérico de 7 a 10 dígitos, email y contraseñas de al menos ocho caracteres sin espacios. Los DNI de cuentas existentes no se revalidan ni modifican. El DNI solo se devuelve al propio usuario y a administradores; no se incluye en logs. Los baneos pueden tener duración o ser indefinidos y su expiración se aplica automáticamente al autenticar. La recuperación de contraseña usa códigos de un solo uso; no hay autenticación multifactor. El Perfil cambia la contraseña verificando la contraseña actual; si `sendMail` falla al emitir un código, la API responde 503 y marca ese código como usado para que no quede vigente un código que nadie recibió. “Olvidé mi contraseña” mantiene una respuesta genérica y registra el detalle real solo en el servidor.
+- Las altas nuevas validan nombres Unicode, DNI numérico de 7 a 10 dígitos, email y contraseñas de al menos ocho caracteres sin espacios. Los DNI de cuentas existentes no se revalidan ni modifican. El DNI solo se devuelve al propio usuario y a administradores; no se incluye en logs. Los baneos pueden tener duración o ser indefinidos y su expiración se aplica automáticamente al autenticar. La recuperación de contraseña usa códigos de un solo uso; no hay autenticación multifactor. El Perfil cambia la contraseña pidiendo un código al correo registrado, sin exigir la contraseña anterior; la variante con contraseña actual se conserva por compatibilidad. Si `sendMail` falla al emitir un código, la API responde 503 y marca ese código como usado para que no quede vigente un código que nadie recibió. “Olvidé mi contraseña” mantiene una respuesta genérica y registra el detalle real solo en el servidor.
 
 ## 9. Configuración
 

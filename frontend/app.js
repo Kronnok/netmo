@@ -37,6 +37,8 @@ let circulationLoans = [];
 let activeTicketRepliesCode = null;
 let forgotResendTimeout = null;
 let forgotResendSeconds = 0;
+let changePasswordResendTimeout = null;
+let changePasswordResendSeconds = 0;
 const searchDebounceTimers = Object.create(null);
 const ticketRepliesLastRead = Object.create(null);
 let pendingDeleteCarro = null;
@@ -352,6 +354,9 @@ function expireSession(message){
   currentUser = null;
   rolActivo = null;
   persistSession = false;
+  const staleChangePasswordForm = document.getElementById('changePasswordForm');
+  if(staleChangePasswordForm) delete staleChangePasswordForm.dataset.userId;
+  restablecerFormularioCambioPassword();
   try{
     clearStoredSession();
   }catch(error){
@@ -601,14 +606,78 @@ async function restablecerPassword(){
   }
 }
 
+function iniciarEsperaReenvioCambio(){
+  if(changePasswordResendTimeout) clearInterval(changePasswordResendTimeout);
+  changePasswordResendSeconds = 60;
+  const button = document.getElementById('changePasswordResendBtn');
+  const countdown = document.getElementById('changePasswordResendCountdown');
+  button.hidden = false;
+  button.disabled = true;
+  const update = ()=>{
+    countdown.textContent = changePasswordResendSeconds > 0
+      ? `Podés pedir otro código en ${changePasswordResendSeconds} s.`
+      : '';
+    if(changePasswordResendSeconds <= 0){
+      button.disabled = false;
+      clearInterval(changePasswordResendTimeout);
+      changePasswordResendTimeout = null;
+    }else changePasswordResendSeconds -= 1;
+  };
+  update();
+  changePasswordResendTimeout = setInterval(update, 1000);
+}
+
+function restablecerFormularioCambioPassword(){
+  const form = document.getElementById('changePasswordForm');
+  if(form) form.reset();
+  const message = document.getElementById('changePasswordMessage');
+  if(message) message.textContent = '';
+  const codeFields = document.getElementById('changePasswordCodeFields');
+  if(codeFields) codeFields.hidden = true;
+  const resendButton = document.getElementById('changePasswordResendBtn');
+  if(resendButton) resendButton.hidden = true;
+  const countdown = document.getElementById('changePasswordResendCountdown');
+  if(countdown) countdown.textContent = '';
+  const requestButton = document.getElementById('changePasswordRequestBtn');
+  if(requestButton){
+    requestButton.hidden = false;
+    requestButton.disabled = false;
+  }
+  if(changePasswordResendTimeout) clearInterval(changePasswordResendTimeout);
+  changePasswordResendTimeout = null;
+  changePasswordResendSeconds = 0;
+}
+
+async function solicitarCodigoCambioPassword(button){
+  const message = document.getElementById('changePasswordMessage');
+  const isResend = button?.id === 'changePasswordResendBtn';
+  if(isResend && changePasswordResendSeconds > 0) return;
+  if(button) button.disabled = true;
+  message.textContent = '';
+  try{
+    const result = await apiRequest('/api/auth/change-password/request', {
+      method:'POST',
+      body:JSON.stringify({})
+    });
+    document.getElementById('changePasswordCodeFields').hidden = false;
+    document.getElementById('changePasswordRequestBtn').hidden = true;
+    document.getElementById('changePasswordResendBtn').hidden = false;
+    iniciarEsperaReenvioCambio();
+    message.textContent = result.message;
+  }catch(error){
+    message.textContent = error.message;
+    if(button) button.disabled = false;
+  }
+}
+
 async function cambiarPassword(event){
   event.preventDefault();
   const form = event.currentTarget;
   const message = document.getElementById('changePasswordMessage');
-  const currentPassword = document.getElementById('changePasswordCurrent').value;
+  const code = document.getElementById('changePasswordCode').value.trim();
   const password = document.getElementById('changePasswordNew').value;
-  if(!currentPassword){
-    message.textContent = 'Ingresá tu contraseña actual.';
+  if(!/^\d{6}$/.test(code)){
+    message.textContent = 'Ingresá el código de 6 dígitos que enviamos a tu correo.';
     return;
   }
   if(password !== document.getElementById('changePasswordRepeat').value){
@@ -625,9 +694,9 @@ async function cambiarPassword(event){
   try{
     const result = await apiRequest('/api/auth/change-password', {
       method:'POST',
-      body:JSON.stringify({currentPassword, password})
+      body:JSON.stringify({code, password})
     });
-    form.reset();
+    restablecerFormularioCambioPassword();
     message.textContent = result.message;
     showToast(result.message, 'success');
   }catch(error){
@@ -934,6 +1003,9 @@ function logout(){
   currentUser = null;
   rolActivo = null;
   persistSession = false;
+  const changePasswordForm = document.getElementById('changePasswordForm');
+  if(changePasswordForm) delete changePasswordForm.dataset.userId;
+  restablecerFormularioCambioPassword();
   document.getElementById('app-root').classList.remove('active');
   document.getElementById('auth-shell').classList.remove('hidden');
   document.getElementById('loginError').textContent = '';
@@ -2836,6 +2908,13 @@ function renderPerfil(){
   document.getElementById('profileRolCurso').textContent = rolLabel[currentUser.rol];
   document.getElementById('profileDni').textContent = currentUser.dni;
   document.getElementById('profileEmail').textContent = currentUser.email;
+  const changeEmail = document.getElementById('changePasswordEmail');
+  if(changeEmail) changeEmail.textContent = currentUser.email || '—';
+  const changeForm = document.getElementById('changePasswordForm');
+  if(changeForm && changeForm.dataset.userId !== String(currentUser.id)){
+    restablecerFormularioCambioPassword();
+    changeForm.dataset.userId = String(currentUser.id);
+  }
   const preferencias = currentUser.preferencias || {email:true, recordatorio:'30'};
   document.getElementById('preferenciasEmail').checked = preferencias.email;
   document.getElementById('preferenciasRecordatorio').value = preferencias.recordatorio;

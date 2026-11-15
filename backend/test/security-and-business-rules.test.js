@@ -1627,6 +1627,13 @@ test('la interfaz muestra selector reabrible, contador de texto, carro y curso e
   assert.match(app, /function validarConfirmacionPasswordAdmin\(\)[\s\S]*Las contraseñas no coinciden/);
   assert.match(app, /if\(!passwordsMatch\) return/);
   assert.match(app, /passwordConfirmation\}\)/);
+  assert.match(html, /id="changePasswordRequestBtn"/);
+  assert.match(html, /id="changePasswordCode"[^>]+maxlength="6"/);
+  assert.match(html, /id="changePasswordResendCountdown"/);
+  assert.doesNotMatch(html, /changePasswordCurrent|Contraseña actual<\/label>/);
+  assert.match(app, /async function solicitarCodigoCambioPassword\(/);
+  assert.match(app, /apiRequest\('\/api\/auth\/change-password\/request'/);
+  assert.match(app, /JSON\.stringify\(\{code, password\}\)/);
   assert.match(api, /typeof body\.passwordConfirmation !== 'string' \|\| password !== body\.passwordConfirmation/);
   assert.match(html, /<div class="field" data-roles-el="alumno,profesor">[\s\S]*?id="resCursoAnio"/);
   assert.match(html, /Obligatorio en cada reserva/);

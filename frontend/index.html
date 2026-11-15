@@ -497,22 +497,34 @@
         </div>
       </div>
       <div class="card">
-        <div class="card-header"><div><h3>Cambiar contraseña</h3><p>Ingresá tu contraseña actual y elegí una nueva.</p></div></div>
+        <div class="card-header"><div><h3>Cambiar contraseña</h3><p>Te enviamos un código a tu correo para confirmar el cambio.</p></div></div>
         <div id="changePasswordMessage" class="field-error" role="status"></div>
         <form id="changePasswordForm" onsubmit="cambiarPassword(event)">
           <div class="field">
-            <label for="changePasswordCurrent">Contraseña actual</label>
-            <div class="password-input-wrap"><input type="password" id="changePasswordCurrent" maxlength="50" required autocomplete="current-password"><button type="button" class="btn btn-sm" onclick="togglePasswordVisibility('changePasswordCurrent', this)">Mostrar</button></div>
+            <label>Correo de verificación</label>
+            <p class="hint" id="changePasswordEmail">—</p>
           </div>
           <div class="field">
-            <label for="changePasswordNew">Nueva contraseña</label>
-            <div class="password-input-wrap"><input type="password" id="changePasswordNew" maxlength="50" minlength="8" required autocomplete="new-password"><button type="button" class="btn btn-sm" onclick="togglePasswordVisibility('changePasswordNew', this)">Mostrar</button></div>
+            <button type="button" class="btn btn-primary" id="changePasswordRequestBtn" onclick="solicitarCodigoCambioPassword(this)">Enviar código a mi correo</button>
+            <button type="button" class="btn btn-sm" id="changePasswordResendBtn" onclick="solicitarCodigoCambioPassword(this)" hidden>Reenviar código</button>
+            <span id="changePasswordResendCountdown" class="hint" role="status" aria-live="polite"></span>
           </div>
-          <div class="field">
-            <label for="changePasswordRepeat">Repetir nueva contraseña</label>
-            <div class="password-input-wrap"><input type="password" id="changePasswordRepeat" maxlength="50" minlength="8" required autocomplete="new-password"><button type="button" class="btn btn-sm" onclick="togglePasswordVisibility('changePasswordRepeat', this)">Mostrar</button></div>
+          <div id="changePasswordCodeFields" hidden>
+            <div class="field">
+              <label for="changePasswordCode">Código de 6 dígitos</label>
+              <input type="text" id="changePasswordCode" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code">
+              <span class="hint">Revisá tu correo. El código vence en 10 minutos.</span>
+            </div>
+            <div class="field">
+              <label for="changePasswordNew">Nueva contraseña</label>
+              <div class="password-input-wrap"><input type="password" id="changePasswordNew" maxlength="50" minlength="8" autocomplete="new-password"><button type="button" class="btn btn-sm" onclick="togglePasswordVisibility('changePasswordNew', this)">Mostrar</button></div>
+            </div>
+            <div class="field">
+              <label for="changePasswordRepeat">Repetir nueva contraseña</label>
+              <div class="password-input-wrap"><input type="password" id="changePasswordRepeat" maxlength="50" minlength="8" autocomplete="new-password"><button type="button" class="btn btn-sm" onclick="togglePasswordVisibility('changePasswordRepeat', this)">Mostrar</button></div>
+            </div>
+            <button type="submit" class="btn btn-primary">Cambiar contraseña</button>
           </div>
-          <button type="submit" class="btn btn-primary">Cambiar contraseña</button>
         </form>
       </div>
     </div>
