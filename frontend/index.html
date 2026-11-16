@@ -203,9 +203,20 @@
       <div class="stat-card"><div class="stat-icon icon-purple">📊</div><div class="stat-info"><span>Total</span><h3 id="statTotal">0</h3><p>Notebooks en total</p></div></div>
     </div>
 
-    <!-- ---- ALUMNO / PROFESOR: solo lo que les importa ---- -->
-    <div id="statsGridUsuario" class="stats-grid" style="grid-template-columns:minmax(200px,280px);">
-      <div class="stat-card"><div class="stat-icon icon-green">💻</div><div class="stat-info"><span>Disponibles</span><h3 id="statDisponiblesUsuario">0</h3><p>En este momento</p></div></div>
+    <!-- ---- ALUMNO / PROFESOR: resumen propio ---- -->
+    <div id="statsGridUsuario" class="stats-grid stats-grid-user">
+      <div class="stat-card">
+        <div class="stat-icon icon-green">💻</div>
+        <div class="stat-info"><span>Disponibles</span><h3 id="statDisponiblesUsuario">0</h3><p>En este momento</p></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon icon-blue">📘</div>
+        <div class="stat-info"><span>Mi préstamo</span><h3 id="statPrestamoUsuario">—</h3><p id="statPrestamoUsuarioInfo">Sin equipos a cargo</p></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon icon-purple">📅</div>
+        <div class="stat-info"><span>Mi próxima reserva</span><h3 id="statReservaUsuario">—</h3><p id="statReservaUsuarioInfo">Sin reservas próximas</p></div>
+      </div>
     </div>
 
     <div class="content-grid">

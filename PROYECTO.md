@@ -25,7 +25,7 @@ El seed contiene cuentas de ejemplo para instalaciones nuevas. No hay registro p
 | Módulo o pantalla | Función |
 |---|---|
 | Acceso | Inicia sesión por correo y contraseña. La cuenta la crea un administrador. |
-| Inicio | Muestra resumen/disponibilidad, actividad propia y accesos rápidos. Las normas y avisos son contenido informativo de la interfaz. |
+| Inicio | Muestra un portal propio por rol: hero, resumen y accesos para alumno/profesor; KPIs y panel denso para administración. Las normas y avisos son contenido informativo de la interfaz. |
 | Mis préstamos | Muestra préstamos activos, historial, hora de vencimiento, cuenta regresiva y avisos previos; la devolución la registra administración. |
 | Reservas | Crea reservas individuales o solicitudes de lote filtrando equipos por ubicación del carro, muestra las propias y permite cancelar las que aún son cancelables. |
 | Reportar falla / Mis tickets | Crea reportes asociados a notebooks del historial propio o a “Otra / no sé”; muestra el seguimiento y el hilo de respuestas. |
@@ -36,7 +36,7 @@ El seed contiene cuentas de ejemplo para instalaciones nuevas. No hay registro p
 | Administración: Préstamos | Lista reservas individuales y por lote, permite aprobar lotes y registrar entrega; notebooks disponibles pueden asignarse al entregar. |
 | Administración: Fallas | Consulta tickets, cambia su estado y responde; notebooks prestadas con tickets abiertos vuelven a mantenimiento al devolverse. |
 | Administración: Devoluciones tardías | Lista todos los alumnos y profesores con su total de tardanzas, permite banear por duración o desbanear y muestra el historial real. |
-| Tema y sesión | Permite alternar tema claro/oscuro, elegir si se mantiene la sesión y cerrar sesión. El tema se guarda en `localStorage`; los tokens se guardan en `localStorage` solo si el usuario elige mantener la sesión, o en `sessionStorage` en caso contrario. |
+| Tema y sesión | Permite alternar tema claro/oscuro, elegir si se mantiene la sesión y cerrar sesión. El tema se guarda en `localStorage`; los tokens se guardan en `localStorage` solo si el usuario elige mantener la sesión, o en `sessionStorage` en caso contrario. La identidad visual combina rol y tema: alumno en verde, profesor en violeta y administración en grafito, con sidebar y hero propios en ambos temas. |
 
 ## 4. Flujos principales y reglas
 

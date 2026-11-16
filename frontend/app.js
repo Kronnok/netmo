@@ -1041,23 +1041,71 @@ function renderRoleHomeBanner(){
   const config = {
     alumno: {
       icon: '🎒',
+      eyebrow: 'Espacio del alumno',
       title: `Hola${nombre ? ', '+escapeHtml(nombre) : ''}. Este es tu espacio`,
-      text: 'Reservá una notebook indicando tu curso, seguí tus préstamos y reportá fallas.'
+      text: 'Reservá tu notebook indicando tu curso, seguí tus préstamos y reportá fallas.',
+      actions: `
+        <button class="btn btn-primary" onclick="switchView('reservas')">Reservar notebook</button>
+        <button class="btn" onclick="switchView('prestamos')">Ver mis préstamos</button>`
     },
     profesor: {
       icon: '📚',
+      eyebrow: 'Panel docente',
       title: `Panel docente${nombre ? ' · '+escapeHtml(nombre) : ''}`,
-      text: 'Gestioná reservas individuales y lotes para tus cursos, y revisá la actividad de tus equipos.'
+      text: 'Gestioná reservas individuales y lotes para tus cursos, y revisá la actividad de tus equipos.',
+      actions: `
+        <button class="btn btn-primary" onclick="abrirReservaLote()">Reservar lote</button>
+        <button class="btn" onclick="switchView('reservas')">Nueva reserva</button>`
     },
     admin: {
       icon: '🛠️',
-      title: 'Panel de administración',
-      text: 'Controlá inventario, usuarios, entregas, devoluciones y copias de seguridad del sistema.'
+      eyebrow: 'Administración',
+      title: 'Centro de control',
+      text: 'Controlá inventario, usuarios, entregas, devoluciones y copias de seguridad del sistema.',
+      actions: ''
     }
   }[rolActivo];
   if(!config){ banner.innerHTML = ''; banner.hidden = true; return; }
+  banner.className = 'role-home-banner ' + (rolActivo==='admin' ? 'banner-admin' : 'banner-user');
   banner.hidden = false;
-  banner.innerHTML = `<div class="banner-icon">${config.icon}</div><div><h3>${config.title}</h3><p>${config.text}</p></div>`;
+  banner.innerHTML = `<div class="banner-icon">${config.icon}</div>
+    <div class="banner-copy">
+      <span class="banner-eyebrow">${config.eyebrow}</span>
+      <h3>${config.title}</h3>
+      <p>${config.text}</p>
+      ${config.actions ? `<div class="banner-actions">${config.actions}</div>` : ''}
+    </div>`;
+}
+
+function renderResumenUsuario(){
+  if(!currentUser || rolActivo==='admin') return;
+  const prestamoTitulo = document.getElementById('statPrestamoUsuario');
+  const prestamoInfo = document.getElementById('statPrestamoUsuarioInfo');
+  const reservaTitulo = document.getElementById('statReservaUsuario');
+  const reservaInfo = document.getElementById('statReservaUsuarioInfo');
+  if(!prestamoTitulo || !reservaTitulo) return;
+
+  const prestamos = prestamosActivos[currentUser.dni] || [];
+  const prestamo = prestamos[0];
+  if(prestamo){
+    prestamoTitulo.textContent = prestamos.length > 1 ? `${prestamos.length} equipos` : prestamo.id;
+    prestamoInfo.textContent = prestamo.pendiente ? 'Devolución informada' : `Vence ${prestamo.vence}`;
+  }else{
+    prestamoTitulo.textContent = '—';
+    prestamoInfo.textContent = 'Sin equipos a cargo';
+  }
+
+  const proxima = reservas
+    .filter(r=>r.ownerDni===currentUser.dni && !['rechazada','cancelada','retirada'].includes(r.estado))
+    .sort((a,b)=>String(a.fecha).localeCompare(String(b.fecha)))[0];
+  if(proxima){
+    const estados = {confirmada:'Confirmada', pendiente_aprobacion:'Pendiente de aprobación', aprobada:'Aprobada'};
+    reservaTitulo.textContent = formatFecha(proxima.fecha);
+    reservaInfo.textContent = [estados[proxima.estado] || proxima.estado, proxima.hora].filter(Boolean).join(' · ');
+  }else{
+    reservaTitulo.textContent = '—';
+    reservaInfo.textContent = 'Sin reservas próximas';
+  }
 }
 
 function toggleProfesorUI(){
@@ -1219,7 +1267,7 @@ function switchView(name){
             : sub;
   window.scrollTo({top:0, behavior:'smooth'});
 
-  if(name==='inicio' && rolActivo!=='admin') renderMiActividad();
+  if(name==='inicio' && rolActivo!=='admin'){ renderMiActividad(); renderResumenUsuario(); }
   if(name==='prestamos'){ renderPrestamoActivo(); renderHistorialPrestamos(); }
   if(name==='reservas'){
     renderReservas();
@@ -1398,6 +1446,7 @@ function renderAll(){
   renderHistorialPrestamos();
   renderReservas();
   renderTicketsPropios();
+  renderResumenUsuario();
   renderPerfil();
   renderProfesoresTable();
   renderCuentasEliminadas();
@@ -1718,7 +1767,7 @@ function toggleInicioParaRol(){
   statsUsuario.style.display = esAdmin ? 'none' : 'grid';
   cardAdmin.style.display = esAdmin ? 'block' : 'none';
   cardUsuario.style.display = esAdmin ? 'none' : 'block';
-  if(!esAdmin) renderMiActividad();
+  if(!esAdmin){ renderMiActividad(); renderResumenUsuario(); }
 }
 
 function renderMiActividad(){
