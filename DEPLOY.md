@@ -32,6 +32,21 @@ editable de ubicaciones, agrega el estado de envío del recordatorio de
 vencimiento y habilita respuestas en tickets. La migración 013 relaciona cada
 reporte de falla con el préstamo seleccionado sin alterar reportes anteriores.
 
+### Orden de despliegue
+
+Render publica `main` automáticamente y su build no ejecuta migraciones. Antes de
+pushear un cambio que dependa de columnas nuevas, aplicá las migraciones:
+
+```sh
+$env:DATABASE_URL = "postgresql://.../neondb?sslmode=require"
+npm run db:migrate
+```
+
+Después verificá el esquema y recién entonces pusheá. Si el código se publica
+antes que la migración, las consultas que usan las columnas nuevas fallan con
+error 500 hasta que la migración se aplique; si ya pasó, ejecutá el comando y
+volvé a desplegar.
+
 ## 2. API en Render
 
 Importá el repositorio en Render usando [render.yaml](./render.yaml). En el
