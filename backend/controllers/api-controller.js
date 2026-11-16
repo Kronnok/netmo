@@ -1,11 +1,13 @@
 const authService = require('../services/auth-service');
 const apiService = require('../services/api-service');
 const passwordResetService = require('../services/password-reset-service');
+const registrationService = require('../services/registration-service');
 const backupService = require('../services/backup-service');
 const db = require('../data/database');
 const { AppError } = require('../errors');
 
 const statusCodes = {
+  register: 201,
   createUser: 201,
   createCarro: 201,
   createUbicacion: 201,
@@ -69,6 +71,8 @@ async function handle(request, response, route, corsHeaders) {
       result = await authService.refresh(request);
     } else if (route.action === 'forgotPassword') {
       result = await passwordResetService.requestForgot(body, request);
+    } else if (route.action === 'register') {
+      result = await registrationService.register(body, request);
     } else if (route.action === 'resetPassword') {
       result = await passwordResetService.resetPassword(body, request);
     } else {

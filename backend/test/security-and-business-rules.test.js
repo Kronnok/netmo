@@ -32,9 +32,11 @@ const {
   loginEmail,
   personName,
   requiredText,
+  registrationRoleFromEmail,
   roleFromEmail,
   validateEmailRole
 } = require('../services/validation');
+const registrationService = require('../services/registration-service');
 
 after(() => db.pool.end());
 
@@ -381,7 +383,10 @@ test('todos los servicios detrás de rutas admin rechazan alumnos y aceptan admi
     ['PATCH', '/api/admin/users/U-8'],
     ['DELETE', '/api/admin/users/U-8'],
     ['POST', '/api/admin/users/U-8/restore'],
-    ['PATCH', '/api/admin/users/U-8/rol']
+    ['PATCH', '/api/admin/users/U-8/rol'],
+    ['GET', '/api/admin/users/pending'],
+    ['POST', '/api/admin/users/U-8/approve'],
+    ['POST', '/api/admin/users/U-8/reject']
   ];
   const originalQuery = db.query;
   db.query = async () => ({ rows: [], rowCount: 1 });
@@ -1621,7 +1626,7 @@ test('la interfaz muestra selector reabrible, contador de texto, carro y curso e
   assert.doesNotMatch(app, /adminSetTicketEstado/);
   assert.match(html, /id="userPassword" type="password"[^>]+oninput="validarConfirmacionPasswordAdmin\(\)"/);
   assert.match(html, /id="userPasswordConfirmation" type="password"[^>]+required/);
-  assert.equal((html.match(/onclick="toggleAdminUserPasswordVisibility\(/g) || []).length, 2);
+  assert.equal((html.match(/onclick="toggleAdminUserPasswordVisibility\(/g) || []).length, 4);
   assert.match(html, /id="userPasswordConfirmationError" class="field-error"[^>]*role="alert"/);
   assert.match(app, /function toggleAdminUserPasswordVisibility\(/);
   assert.match(app, /function validarConfirmacionPasswordAdmin\(\)[\s\S]*Las contraseñas no coinciden/);
@@ -2258,4 +2263,252 @@ test('la migración 014 permite respuestas automáticas sin autor humano', () =>
   assert.match(migration, /ALTER TABLE ticket_replies ALTER COLUMN author_id DROP NOT NULL/i);
   assert.match(schema, /CREATE TABLE ticket_replies[\s\S]*?author_id BIGINT REFERENCES users\(id\) ON DELETE CASCADE/);
   assert.match(runner, /'014-ticket-automatic-replies\.sql'/);
+});
+
+test('el registro público asigna el rol según el dominio y deja la cuenta pendiente', async () => {
+  const originalTransaction = db.transaction;
+  const originalInfo = console.info;
+  const statements = [];
+  db.transaction = async (callback) => callback({
+    query: async (sql, params) => {
+      statements.push({ sql, params });
+      if (sql.includes('INSERT INTO users')) {
+        return {
+          rowCount: 1,
+          rows: [{ id: String(statements.length), dni: params[0], nombre: params[1], email: params[2], rol: params[3], aprobado: false }]
+        };
+      }
+      return { rowCount: 1, rows: [] };
+    }
+  });
+  console.info = () => {};
+  const request = { headers: {}, socket: { remoteAddress: '198.51.100.20' } };
+  loginRateLimiter.reset();
+  try {
+    for (const [email, rol, dni] of [
+      ['ana@alu.bue.edu.ar', 'alumno', '30000001'],
+      ['bruno@bue.edu.ar', 'profesor', '30000002'],
+      ['carla@gmail.com', null, '30000003']
+    ]) {
+      const result = await registrationService.register({
+        nombre: 'Nombre',
+        apellido: 'Apellido',
+        dni,
+        email,
+        password: 'secreto123',
+        passwordConfirmation: 'secreto123'
+      }, request);
+      assert.equal(result.user.rol, rol);
+      assert.equal(result.user.aprobado, false);
+      assert.match(result.message, /administrador/i);
+    }
+    const userInserts = statements.filter(({ sql }) => sql.includes('INSERT INTO users'));
+    assert.deepEqual(userInserts.map(({ params }) => params[3]), ['alumno', 'profesor', null]);
+    assert.match(userInserts[0].sql, /aprobado/);
+    assert.match(userInserts[0].sql, /FALSE, FALSE/);
+    assert.ok(statements.some(({ sql }) => sql.includes('INSERT INTO user_preferences')));
+  } finally {
+    console.info = originalInfo;
+    db.transaction = originalTransaction;
+    loginRateLimiter.reset();
+  }
+});
+
+test('el registro público rechaza dominios no permitidos y cuentas duplicadas', async () => {
+  const originalTransaction = db.transaction;
+  const request = { headers: {}, socket: { remoteAddress: '198.51.100.21' } };
+  loginRateLimiter.reset();
+  try {
+    db.transaction = async () => { throw new Error('no debería abrir transacción'); };
+    await assert.rejects(registrationService.register({
+      nombre: 'Nombre',
+      apellido: 'Apellido',
+      dni: '30000011',
+      email: 'persona@example.test',
+      password: 'secreto123',
+      passwordConfirmation: 'secreto123'
+    }, request), (error) => error.status === 400 && /bue\.edu\.ar/.test(error.message));
+
+    db.transaction = async () => {
+      const error = new Error('duplicado');
+      error.code = '23505';
+      throw error;
+    };
+    await assert.rejects(registrationService.register({
+      nombre: 'Nombre',
+      apellido: 'Apellido',
+      dni: '30000012',
+      email: 'duplicado@alu.bue.edu.ar',
+      password: 'secreto123',
+      passwordConfirmation: 'secreto123'
+    }, request), (error) => error.status === 409 && /ya están registrados/.test(error.message));
+  } finally {
+    db.transaction = originalTransaction;
+    loginRateLimiter.reset();
+  }
+});
+
+test('una cuenta pendiente no puede iniciar sesión ni autenticarse hasta ser aprobada', async () => {
+  const originalQuery = db.query;
+  const email = 'pendiente@alu.bue.edu.ar';
+  const password = 'secreto123';
+  const request = { headers: {}, socket: { remoteAddress: '198.51.100.22' } };
+  loginRateLimiter.reset();
+  try {
+    const pending = { id: '90', email, rol: 'alumno', aprobado: false, baneado: false };
+    const queryFor = (usuario) => async (sql) => {
+      if (sql.includes('password_hash = crypt') || sql.includes('SELECT id, dni, nombre, email, rol, aprobado')) {
+        return { rowCount: 1, rows: [usuario] };
+      }
+      return { rowCount: 1, rows: [{ id: usuario.id }] };
+    };
+    db.query = queryFor(pending);
+    await assert.rejects(
+      authService.login({ email, password }, request),
+      (error) => error.status === 403 && /pendiente de aprobación/.test(error.message)
+    );
+    await assert.rejects(
+      authService.authenticate({ headers: { authorization: `Bearer ${createToken(pending.id)}` } }),
+      (error) => error.status === 403 && /pendiente de aprobación/.test(error.message)
+    );
+    db.query = queryFor({ ...pending, aprobado: true });
+    const accepted = await authService.login({ email, password }, request);
+    assert.equal(accepted.user.id, pending.id);
+  } finally {
+    db.query = originalQuery;
+    loginRateLimiter.reset();
+  }
+});
+
+test('aprobar una solicitud exige rol para gmail y respeta el rol institucional', async () => {
+  const originalTransaction = db.transaction;
+  const originalInfo = console.info;
+  const calls = [];
+  let target = { id: '70', dni: '30000003', nombre: 'Carla', email: 'carla@gmail.com', rol: null, aprobado: false };
+  db.transaction = async (callback) => callback({
+    query: async (sql, params) => {
+      calls.push({ sql, params });
+      if (sql.includes('SELECT id, dni, nombre, email, rol, aprobado')) {
+        return { rowCount: 1, rows: [target] };
+      }
+      if (sql.includes('to_regclass')) return { rowCount: 1, rows: [{ table_name: 'audit_log' }] };
+      if (sql.includes('UPDATE users SET rol')) {
+        return { rowCount: 1, rows: [{ ...target, rol: params[0], aprobado: true }] };
+      }
+      return { rowCount: 1, rows: [] };
+    }
+  });
+  console.info = () => {};
+  const admin = { id: '1', rol: 'admin' };
+  try {
+    await assert.rejects(
+      apiService.approveUser({}, admin, { dni: target.dni }),
+      (error) => error.status === 400 && /Asigná un rol/.test(error.message)
+    );
+    const approved = await apiService.approveUser({ rol: 'profesor' }, admin, { dni: target.dni });
+    assert.equal(approved.user.rol, 'profesor');
+    assert.equal(approved.user.aprobado, true);
+    assert.ok(calls.some(({ sql }) => sql.includes('aprobacion_cuenta')));
+
+    target = { id: '71', dni: '30000004', nombre: 'Bruno', email: 'bruno@bue.edu.ar', rol: 'profesor', aprobado: false };
+    await assert.rejects(
+      apiService.approveUser({ rol: 'alumno' }, admin, { dni: target.dni }),
+      (error) => error.status === 400 && /solo puede ser profesor/.test(error.message)
+    );
+    const institutional = await apiService.approveUser({}, admin, { dni: target.dni });
+    assert.equal(institutional.user.rol, 'profesor');
+  } finally {
+    console.info = originalInfo;
+    db.transaction = originalTransaction;
+  }
+});
+
+test('rechazar una solicitud elimina la cuenta y registra la decisión', async () => {
+  const originalQuery = db.query;
+  const originalTransaction = db.transaction;
+  const calls = [];
+  const pending = { id: '72', dni: '30000005', nombre: 'Dana', email: 'dana@gmail.com', aprobado: false };
+  db.query = async () => ({ rowCount: 1, rows: [pending] });
+  db.transaction = async (callback) => callback({
+    query: async (sql, params) => {
+      calls.push({ sql, params });
+      if (sql.includes('to_regclass')) return { rowCount: 1, rows: [{ table_name: 'audit_log' }] };
+      return { rowCount: 1, rows: [] };
+    }
+  });
+  try {
+    const rejected = await apiService.rejectUser({}, { id: '1', rol: 'admin' }, { dni: pending.dni });
+    assert.match(rejected.message, /rechazada/i);
+    assert.ok(calls.some(({ sql }) => sql.includes('rechazo_cuenta')));
+    assert.ok(calls.some(({ sql }) => sql.includes('DELETE FROM user_preferences')));
+    assert.ok(calls.some(({ sql }) => sql.includes('DELETE FROM users WHERE id')));
+    db.query = async () => ({ rowCount: 1, rows: [{ ...pending, aprobado: true }] });
+    await assert.rejects(
+      apiService.rejectUser({}, { id: '1', rol: 'admin' }, { dni: pending.dni }),
+      (error) => error.status === 409
+    );
+  } finally {
+    db.query = originalQuery;
+    db.transaction = originalTransaction;
+  }
+});
+
+test('el listado admin solo muestra cuentas aprobadas y expone sus pendientes aparte', async () => {
+  const originalQuery = db.query;
+  const statements = [];
+  db.query = async (sql) => {
+    statements.push(sql.replace(/\s+/g, ' '));
+    return { rowCount: 0, rows: [] };
+  };
+  try {
+    await apiService.users({}, { id: '1', rol: 'admin' }, {}, new URLSearchParams(''));
+    await apiService.pendingUsers({}, { id: '1', rol: 'admin' });
+    assert.match(statements[0], /aprobado = TRUE/);
+    assert.match(statements[1], /aprobado = FALSE/);
+    assert.match(statements[1], /rol_sugerido/);
+  } finally {
+    db.query = originalQuery;
+  }
+});
+
+test('la validación de rol del registro público distingue institucionales y gmail', () => {
+  assert.equal(registrationRoleFromEmail('ana@alu.bue.edu.ar'), 'alumno');
+  assert.equal(registrationRoleFromEmail('bruno@bue.edu.ar'), 'profesor');
+  assert.equal(registrationRoleFromEmail('carla@gmail.com'), null);
+  assert.throws(() => registrationRoleFromEmail('persona@example.test'), (error) => error.status === 400);
+});
+
+test('la migración 016 habilita el registro pendiente sin afectar cuentas existentes', () => {
+  const root = path.resolve(__dirname, '..', '..');
+  const migration = fs.readFileSync(path.join(root, 'database', 'migrations', '016-registro-publico.sql'), 'utf8');
+  const schema = fs.readFileSync(path.join(root, 'database', 'schema.sql'), 'utf8');
+  const runner = fs.readFileSync(path.join(root, 'backend', 'scripts', 'db.js'), 'utf8');
+  assert.match(migration, /ADD COLUMN IF NOT EXISTS aprobado BOOLEAN NOT NULL DEFAULT TRUE/i);
+  assert.match(migration, /ALTER COLUMN rol DROP NOT NULL/i);
+  assert.match(migration, /WHERE aprobado = FALSE/i);
+  assert.match(schema, /rol user_role,/);
+  assert.match(schema, /aprobado BOOLEAN NOT NULL DEFAULT TRUE/);
+  assert.match(runner, /'016-registro-publico\.sql'/);
+});
+
+test('la interfaz permite registrarse y aprobar solicitudes pendientes', () => {
+  const root = path.resolve(__dirname, '..', '..');
+  const html = fs.readFileSync(path.join(root, 'frontend', 'index.html'), 'utf8');
+  const app = fs.readFileSync(path.join(root, 'frontend', 'app.js'), 'utf8');
+  assert.match(html, /id="view-register"/);
+  assert.match(html, /id="registerEmail"[^>]*oninput="actualizarRolRegistro\(\)"/);
+  assert.match(html, /id="registerPasswordConfirmation"/);
+  assert.match(html, /onclick="mostrarRegistro\(\)"/);
+  assert.match(html, /id="pendingUsersTable"/);
+  assert.match(html, /id="pendingUsersBadge"/);
+  assert.match(app, /function registrarCuenta\(e\)/);
+  assert.match(app, /function mostrarRegistro\(\)/);
+  assert.match(app, /function actualizarRolRegistro\(\)/);
+  assert.match(app, /\/api\/auth\/register/);
+  assert.match(app, /function aprobarCuentaPendiente\(dni\)/);
+  assert.match(app, /function rechazarCuentaPendiente\(dni\)/);
+  assert.match(app, /\/api\/admin\/users\/\$\{encodeURIComponent\(dni\)\}\/approve/);
+  assert.match(app, /\/api\/admin\/users\/\$\{encodeURIComponent\(dni\)\}\/reject/);
+  assert.match(app, /apiRequest\('\/api\/admin\/users\/pending'\)/);
+  assert.match(app, /usuariosPendientes = loaded\.pendingUsers\?\.users \|\| \[\]/);
 });

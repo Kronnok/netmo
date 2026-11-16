@@ -37,7 +37,7 @@ const RESTORE_ORDER = [
 const SERIAL_TABLES = ['users', 'ubicaciones', 'carros', 'notebooks', 'reservations', 'loans', 'returns', 'tickets', 'ticket_replies', 'late_returns'];
 
 const REQUIRED_FIELDS = {
-  users: ['id', 'dni', 'nombre', 'email', 'rol', 'password_hash'],
+  users: ['id', 'dni', 'nombre', 'email', 'password_hash'],
   user_preferences: ['user_id'],
   ubicaciones: ['id', 'slug', 'nombre'],
   carros: ['id', 'numero'],
@@ -62,6 +62,7 @@ const ENUMS = {
 };
 
 const NULLABLE_FIELDS = new Set([
+  'users.rol',
   'users.baneado_hasta',
   'users.eliminado_at',
   'carros.ubicacion_id',
@@ -76,6 +77,7 @@ const NULLABLE_FIELDS = new Set([
 
 const TYPE_OVERRIDES = {
   'users.baneado': 'boolean',
+  'users.aprobado': 'boolean',
   'user_preferences.email_notifications': 'boolean',
   'reservation_notebooks.active': 'boolean',
   'users.rol': 'enum',
@@ -221,6 +223,11 @@ function validateRows(backup, availableTables, columnsByTable) {
     }
   }
   const users = backup.data.users;
+  for (const row of users) {
+    if ((row.rol === undefined || row.rol === null) && row.aprobado !== false) {
+      throw new AppError('Falta el campo requerido users.rol.', 400);
+    }
+  }
   if (!users.some((row) => row.rol === 'admin')) throw new AppError('El backup debe incluir al menos un administrador.', 400);
   for (const [table, key] of [
     ['users', 'id'], ['users', 'dni'], ['users', 'email'], ['user_preferences', 'user_id'],
