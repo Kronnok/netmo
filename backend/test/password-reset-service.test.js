@@ -35,12 +35,18 @@ async function withResetStore({ exists = true, email = 'legacy@example.test' } =
         if (sql.includes('SELECT id FROM users WHERE id = $1 FOR UPDATE')) {
           return state.user ? { rowCount: 1, rows: [{ id: state.user.id }] } : { rowCount: 0, rows: [] };
         }
-        if (sql.includes('SELECT 1 FROM password_resets')) return { rowCount: 0, rows: [] };
+        if (sql.includes('SELECT 1 FROM password_resets')) {
+          const recent = state.reset && Date.now() - state.reset.created_at.getTime() < 60_000;
+          const unused = state.reset && !state.reset.used_at;
+          const matches = Boolean(recent && (unused || !sql.includes('used_at IS NULL')));
+          return matches ? { rowCount: 1, rows: [{ '?column?': 1 }] } : { rowCount: 0, rows: [] };
+        }
         if (sql.includes('INSERT INTO password_resets')) {
           state.reset = {
             id: '8',
             code_hash: params[1],
             attempts: 0,
+            created_at: new Date(),
             expires_at: new Date(Date.now() + 10 * 60_000),
             used_at: null
           };
@@ -225,6 +231,30 @@ test('el cambio autenticado responde 503 e invalida el código si el correo fall
       );
       assert.equal(state.invalidated, true);
       assert.ok(state.reset?.used_at);
+    } finally {
+      process.env.MAIL_PROVIDER = originalProvider;
+      if (originalKey === undefined) delete process.env.MAIL_API_KEY;
+      else process.env.MAIL_API_KEY = originalKey;
+    }
+  });
+});
+
+test('un envío fallido no deja el cooldown bloqueando el reintento del cambio', async () => {
+  await withResetStore({}, async ({ getCode }) => {
+    const originalProvider = process.env.MAIL_PROVIDER;
+    const originalKey = process.env.MAIL_API_KEY;
+    const owner = { id: '44', email: 'legacy@example.test' };
+    process.env.MAIL_PROVIDER = 'brevo';
+    delete process.env.MAIL_API_KEY;
+    try {
+      await assert.rejects(
+        requestChange({}, owner, request('192.0.2.47')),
+        (error) => error.status === 503
+      );
+      process.env.MAIL_PROVIDER = 'console';
+      const retry = await requestChange({}, owner, request('192.0.2.47'));
+      assert.equal(retry.message, 'Te enviamos un código de verificación a tu correo.');
+      assert.match(getCode(), /^\d{6}$/);
     } finally {
       process.env.MAIL_PROVIDER = originalProvider;
       if (originalKey === undefined) delete process.env.MAIL_API_KEY;

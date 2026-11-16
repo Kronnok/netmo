@@ -71,7 +71,8 @@ async function requestForgot(body, request) {
         FOR UPDATE`, [normalizedEmail]);
       if (!result.rowCount) return null;
       const cooldown = await client.query(`SELECT 1 FROM password_resets
-        WHERE user_id = $1 AND purpose = 'reset' AND created_at > now() - interval '60 seconds'
+        WHERE user_id = $1 AND purpose = 'reset' AND used_at IS NULL
+          AND created_at > now() - interval '60 seconds'
         LIMIT 1`, [result.rows[0].id]);
       if (cooldown.rowCount) return null;
       const code = generateCode();
@@ -99,7 +100,8 @@ async function requestChange(body, user, request) {
     const issued = await db.transaction(async (client) => {
       await client.query('SELECT id FROM users WHERE id = $1 FOR UPDATE', [user.id]);
       const cooldown = await client.query(`SELECT 1 FROM password_resets
-        WHERE user_id = $1 AND purpose = 'change' AND created_at > now() - interval '60 seconds'
+        WHERE user_id = $1 AND purpose = 'change' AND used_at IS NULL
+          AND created_at > now() - interval '60 seconds'
         LIMIT 1`, [user.id]);
       if (cooldown.rowCount) throw new AppError('Esperá 1 minuto antes de solicitar otro código.', 429);
       const code = generateCode();

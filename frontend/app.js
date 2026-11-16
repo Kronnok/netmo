@@ -667,6 +667,12 @@ async function solicitarCodigoCambioPassword(button){
   }catch(error){
     message.textContent = error.message;
     if(button) button.disabled = false;
+    const requestButton = document.getElementById('changePasswordRequestBtn');
+    const resendButton = document.getElementById('changePasswordResendBtn');
+    const codeFields = document.getElementById('changePasswordCodeFields');
+    if(requestButton) requestButton.hidden = isResend;
+    if(resendButton) resendButton.hidden = !isResend;
+    if(codeFields && !isResend) codeFields.hidden = true;
   }
 }
 

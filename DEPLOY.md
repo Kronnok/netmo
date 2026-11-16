@@ -71,10 +71,12 @@ el plan free de Render no tiene una IP de salida fija. Después de cambiar
 cualquier variable `MAIL_*`, guardá los cambios y hacé un **Manual Deploy**
 para que el servicio reinicie con la configuración nueva.
 
-El Perfil cambia la contraseña pidiendo la contraseña actual, así que ese flujo
-no depende del correo. Si el envío de un código falla, la API responde 503 y el
-código emitido queda invalidado; “Olvidé mi contraseña” mantiene una respuesta
-genérica y registra el detalle real solo en los logs del servidor.
+El Perfil cambia la contraseña con un código de 6 dígitos que se envía al correo
+registrado, así que ese flujo depende del correo (la variante con contraseña
+actual se conserva por compatibilidad). Si el envío de un código falla, la API
+responde 503 y el código emitido queda invalidado, y el reintento no queda
+bloqueado por el cooldown de un minuto; “Olvidé mi contraseña” mantiene una
+respuesta genérica y registra el detalle real solo en los logs del servidor.
 
 **Google Apps Script:** creá un proyecto con una función `doPost` que lea el
 JSON recibido (`secret`, `to`, `subject`, `html`), compare `secret` con un
