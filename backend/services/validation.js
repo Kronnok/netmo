@@ -68,18 +68,6 @@ function roleFromEmail(email) {
   return 'profesor';
 }
 
-// Rol automático del registro público: los institucionales lo tienen fijo y
-// @gmail.com queda sin rol hasta que un administrador lo asigne al aprobar.
-function registrationRoleFromEmail(email) {
-  const domain = String(email).trim().toLowerCase().slice(String(email).trim().lastIndexOf('@') + 1);
-  if (!ALLOWED_EMAIL_DOMAINS.includes(domain)) {
-    throw new AppError('Usá un correo @bue.edu.ar, @alu.bue.edu.ar o @gmail.com', 400);
-  }
-  if (domain === 'alu.bue.edu.ar') return 'alumno';
-  if (domain === 'bue.edu.ar') return 'profesor';
-  return null;
-}
-
 function validateEmailRole(email, role) {
   const defaultRole = roleFromEmail(email);
   const domain = String(email).trim().toLowerCase().slice(String(email).trim().lastIndexOf('@') + 1);
@@ -127,7 +115,6 @@ module.exports = {
   accountEmail,
   emailType,
   roleFromEmail,
-  registrationRoleFromEmail,
   validateEmailRole,
   loginEmail,
   accountPassword,

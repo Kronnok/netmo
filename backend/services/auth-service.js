@@ -11,12 +11,11 @@ async function authenticate(request) {
   await db.query(`UPDATE users SET baneado = FALSE, baneado_hasta = NULL
     WHERE id = $1 AND baneado AND baneado_hasta IS NOT NULL AND baneado_hasta <= now()
     RETURNING id`, [session.userId]);
-  const userResult = await db.query(`SELECT id, dni, nombre, email, rol, aprobado,
+  const userResult = await db.query(`SELECT id, dni, nombre, email, rol,
     (baneado AND (baneado_hasta IS NULL OR baneado_hasta > now())) AS baneado
     FROM users WHERE id = $1 AND eliminado_at IS NULL`, [session.userId]);
   const user = userResult.rows[0];
   if (!user || user.baneado) throw new AppError('Cuenta no autorizada', 403);
-  if (user.aprobado === false) throw new AppError('Tu cuenta está pendiente de aprobación', 403);
   return user;
 }
 
@@ -33,7 +32,7 @@ async function login(body, request) {
        WHERE email = $1 AND baneado AND baneado_hasta IS NOT NULL AND baneado_hasta <= now()
        RETURNING id
      )
-     SELECT id, dni, nombre, email, rol, aprobado,
+     SELECT id, dni, nombre, email, rol,
       (baneado AND (baneado_hasta IS NULL OR baneado_hasta > now())) AS baneado
       FROM users WHERE email = $1 AND eliminado_at IS NULL
         AND password_hash = crypt($2, password_hash)`,
@@ -45,10 +44,6 @@ async function login(body, request) {
     throw new AppError('Correo o contraseña incorrectos', 401);
   }
   if (user.baneado) throw new AppError('Usuario bloqueado por administración', 403);
-  if (user.aprobado === false) {
-    loginRateLimiter.clearFailures(request, email);
-    throw new AppError('Tu cuenta está pendiente de aprobación', 403);
-  }
   loginRateLimiter.clearFailures(request, email);
   return { token: createToken(user.id), user };
 }

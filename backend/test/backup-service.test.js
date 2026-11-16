@@ -20,7 +20,6 @@ function createValidBackup() {
     nombre: 'Admin Test',
     email: 'admin@example.test',
     rol: 'admin',
-    aprobado: true,
     password_hash: 'hash',
     baneado: false,
     baneado_hasta: null,
@@ -28,7 +27,7 @@ function createValidBackup() {
     created_at: '2026-10-25T10:00:00.000Z'
   }];
   const columns = Object.fromEntries(tableNames.map((table) => [table, new Set([
-    'id', 'dni', 'nombre', 'email', 'rol', 'aprobado', 'password_hash', 'baneado', 'baneado_hasta', 'eliminado_at',
+    'id', 'dni', 'nombre', 'email', 'rol', 'password_hash', 'baneado', 'baneado_hasta', 'eliminado_at',
     'created_at', 'user_id', 'email_notifications', 'return_reminder_minutes', 'updated_at', 'slug', 'nombre',
     'numero', 'ubicacion_id', 'codigo', 'estado', 'ubicacion', 'carro_id', 'prestado_a', 'owner_id', 'tipo',
     'carro', 'curso', 'cantidad', 'retiro_at', 'motivo', 'reservation_id', 'notebook_id',
@@ -173,26 +172,6 @@ test('acepta el esquema inicial y reconoce versiones de migración', () => {
   assert.equal(backupService.migrationNumber('010-dni-carros-y-sesiones.sql'), 10);
   assert.equal(backupService.migrationNumber('011-ubicaciones-recordatorios-y-respuestas.sql'), 11);
   assert.equal(backupService.migrationNumber('future'), null);
-});
-
-test('el backup admite solicitudes pendientes sin rol y exige rol al resto', () => {
-  const backup = createValidBackup();
-  backup.data.users.push({
-    id: '2', dni: '200', nombre: 'Solicitud Pendiente', email: 'pendiente@gmail.com',
-    rol: null, aprobado: false, password_hash: 'hash'
-  });
-  assert.doesNotThrow(() => backupService.validateRows(backup, backup.available, backup.columns));
-  backup.data.users[1].aprobado = true;
-  assert.throws(
-    () => backupService.validateRows(backup, backup.available, backup.columns),
-    /Falta el campo requerido users\.rol/
-  );
-  backup.data.users[1].rol = 'alumno';
-  backup.data.users[1].aprobado = 'no';
-  assert.throws(
-    () => backupService.validateRows(backup, backup.available, backup.columns),
-    /Tipo o valor inválido/
-  );
 });
 
 test('la restauración convierte backups históricos con legajo sin cambiar sus valores', () => {

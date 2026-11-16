@@ -19,7 +19,7 @@ async function unusedPort() {
 test('resuelve rutas de API y sus parámetros', () => {
   assert.equal(routes.resolve('GET', '/api/notebooks').action, 'notebooks');
   assert.deepEqual(routes.resolve('POST', '/api/admin/reservations/42/checkout').params, { id: 42 });
-  assert.equal(routes.resolve('POST', '/api/auth/register').action, 'register');
+  assert.equal(routes.resolve('POST', '/api/auth/register'), null);
   assert.equal(routes.resolve('POST', '/api/auth/forgot').action, 'forgotPassword');
   assert.equal(routes.resolve('POST', '/api/auth/refresh').action, 'refresh');
   assert.equal(routes.resolve('GET', '/api/me').action, 'me');
@@ -28,9 +28,6 @@ test('resuelve rutas de API y sus parámetros', () => {
   assert.equal(routes.resolve('POST', '/api/auth/change-password/request').action, 'requestPasswordChange');
   assert.equal(routes.resolve('POST', '/api/auth/change-password').action, 'changePassword');
   assert.equal(routes.resolve('POST', '/api/admin/users').action, 'createUser');
-  assert.equal(routes.resolve('GET', '/api/admin/users/pending').action, 'pendingUsers');
-  assert.deepEqual(routes.resolve('POST', '/api/admin/users/1234567/approve').params, { dni: '1234567' });
-  assert.deepEqual(routes.resolve('POST', '/api/admin/users/1234567/reject').params, { dni: '1234567' });
   assert.equal(routes.resolve('GET', '/api/admin/carros').action, 'carros');
   assert.equal(routes.resolve('GET', '/api/admin/backup').action, 'downloadAdminBackup');
   assert.equal(routes.resolve('POST', '/api/admin/restore').action, 'restoreAdminBackup');
@@ -131,10 +128,9 @@ test('sirve frontend en desarrollo, valida JSON y responde CORS', async (context
   const publicRegistration = await fetch(`${baseUrl}/api/auth/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ nombre: 'Test', apellido: 'Prueba', dni: '12345678', email: 'test@example.test', password: 'password', passwordConfirmation: 'password' })
+    body: JSON.stringify({ nombre: 'Test', email: 'test@example.test', password: 'password' })
   });
-  assert.equal(publicRegistration.status, 400);
-  assert.match((await publicRegistration.json()).error, /bue\.edu\.ar/);
+  assert.equal(publicRegistration.status, 404);
 
   const health = await fetch(`${baseUrl}/health`, { headers: { Origin: allowedOrigin } });
   assert.equal(health.status, 500);

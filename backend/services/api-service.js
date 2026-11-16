@@ -34,19 +34,6 @@ async function notifyByEmail(userId, subject, html) {
   }
 }
 
-async function notifyAccountApproved(user) {
-  try {
-    const roleLabel = { alumno: 'alumno', profesor: 'profesor', admin: 'administrador' }[user.rol] || user.rol;
-    await sendMail({
-      to: user.email,
-      subject: 'Tu cuenta de NetMO fue aprobada',
-      html: `<p>Hola ${escapeEmailHtml(user.nombre)},</p><p>Un administrador aprobó tu cuenta de NetMO con el rol de ${roleLabel}. Ya podés iniciar sesión con tu correo y contraseña.</p>`
-    });
-  } catch {
-    console.error('No se pudo enviar el correo de aprobación de cuenta.');
-  }
-}
-
 async function notifyLoanReturnByEmail(loanId) {
   try {
     const result = await db.query(`SELECT u.email FROM loans l
@@ -296,7 +283,7 @@ const actions = {
   async professors(_body, user) {
     requireAdmin(user, 'Solo admin puede consultar profesores');
     const result = await db.query(`SELECT dni, nombre, email FROM users
-      WHERE rol = 'profesor' AND aprobado = TRUE AND eliminado_at IS NULL ORDER BY nombre`);
+      WHERE rol = 'profesor' AND eliminado_at IS NULL ORDER BY nombre`);
     return { professors: result.rows };
   },
   async users(_body, user, _params, query) {
@@ -321,8 +308,7 @@ const actions = {
         ELSE 'otro'
       END AS tipo_correo
       FROM users
-      WHERE aprobado = TRUE
-        AND ($1::user_role IS NULL OR rol = $1::user_role)
+      WHERE ($1::user_role IS NULL OR rol = $1::user_role)
         AND ($2::text IS NULL OR CASE split_part(lower(email::text), '@', 2)
           WHEN 'bue.edu.ar' THEN 'profesor'
           WHEN 'alu.bue.edu.ar' THEN 'alumno'
@@ -359,72 +345,6 @@ const actions = {
       if (error.code === '23505') throw new AppError('El email o el DNI ya están registrados', 409);
       throw error;
     }
-  },
-  async pendingUsers(_body, user) {
-    requireAdmin(user, 'Solo admin puede consultar solicitudes pendientes');
-    const result = await db.query(`SELECT dni, nombre, email, rol, created_at,
-      CASE split_part(lower(email::text), '@', 2)
-        WHEN 'bue.edu.ar' THEN 'profesor'
-        WHEN 'alu.bue.edu.ar' THEN 'alumno'
-        WHEN 'gmail.com' THEN 'gmail'
-        ELSE 'otro'
-      END AS tipo_correo,
-      CASE split_part(lower(email::text), '@', 2)
-        WHEN 'bue.edu.ar' THEN 'profesor'
-        WHEN 'alu.bue.edu.ar' THEN 'alumno'
-        ELSE NULL
-      END AS rol_sugerido
-      FROM users
-      WHERE aprobado = FALSE AND eliminado_at IS NULL
-      ORDER BY created_at`);
-    return { users: result.rows };
-  },
-  async approveUser(body, user, { dni }) {
-    requireAdmin(user, 'Solo admin puede aprobar solicitudes');
-    const approved = await db.transaction(async (client) => {
-      await client.query('LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE');
-      const current = await client.query(`SELECT id, dni, nombre, email, rol, aprobado
-        FROM users WHERE dni = $1 AND eliminado_at IS NULL FOR UPDATE`, [dni]);
-      if (!current.rowCount) throw new AppError('Solicitud no encontrada', 404);
-      const target = current.rows[0];
-      if (target.aprobado !== false) throw new AppError('La cuenta ya está aprobada', 409);
-      const requestedRole = body.rol || target.rol;
-      if (!requestedRole) throw new AppError('Asigná un rol para aprobar esta cuenta', 400);
-      const role = validateEmailRole(target.email, requestedRole);
-      const updated = await client.query(`UPDATE users SET rol = $1, aprobado = TRUE
-        WHERE id = $2
-        RETURNING dni, nombre, email, rol, aprobado`, [role, target.id]);
-      const auditTable = await client.query("SELECT to_regclass('public.audit_log') AS table_name");
-      if (auditTable.rows[0]?.table_name) {
-        await client.query(`INSERT INTO audit_log (user_id, accion, detalle)
-          VALUES ($1, 'aprobacion_cuenta', $2)`, [
-          user.id, JSON.stringify({ user_id: target.id, email: target.email, rol: role })
-        ]);
-      }
-      return updated.rows[0];
-    });
-    await notifyAccountApproved(approved);
-    return { user: approved, message: 'Cuenta aprobada' };
-  },
-  async rejectUser(_body, user, { dni }) {
-    requireAdmin(user, 'Solo admin puede rechazar solicitudes');
-    const result = await db.query(`SELECT id, dni, nombre, email, aprobado FROM users
-      WHERE dni = $1 AND eliminado_at IS NULL`, [dni]);
-    if (!result.rowCount) throw new AppError('Solicitud no encontrada', 404);
-    const pending = result.rows[0];
-    if (pending.aprobado !== false) throw new AppError('Solo se pueden rechazar solicitudes pendientes', 409);
-    await db.transaction(async (client) => {
-      const auditTable = await client.query("SELECT to_regclass('public.audit_log') AS table_name");
-      if (auditTable.rows[0]?.table_name) {
-        await client.query(`INSERT INTO audit_log (user_id, accion, detalle)
-          VALUES ($1, 'rechazo_cuenta', $2)`, [
-          user.id, JSON.stringify({ user_id: pending.id, dni: pending.dni, email: pending.email })
-        ]);
-      }
-      await client.query('DELETE FROM user_preferences WHERE user_id = $1', [pending.id]);
-      await client.query('DELETE FROM users WHERE id = $1', [pending.id]);
-    });
-    return { user: { dni: pending.dni, email: pending.email }, message: 'Solicitud rechazada' };
   },
   async preferences(_body, user) {
     const result = await db.query('SELECT email_notifications AS email, return_reminder_minutes AS recordatorio FROM user_preferences WHERE user_id = $1', [user.id]);

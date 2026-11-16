@@ -18,19 +18,19 @@ Los permisos de la interfaz se presentan por rol, pero la autorización efectiva
 | `profesor` | Las funciones comunes; además, reservar más de una notebook y solicitar lotes de al menos tres equipos indicando el curso. Los lotes requieren aprobación administrativa. |
 | `admin` | Crear cuentas; administrar roles, carros, ubicaciones y notebooks; ver reservas y préstamos, registrar entregas y devoluciones; administrar tickets y respuestas; revisar demoras, banear usuarios con vencimiento y dar de baja o restaurar cuentas. |
 
-El seed contiene cuentas de ejemplo para instalaciones nuevas. Cualquier persona puede solicitar una cuenta desde el inicio de sesión; la solicitud queda pendiente hasta que un administrador la apruebe. También el administrador puede crear cuentas directamente. Los usuarios existentes conservan sus credenciales y los valores de su DNI; el DNI solo se muestra al propio usuario y a administración.
+El seed contiene cuentas de ejemplo para instalaciones nuevas. No hay registro público: el administrador crea las cuentas nuevas de alumnos y profesores. Los usuarios existentes conservan sus credenciales y los valores de su DNI; el DNI solo se muestra al propio usuario y a administración.
 
 ## 3. Funcionalidades por módulo/pantalla
 
 | Módulo o pantalla | Función |
 |---|---|
-| Acceso | Inicia sesión por correo y contraseña o solicita una cuenta nueva. Toda solicitud queda pendiente de aprobación administrativa. |
+| Acceso | Inicia sesión por correo y contraseña. La cuenta la crea un administrador. |
 | Inicio | Muestra un portal propio por rol: hero, resumen y accesos para alumno/profesor; KPIs y panel denso para administración. Las normas y avisos son contenido informativo de la interfaz. |
 | Mis préstamos | Muestra préstamos activos, historial, hora de vencimiento, cuenta regresiva y avisos previos; la devolución la registra administración. |
 | Reservas | Crea reservas individuales o solicitudes de lote filtrando equipos por ubicación del carro, muestra las propias y permite cancelar las que aún son cancelables. |
 | Reportar falla / Mis tickets | Crea reportes asociados a notebooks del historial propio o a “Otra / no sé”; muestra el seguimiento y el hilo de respuestas. |
 | Perfil | Muestra los datos de cuenta y permite configurar notificaciones por correo y minutos de recordatorio (0 desactiva el aviso). |
-| Administración: Usuarios | Revisa y aprueba o rechaza solicitudes pendientes, crea cuentas con correo institucional o `@gmail.com`, consulta las listas reales, permite cambiar roles, banear cuentas y dar de baja o restaurar cuentas sin perder el historial. |
+| Administración: Usuarios | Crea cuentas con correo institucional o `@gmail.com`, consulta las listas reales, permite cambiar roles, banear cuentas y dar de baja o restaurar cuentas sin perder el historial. |
 | Administración: Inventario | Lista y filtra notebooks; administra carros y ubicaciones editables, renumera carros y da de alta o mueve notebooks. |
 | Administración: Entregas y devoluciones | Busca usuarios y préstamos activos, registra devoluciones individuales o de un lote y actualiza la lista periódicamente. |
 | Administración: Préstamos | Lista reservas individuales y por lote, permite aprobar lotes y registrar entrega; notebooks disponibles pueden asignarse al entregar. |
@@ -43,12 +43,10 @@ El seed contiene cuentas de ejemplo para instalaciones nuevas. Cualquier persona
 ### Login y cuentas
 
 1. Al abrir la página, el frontend calienta `/health`; si encuentra un token, valida/restaura la sesión con `GET /api/me` y, si vence en menos de dos horas, lo renueva.
-2. El login envía correo y contraseña a la API, que compara el hash almacenado en una consulta; una cuenta baneada o pendiente de aprobación no puede iniciar sesión.
+2. El login envía correo y contraseña a la API, que compara el hash almacenado en una consulta; una cuenta baneada no puede iniciar sesión.
 3. La API devuelve usuario y token; los datos necesarios para el rol y la vista se cargan en paralelo. La contraseña nunca se almacena en el navegador.
 4. El administrador crea nuevas cuentas; el backend valida nombre, apellido, DNI de 7 a 10 dígitos, correo, rol y contraseña, y genera preferencias iniciales.
-5. Desde “Crear una cuenta” en el login, una persona se registra con nombre, apellido, DNI, correo, contraseña y confirmación. El rol se deriva del dominio: `@alu.bue.edu.ar` es alumno, `@bue.edu.ar` es profesor y `@gmail.com` queda sin rol hasta que administración lo elija. La cuenta se guarda como pendiente (`users.aprobado = false`) y se envía un correo de recepción.
-6. En Administración: Usuarios aparece la tarjeta Solicitudes pendientes con un contador en el menú. Al aprobar se asigna el rol, se marca la cuenta como aprobada y se envía un correo; al rechazar se elimina la solicitud y la persona puede volver a registrarse. Las cuentas pendientes no aparecen en los listados normales y no pueden autenticarse hasta la aprobación.
-7. El administrador puede cambiar el rol de otra cuenta, pero no el propio; no puede dejar el sistema sin administradores y debe confirmar su contraseña para ascender una cuenta. El rol vigente se consulta desde la base en cada solicitud.
+5. El administrador puede cambiar el rol de otra cuenta, pero no el propio; no puede dejar el sistema sin administradores y debe confirmar su contraseña para ascender una cuenta. El rol vigente se consulta desde la base en cada solicitud.
 
 Las altas y cambios de correo de alumnos/profesores aceptan únicamente `@alu.bue.edu.ar`, `@bue.edu.ar` y `@gmail.com`. El rol institucional se valida; con `@gmail.com` se elige alumno o profesor. No se migran ni bloquean cuentas existentes.
 
@@ -132,13 +130,12 @@ No se encontró `CONTEXT.md` en la raíz. La documentación de referencia `docum
 
 ## 6. API
 
-Salvo health, login y registro, las rutas requieren `Authorization: Bearer <token>`. Los endpoints `/api/admin/*` exigen rol administrador en el controlador y en sus acciones de servicio. Las respuestas de error tienen forma `{ "error": "..." }`.
+Salvo health y login, las rutas requieren `Authorization: Bearer <token>`. Los endpoints `/api/admin/*` exigen rol administrador en el controlador y en sus acciones de servicio. Las respuestas de error tienen forma `{ "error": "..." }`. `/api/auth/register` no existe y responde 404.
 
 | Método | Ruta | Rol requerido | Recibe | Devuelve |
 |---|---|---|---|---|
 | GET | `/health` | Ninguno | — | `{ok, service}` si puede consultar PostgreSQL. |
-| POST | `/api/auth/login` | Público | `{email, password}` | `{token, user}`; rechaza cuentas pendientes o bloqueadas. |
-| POST | `/api/auth/register` | Público | `{nombre, apellido, dni, email, password, passwordConfirmation}` | Crea una solicitud pendiente, envía un correo de recepción y responde HTTP 201. |
+| POST | `/api/auth/login` | Público | `{email, password}` | `{token, user}`. |
 | POST | `/api/auth/refresh` | Autenticado | — | `{token}`; renueva la sesión próxima a vencer. |
 | POST | `/api/auth/forgot` | Público | `{email}` | Respuesta genérica; envía un código si la cuenta existe y el correo se pudo enviar. |
 | POST | `/api/auth/reset` | Público | `{email, code, password}` | Restablece la contraseña con un código de un solo uso. |
@@ -149,10 +146,7 @@ Salvo health, login y registro, las rutas requieren `Authorization: Bearer <toke
 | GET | `/api/admin/users` | Admin | — | Usuarios activos de todos los roles en `{users}`. |
 | GET | `/api/admin/users?rol=alumno\|profesor\|admin` | Admin | — | Filtra las cuentas activas por rol. |
 | GET | `/api/admin/users?eliminados=si` | Admin | — | Lista solo las cuentas dadas de baja. |
-| GET | `/api/admin/users/pending` | Admin | — | Solicitudes pendientes en `{users}`, con `tipo_correo` y `rol_sugerido`. |
 | POST | `/api/admin/users` | Admin | `{nombre, apellido, email, dni, rol, password}` | Crea cuenta y preferencias; HTTP 201. |
-| POST | `/api/admin/users/:dni/approve` | Admin | `{rol?}` | Aprueba una solicitud, asigna el rol (obligatorio para `@gmail.com`) y envía un correo. |
-| POST | `/api/admin/users/:dni/reject` | Admin | — | Rechaza y elimina definitivamente una solicitud pendiente. |
 | PATCH | `/api/admin/users/:dni` | Admin | `{baneado, duracionDias?}` | `{user}`; duración 1, 3, 7, 15, 30 días o indefinida; no modifica administradores. |
 | DELETE | `/api/admin/users/:dni` | Admin | — | Baja lógica: completa `eliminado_at`; no borra historial ni permite administradores o la propia cuenta. |
 | POST | `/api/admin/users/:dni/restore` | Admin | — | Restaura una cuenta dada de baja. |
@@ -204,7 +198,7 @@ PostgreSQL usa `citext` para emails y `pgcrypto` para hash de contraseñas. Las 
 
 | Tabla | Columnas principales (tipo) y relaciones |
 |---|---|
-| `users` | `id BIGSERIAL PK`; `dni VARCHAR(32) UNIQUE`; `nombre VARCHAR(120)`; `email CITEXT UNIQUE`; `rol user_role nullable`; `aprobado BOOLEAN NOT NULL DEFAULT TRUE`; `password_hash TEXT`; `baneado BOOLEAN`; `baneado_hasta TIMESTAMPTZ nullable`; `eliminado_at TIMESTAMPTZ nullable`; `created_at TIMESTAMPTZ`. Las cuentas registradas públicamente quedan con `aprobado = false`; `rol` es nulo solo para solicitudes `@gmail.com` aún sin asignar. La baja lógica completa `eliminado_at` y conserva todo el historial. |
+| `users` | `id BIGSERIAL PK`; `dni VARCHAR(32) UNIQUE`; `nombre VARCHAR(120)`; `email CITEXT UNIQUE`; `rol user_role`; `password_hash TEXT`; `baneado BOOLEAN`; `baneado_hasta TIMESTAMPTZ nullable`; `eliminado_at TIMESTAMPTZ nullable`; `created_at TIMESTAMPTZ`. La baja lógica completa `eliminado_at` y conserva todo el historial. |
 | `user_preferences` | `user_id BIGINT PK/FK → users(id)`; `email_notifications BOOLEAN`; `return_reminder_minutes INTEGER` con valores permitidos 0/15/30/60; `updated_at TIMESTAMPTZ`. |
 | `ubicaciones` | `slug VARCHAR(32) PK`; `nombre VARCHAR(50)`; catálogo editable con las ubicaciones iniciales. |
 | `carros` | `numero INTEGER PK` entre 1 y 999; `ubicacion VARCHAR(20) nullable FK → ubicaciones(slug)`; `created_at TIMESTAMPTZ`. |
@@ -228,9 +222,9 @@ La vista `user_late_return_summary` cuenta tardanzas y marca `candidato_a_sancio
 - El token es JWT HS256 firmado con HMAC y `JWT_SECRET`, con vencimiento de 12 horas. En producción el secreto es obligatorio; Render lo genera. El endpoint de refresh emite un token nuevo para sesiones próximas a vencer.
 - El frontend persiste solo el token, en `localStorage` si se solicita mantener la sesión y en `sessionStorage` en caso contrario. Al iniciar, valida el token mediante `/api/me`; no almacena la contraseña.
 - CORS usa `CORS_ORIGIN`; acepta una lista de orígenes. En producción exige que la variable contenga al menos uno; en desarrollo, si no se indica, permite `*`.
-- Se limita el cuerpo JSON a 1 MiB, se rechazan cuerpos no-objeto o JSON inválido y se usan consultas parametrizadas. El login limita cinco fallos por IP/correo durante dos minutos por defecto; `LOGIN_LOCK_MINUTES` permite configurar la ventana con mínimo de un minuto. El registro público usa el mismo límite por IP/correo.
+- Se limita el cuerpo JSON a 1 MiB, se rechazan cuerpos no-objeto o JSON inválido y se usan consultas parametrizadas. El login limita cinco fallos por IP/correo durante dos minutos por defecto; `LOGIN_LOCK_MINUTES` permite configurar la ventana con mínimo de un minuto.
 - Se envían `X-Content-Type-Options`, `X-Frame-Options` y `Referrer-Policy`; las vistas escapan los valores dinámicos que interpolan en `innerHTML`.
-- Las altas nuevas y el registro público validan nombres Unicode, DNI numérico de 7 a 10 dígitos, email y contraseñas de al menos ocho caracteres sin espacios. Los DNI de cuentas existentes no se revalidan ni modifican. El DNI solo se devuelve al propio usuario y a administradores; no se incluye en logs. Los baneos pueden tener duración o ser indefinidos y su expiración se aplica automáticamente al autenticar. La recuperación de contraseña usa códigos de un solo uso; no hay autenticación multifactor. El Perfil cambia la contraseña pidiendo un código al correo registrado, sin exigir la contraseña anterior; la variante con contraseña actual se conserva por compatibilidad. Si `sendMail` falla al emitir un código, la API responde 503 y marca ese código como usado para que no quede vigente un código que nadie recibió. “Olvidé mi contraseña” mantiene una respuesta genérica y registra el detalle real solo en el servidor.
+- Las altas nuevas validan nombres Unicode, DNI numérico de 7 a 10 dígitos, email y contraseñas de al menos ocho caracteres sin espacios. Los DNI de cuentas existentes no se revalidan ni modifican. El DNI solo se devuelve al propio usuario y a administradores; no se incluye en logs. Los baneos pueden tener duración o ser indefinidos y su expiración se aplica automáticamente al autenticar. La recuperación de contraseña usa códigos de un solo uso; no hay autenticación multifactor. El Perfil cambia la contraseña pidiendo un código al correo registrado, sin exigir la contraseña anterior; la variante con contraseña actual se conserva por compatibilidad. Si `sendMail` falla al emitir un código, la API responde 503 y marca ese código como usado para que no quede vigente un código que nadie recibió. “Olvidé mi contraseña” mantiene una respuesta genérica y registra el detalle real solo en el servidor.
 
 ## 9. Configuración
 
