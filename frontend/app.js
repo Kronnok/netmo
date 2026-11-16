@@ -32,7 +32,9 @@ let reservationSubmitting = false;
 let lateReturnsInterval = null;
 let loanReminderInterval = null;
 let circulationInterval = null;
+let circulationSearchTimer = null;
 let reservationsSearchTimer = null;
+let returnHistorySearchTimer = null;
 let circulationLoans = [];
 let activeTicketRepliesCode = null;
 let forgotResendTimeout = null;
@@ -353,6 +355,7 @@ function expireSession(message){
   authToken = null;
   currentUser = null;
   rolActivo = null;
+  resetRoleIdentity();
   persistSession = false;
   const staleChangePasswordForm = document.getElementById('changePasswordForm');
   if(staleChangePasswordForm) delete staleChangePasswordForm.dataset.userId;
@@ -1008,6 +1011,7 @@ function logout(){
   authToken = null;
   currentUser = null;
   rolActivo = null;
+  resetRoleIdentity();
   persistSession = false;
   const changePasswordForm = document.getElementById('changePasswordForm');
   if(changePasswordForm) delete changePasswordForm.dataset.userId;
@@ -1017,6 +1021,21 @@ function logout(){
   document.getElementById('loginError').textContent = '';
   if(storageError) document.getElementById('loginError').textContent = storageError.trim();
   else showToast('Sesión cerrada correctamente.', 'warn');
+}
+
+function resetRoleIdentity(){
+  delete document.documentElement.dataset.role;
+  const pill = document.getElementById('sidebarRolePill');
+  if(pill){
+    pill.textContent = '';
+    pill.className = 'role-pill';
+  }
+  const banner = document.getElementById('roleHomeBanner');
+  if(banner){
+    banner.hidden = true;
+    banner.innerHTML = '';
+    banner.className = 'role-home-banner';
+  }
 }
 
 function applyRoleVisibility(){
@@ -1036,8 +1055,10 @@ function applyRoleVisibility(){
   renderRoleHomeBanner();
   document.documentElement.dataset.role = rolActivo || '';
   const pill = document.getElementById('sidebarRolePill');
-  pill.textContent = rolLabel[rolActivo];
-  pill.className = 'role-pill role-' + rolActivo;
+  if(pill){
+    pill.textContent = rolActivo ? rolLabel[rolActivo] : '';
+    pill.className = rolActivo ? 'role-pill role-' + rolActivo : 'role-pill';
+  }
 }
 
 function renderRoleHomeBanner(){

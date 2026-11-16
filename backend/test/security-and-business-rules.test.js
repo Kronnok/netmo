@@ -1665,6 +1665,11 @@ test('la interfaz muestra selector reabrible, contador de texto, carro y curso e
   assert.match(html, /id="statReservaUsuario"/);
   assert.match(app, /function renderResumenUsuario\(/);
   assert.match(app, /function renderRoleHomeBanner\(/);
+  assert.match(app, /function resetRoleIdentity\(/);
+  assert.match(app, /delete document\.documentElement\.dataset\.role/);
+  assert.ok((app.match(/resetRoleIdentity\(\);/g) || []).length >= 2);
+  assert.match(app, /let circulationSearchTimer = null/);
+  assert.match(app, /let returnHistorySearchTimer = null/);
   assert.match(app, /banner-actions/);
   assert.doesNotMatch(app, /<th>Slug<\/th>/);
   assert.doesNotMatch(app, /<td class="mono">\$\{escapeHtml\(location\.slug\)\}<\/td>/);
