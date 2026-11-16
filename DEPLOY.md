@@ -31,6 +31,10 @@ de notebooks para permitir renumerarlos. La migración 011 crea el catálogo
 editable de ubicaciones, agrega el estado de envío del recordatorio de
 vencimiento y habilita respuestas en tickets. La migración 013 relaciona cada
 reporte de falla con el préstamo seleccionado sin alterar reportes anteriores.
+La migración 016 agrega `users.aprobado` (verdadero por defecto, para no afectar
+cuentas existentes), permite `users.rol` nulo en solicitudes `@gmail.com` y crea
+un índice parcial de cuentas pendientes. Después de migrar, las solicitudes
+nuevas quedan visibles en Administración → Usuarios y roles para aprobarlas.
 
 ## 2. API en Render
 

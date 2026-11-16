@@ -2,6 +2,7 @@
    ESTADO EN MEMORIA
 ====================================================================== */
 let usuariosRegistrados = [];
+let usuariosPendientes = [];
 let usuariosEliminados = [];
 let usuariosConTardanzas = [];
 
@@ -413,6 +414,7 @@ async function cargarEstadoAPI(){
     requests.push(
       ['lateReturns', apiRequest('/api/admin/late-returns')],
       ['users', apiRequest('/api/admin/users')],
+      ['pendingUsers', apiRequest('/api/admin/users/pending')],
       ['deletedUsers', apiRequest('/api/admin/users?eliminados=si')]
     );
   }
@@ -459,6 +461,7 @@ async function cargarEstadoAPI(){
   }));
   if(esAdmin){
     usuariosRegistrados = loaded.users.users;
+    usuariosPendientes = loaded.pendingUsers?.users || [];
     usuariosEliminados = loaded.deletedUsers?.users || [];
     usuariosConTardanzas = loaded.lateReturns.users;
     historialTardanzas = loaded.lateReturns.history.map(item=>({
@@ -522,14 +525,80 @@ function mostrarRecuperacion(){
   forgotResendTimeout = null;
   forgotResendSeconds = 0;
   document.getElementById('view-login').classList.remove('active');
+  document.getElementById('view-register').classList.remove('active');
   document.getElementById('view-forgot-password').classList.add('active');
   document.getElementById('forgotEmail').value = document.getElementById('loginEmail').value.trim();
   document.getElementById('forgotPasswordMessage').textContent = '';
 }
 
 function mostrarLogin(){
-  document.getElementById('view-forgot-password').classList.remove('active');
+  document.querySelectorAll('.auth-view').forEach(view=>view.classList.remove('active'));
   document.getElementById('view-login').classList.add('active');
+}
+
+function mostrarRegistro(){
+  document.querySelectorAll('.auth-view').forEach(view=>view.classList.remove('active'));
+  document.getElementById('view-register').classList.add('active');
+  const email = document.getElementById('loginEmail').value.trim();
+  const registerEmail = document.getElementById('registerEmail');
+  if(email && !registerEmail.value) registerEmail.value = email;
+  document.getElementById('registerError').textContent = '';
+  actualizarRolRegistro();
+}
+
+function actualizarRolRegistro(){
+  const hint = document.getElementById('registerRoleHint');
+  if(!hint) return;
+  const email = document.getElementById('registerEmail').value.trim();
+  const tipo = clasificarCorreo(email);
+  const messages = {
+    alumno:'Tu cuenta será de alumno y quedará pendiente de aprobación.',
+    profesor:'Tu cuenta será de profesor y quedará pendiente de aprobación.',
+    gmail:'Con @gmail.com el administrador te asigna el rol antes de aprobar la cuenta.',
+    otro:'Usá un correo @bue.edu.ar, @alu.bue.edu.ar o @gmail.com.'
+  };
+  hint.textContent = messages[tipo];
+  hint.style.color = tipo==='otro' && email ? 'var(--red-text)' : '';
+}
+
+async function registrarCuenta(e){
+  e.preventDefault();
+  const error = document.getElementById('registerError');
+  const submit = document.getElementById('registerSubmit');
+  const nombre = document.getElementById('registerNombre').value.trim();
+  const apellido = document.getElementById('registerApellido').value.trim();
+  const dni = document.getElementById('registerDni').value.trim();
+  const email = document.getElementById('registerEmail').value.trim().toLowerCase();
+  const password = document.getElementById('registerPassword').value;
+  const passwordConfirmation = document.getElementById('registerPasswordConfirmation').value;
+  error.textContent = validarNombreCuenta(nombre, 'El nombre') || validarNombreCuenta(apellido, 'El apellido');
+  if(!error.textContent && !/^\d{7,10}$/.test(dni)) error.textContent = 'El DNI debe contener de 7 a 10 dígitos numéricos';
+  if(!error.textContent && /\s/.test(email)) error.textContent = 'El email no puede contener espacios';
+  if(!error.textContent && (email.length > 50 || !/^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$/.test(email))) error.textContent = 'Ingresá un email válido de hasta 50 caracteres';
+  if(!error.textContent && clasificarCorreo(email)==='otro') error.textContent = 'Usá un correo @bue.edu.ar, @alu.bue.edu.ar o @gmail.com';
+  if(!error.textContent && (password.length < 8 || password.length > 50 || /\s/.test(password))) error.textContent = 'La contraseña debe tener entre 8 y 50 caracteres y no contener espacios';
+  if(!error.textContent && password !== passwordConfirmation) error.textContent = 'Las contraseñas no coinciden';
+  if(error.textContent){ showToast(error.textContent, 'warn'); return; }
+  submit.disabled = true;
+  submit.textContent = 'Enviando...';
+  try{
+    const result = await apiRequest('/api/auth/register', {
+      method:'POST',
+      body:JSON.stringify({nombre, apellido, dni, email, password, passwordConfirmation})
+    });
+    document.getElementById('registerForm').reset();
+    actualizarRolRegistro();
+    mostrarLogin();
+    document.getElementById('loginEmail').value = email;
+    document.getElementById('loginError').textContent = result.message;
+    showToast(result.message, 'success');
+  }catch(requestError){
+    error.textContent = isNetworkError(requestError) ? API_CONNECTION_ERROR : requestError.message;
+    showToast(error.textContent, 'warn');
+  }finally{
+    submit.disabled = false;
+    submit.textContent = 'Enviar solicitud';
+  }
 }
 
 function iniciarEsperaReenvio(){
@@ -831,6 +900,82 @@ function renderProfesoresTable(){
         onclick="cambiarEstadoCuenta(${escapeHtml(JSON.stringify(usuario.dni))}, ${!usuario.baneado})">${usuario.baneado?'Desbloquear':'Bloquear'}</button>
         <button class="btn btn-sm btn-danger-outline" onclick="darBajaUsuario(${escapeHtml(JSON.stringify(usuario.dni))})">Dar de baja</button></div>`}</td>
     </tr>`).join('');
+  }
+}
+
+function renderUsuariosPendientes(){
+  const tbody = document.getElementById('pendingUsersTable');
+  if(!tbody) return;
+  const badge = document.getElementById('pendingUsersBadge');
+  const count = document.getElementById('pendingUsersCount');
+  const total = usuariosPendientes.length;
+  if(count) count.textContent = total ? `${total} ${total===1?'solicitud pendiente':'solicitudes pendientes'}` : 'Sin solicitudes pendientes';
+  if(badge){
+    badge.style.display = total ? 'inline-flex' : 'none';
+    badge.textContent = total;
+  }
+  if(!total){
+    tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state"><p>No hay solicitudes pendientes.</p></div></td></tr>`;
+    return;
+  }
+  tbody.innerHTML = usuariosPendientes.map(usuario=>{
+    const tipo = usuario.tipo_correo || clasificarCorreo(usuario.email);
+    const sugerido = usuario.rol_sugerido || usuario.rol;
+    return `<tr>
+      <td>${escapeHtml(usuario.nombre)}</td>
+      <td>${escapeHtml(usuario.email)}</td>
+      <td class="mono">${escapeHtml(usuario.dni)}</td>
+      <td>${tipo==='gmail'
+        ? `<select class="btn btn-sm" id="pending-role-${escapeHtml(usuario.dni)}" aria-label="Rol para ${escapeHtml(usuario.nombre)}">
+            <option value="">Elegir rol</option>
+            <option value="alumno">Alumno</option>
+            <option value="profesor">Profesor</option>
+          </select>`
+        : `<span>${escapeHtml(rolLabel[sugerido] || '—')}</span>`}</td>
+      <td>${usuario.created_at ? escapeHtml(formatBusinessDateTime(usuario.created_at)) : '—'}</td>
+      <td><div class="inventory-actions">
+        <button class="btn btn-sm btn-success-outline" onclick="aprobarCuentaPendiente(${escapeHtml(JSON.stringify(usuario.dni))})">Aprobar</button>
+        <button class="btn btn-sm btn-danger-outline" onclick="rechazarCuentaPendiente(${escapeHtml(JSON.stringify(usuario.dni))})">Rechazar</button>
+      </div></td>
+    </tr>`;
+  }).join('');
+}
+
+async function aprobarCuentaPendiente(dni){
+  const usuario = usuariosPendientes.find(item=>item.dni===dni);
+  if(!usuario) return;
+  const tipo = usuario.tipo_correo || clasificarCorreo(usuario.email);
+  const rol = tipo==='gmail'
+    ? document.getElementById('pending-role-'+dni)?.value
+    : (usuario.rol_sugerido || usuario.rol);
+  if(!rol){
+    showToast('Elegí un rol para aprobar esta cuenta.', 'warn');
+    return;
+  }
+  try{
+    await apiRequest(`/api/admin/users/${encodeURIComponent(dni)}/approve`, {
+      method:'POST',
+      body:JSON.stringify({rol})
+    });
+    await cargarEstadoAPI();
+    renderAll();
+    showToast('Cuenta aprobada.', 'success');
+  }catch(error){
+    showToast(error.message, 'warn');
+  }
+}
+
+async function rechazarCuentaPendiente(dni){
+  const usuario = usuariosPendientes.find(item=>item.dni===dni);
+  if(!usuario) return;
+  if(!window.confirm(`¿Rechazar la solicitud de ${usuario.nombre}? Se eliminarán sus datos y podrá volver a registrarse.`)) return;
+  try{
+    await apiRequest(`/api/admin/users/${encodeURIComponent(dni)}/reject`, {method:'POST', body:'{}'});
+    await cargarEstadoAPI();
+    renderAll();
+    showToast('Solicitud rechazada.', 'success');
+  }catch(error){
+    showToast(error.message, 'warn');
   }
 }
 
@@ -1307,7 +1452,7 @@ function switchView(name){
     if(authToken) void refreshOwnTickets();
   }
   if(name==='perfil') renderPerfil();
-  if(name==='admin-profesores') renderProfesoresTable();
+  if(name==='admin-profesores'){ renderProfesoresTable(); renderUsuariosPendientes(); }
   if(name==='admin-inventario') renderAdminInventario();
   if(name==='admin-devoluciones'){
     renderDevoluciones();
@@ -1476,6 +1621,7 @@ function renderAll(){
   renderResumenUsuario();
   renderPerfil();
   renderProfesoresTable();
+  renderUsuariosPendientes();
   renderCuentasEliminadas();
   renderAdminInventario();
   renderDevoluciones();
