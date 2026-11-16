@@ -1668,6 +1668,12 @@ test('la interfaz muestra selector reabrible, contador de texto, carro y curso e
   assert.match(app, /function resetRoleIdentity\(/);
   assert.match(app, /delete document\.documentElement\.dataset\.role/);
   assert.ok((app.match(/resetRoleIdentity\(\);/g) || []).length >= 2);
+  assert.match(styles, /\.sidebar\{[^}]*height:100dvh/);
+  assert.match(styles, /\.nav-menu\{[^}]*overflow-y:auto/);
+  assert.match(styles, /\.nav-menu\{[^}]*min-height:0/);
+  assert.match(styles, /\.logout\{[^}]*flex-shrink:0/);
+  assert.match(styles, /@media \(max-height:760px\)/);
+  assert.match(styles, /@media \(max-height:600px\)/);
   assert.match(app, /let circulationSearchTimer = null/);
   assert.match(app, /let returnHistorySearchTimer = null/);
   assert.match(app, /banner-actions/);

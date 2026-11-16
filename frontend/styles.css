@@ -256,9 +256,9 @@
     width:264px;flex-shrink:0;background:var(--sidebar-bg);color:var(--sidebar-text);
     border-right:1px solid var(--sidebar-border);
     display:flex;flex-direction:column;padding:1.5rem 1rem;
-    position:sticky;top:0;height:100vh;
+    position:sticky;top:0;height:100vh;height:100dvh;min-height:0;overflow:hidden;
   }
-  .logo{display:flex;align-items:center;gap:12px;margin-bottom:1.5rem;padding:0 .5rem;}
+  .logo{display:flex;align-items:center;gap:12px;margin-bottom:1.5rem;padding:0 .5rem;flex-shrink:0;}
   .logo-mark{
     width:38px;height:38px;border-radius:10px;background:linear-gradient(155deg,var(--role-accent),var(--role-accent-strong));
     display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:var(--shadow-sm);
@@ -266,7 +266,7 @@
   .logo h1{font-size:.92rem;line-height:1.25;color:var(--sidebar-text);font-weight:700;}
   .logo h1 span{display:block;font-family:var(--font-body);font-weight:500;font-size:.72rem;color:var(--sidebar-muted);letter-spacing:.04em;text-transform:uppercase;}
 
-  .role-pill-wrap{margin:0 .5rem 1.25rem;}
+  .role-pill-wrap{margin:0 .5rem 1.25rem;flex-shrink:0;}
   .role-pill{
     display:flex;align-items:center;gap:6px;background:var(--role-accent-tint);color:var(--role-accent-strong);
     font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;
@@ -307,7 +307,14 @@
   .role-home-banner.banner-admin p{font-size:.85rem;color:var(--text-muted);}
   .role-home-banner.banner-admin .banner-eyebrow{color:var(--red-text);}
 
-  .nav-menu{list-style:none;display:flex;flex-direction:column;gap:2px;flex-grow:1;}
+  .nav-menu{
+    list-style:none;display:flex;flex-direction:column;gap:2px;
+    flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;
+    scrollbar-width:thin;scrollbar-color:var(--sidebar-border) transparent;
+  }
+  .nav-menu::-webkit-scrollbar{width:6px;}
+  .nav-menu::-webkit-scrollbar-track{background:transparent;}
+  .nav-menu::-webkit-scrollbar-thumb{background:var(--sidebar-border);border-radius:20px;}
   .nav-section-label{font-size:.68rem;font-weight:700;color:var(--sidebar-muted);text-transform:uppercase;letter-spacing:.06em;padding:.9rem .9rem .3rem;}
   .nav-item{
     padding:.68rem .9rem;border-radius:var(--radius-sm);cursor:pointer;
@@ -322,7 +329,7 @@
   li[data-roles]{display:none;}
   li[data-roles].role-visible{display:block;}
 
-  .logout{margin-top:1rem;border-top:1px solid var(--sidebar-border);padding-top:1rem;}
+  .logout{margin-top:1rem;border-top:1px solid var(--sidebar-border);padding-top:1rem;flex-shrink:0;}
 
   /* ---------- Main ---------- */
   .main-content{flex:1 1 0;min-width:0;padding:2.25rem 2.75rem;max-width:1400px;}
@@ -550,10 +557,10 @@
   }
   @media (max-width:899px){
     #app-root.active{flex-direction:column;}
-    .sidebar{position:relative;top:auto;width:100%;height:auto;padding:.75rem 1rem;border-right:0;border-bottom:1px solid var(--sidebar-border);}
+    .sidebar{position:relative;top:auto;width:100%;height:auto;min-height:0;padding:.75rem 1rem;border-right:0;border-bottom:1px solid var(--sidebar-border);overflow:visible;}
     .sidebar .logo{margin-bottom:.75rem;}
     .sidebar .role-pill-wrap{margin:0 0 .65rem;}
-    .nav-menu{flex-direction:row;flex-wrap:nowrap;gap:.25rem;overflow-x:auto;flex-grow:0;padding-bottom:.35rem;overscroll-behavior-x:contain;}
+    .nav-menu{flex-direction:row;flex-wrap:nowrap;gap:.25rem;overflow-x:auto;overflow-y:hidden;flex:0 0 auto;min-height:auto;padding-bottom:.35rem;overscroll-behavior-x:contain;scrollbar-width:none;}
     .nav-menu>li{flex:0 0 auto;}
     .nav-section-label{display:block;padding:.68rem .5rem .3rem;white-space:nowrap;}
     .nav-item{width:auto;white-space:nowrap;}
@@ -572,6 +579,22 @@
     .main-content{padding:1rem;}
     html[data-role="admin"] .main-content{padding:1rem;}
     .role-home-banner{padding:1rem;}
+  }
+
+  /* ---------- Pantallas de poca altura (el sidebar conserva Cerrar sesión visible) ---------- */
+  @media (max-height:760px){
+    .sidebar{padding:1rem .8rem;}
+    .sidebar .logo{margin-bottom:.85rem;}
+    .sidebar .role-pill-wrap{margin:0 .4rem .75rem;}
+    .nav-section-label{padding:.6rem .8rem .25rem;}
+    .nav-item{padding:.5rem .8rem;font-size:.88rem;}
+    .sidebar .logout{margin-top:.6rem;padding-top:.6rem;}
+  }
+  @media (max-height:600px){
+    .sidebar .logo h1 span{display:none;}
+    .sidebar .role-pill-wrap{margin-bottom:.5rem;}
+    .nav-item{padding:.42rem .75rem;font-size:.85rem;}
+    .sidebar .logout{margin-top:.45rem;padding-top:.45rem;}
   }
 
   /* ---------- Profile ---------- */
