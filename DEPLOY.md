@@ -21,6 +21,9 @@ esa versión ya está aplicada. Rotá cualquier credencial que haya sido expuest
 antes de usar la base en producción.
 
 `npm run db:migrate` aplica migraciones nuevas sin modificar las ya aplicadas.
+El servicio de Render también las aplica automáticamente al iniciar (`npm start`
+ejecuta primero `scripts/db.js migrate`), así que un despliegue con migraciones
+nuevas no deja la base desactualizada.
 Las reservas usan la zona `America/Argentina/Buenos_Aires`, de lunes a viernes,
 08:00–11:50 y 13:30–17:40, y rechazan fechas pasadas. Las migraciones agregan
 también baneos con vencimiento y la relación de inventario con carros; el

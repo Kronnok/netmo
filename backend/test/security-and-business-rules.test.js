@@ -2600,6 +2600,7 @@ test('la migración 016 agrega estados de registro y el esquema/seed/documentaci
   const project = fs.readFileSync(path.join(root, 'PROYECTO.md'), 'utf8');
   const deploy = fs.readFileSync(path.join(root, 'DEPLOY.md'), 'utf8');
   const readme = fs.readFileSync(path.join(root, 'README.md'), 'utf8');
+  const pkg = JSON.parse(fs.readFileSync(path.join(root, 'backend', 'package.json'), 'utf8'));
   assert.match(schema, /CREATE TYPE registration_status AS ENUM \('pendiente', 'aprobado', 'rechazado'\)/);
   assert.match(schema, /estado_registro registration_status NOT NULL DEFAULT 'aprobado'/);
   assert.match(schema, /registro_revisado_por BIGINT REFERENCES users\(id\) ON DELETE SET NULL/);
@@ -2609,6 +2610,8 @@ test('la migración 016 agrega estados de registro y el esquema/seed/documentaci
   assert.match(migration, /ADD COLUMN IF NOT EXISTS registro_revisado_por BIGINT REFERENCES users\(id\) ON DELETE SET NULL/);
   assert.match(seed, /estado_registro/);
   assert.match(runner, /'016-registration-approval\.sql'/);
+  assert.match(pkg.scripts.start, /scripts\/db\.js migrate/);
+  assert.match(deploy, /automáticamente|al iniciar|inicio del servicio/i);
   assert.match(project, /registro público/i);
   assert.match(deploy, /aprobación|registro público/i);
   assert.match(readme, /registro|aprobación/i);
