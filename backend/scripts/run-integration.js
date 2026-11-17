@@ -246,6 +246,8 @@ async function adminPermissions(admin, adminUserId, professor, student) {
     ['PATCH', '/api/admin/users/999999', {}],
     ['DELETE', '/api/admin/users/999999', undefined],
     ['POST', '/api/admin/users/999999/restore', {}],
+    ['POST', '/api/admin/users/999999/approve', {}],
+    ['POST', '/api/admin/users/999999/reject', {}],
     ['PATCH', '/api/admin/users/999999/rol', {}]
   ];
   for (const [method, pathname, body] of paths) {
@@ -700,6 +702,50 @@ async function runFlows(users) {
       dni: '9900011', rol: 'alumno', password: 'new-user-pass-2026'
     }, tokens.admin);
     assert.equal(duplicate.status, 409);
+  });
+
+  await report('registro público con aprobación, rechazo y reintento', async () => {
+    const registration = {
+      nombre: 'Registro', apellido: 'Pendiente', email: 'registro-pendiente@gmail.com',
+      dni: '9900030', rol: 'alumno', password: 'registro-pass-2026', passwordConfirmation: 'registro-pass-2026'
+    };
+    const created = await request('POST', '/api/auth/register', registration);
+    assert.equal(created.status, 201);
+    assert.equal(created.payload.user.estado_registro, 'pendiente');
+    assert.equal((await request('POST', '/api/auth/login', {
+      email: registration.email, password: registration.password
+    })).status, 403);
+
+    const pending = await request('GET', '/api/admin/users?registro=pendiente', undefined, tokens.admin);
+    assert.ok(pending.payload.users.some((user) => user.dni === registration.dni));
+    assert.ok(!pending.payload.users.some((user) => user.dni === '990001'));
+    assert.equal((await request('POST', `/api/admin/users/${registration.dni}/approve`, {}, tokens.admin)).status, 200);
+    assert.equal((await request('POST', '/api/auth/login', {
+      email: registration.email, password: registration.password
+    })).status, 200);
+
+    const rejectedRegistration = {
+      nombre: 'Registro', apellido: 'Rechazado', email: 'registro-rechazado@gmail.com',
+      dni: '9900031', rol: 'alumno', password: 'registro-pass-2026', passwordConfirmation: 'registro-pass-2026'
+    };
+    assert.equal((await request('POST', '/api/auth/register', rejectedRegistration)).status, 201);
+    assert.equal((await request('POST', `/api/admin/users/${rejectedRegistration.dni}/reject`, {}, tokens.admin)).status, 200);
+    assert.equal((await request('POST', '/api/auth/login', {
+      email: rejectedRegistration.email, password: rejectedRegistration.password
+    })).status, 403);
+
+    const reRegistered = await request('POST', '/api/auth/register', {
+      ...rejectedRegistration,
+      nombre: 'Registro Corregido',
+      password: 'registro-pass-2027',
+      passwordConfirmation: 'registro-pass-2027'
+    });
+    assert.equal(reRegistered.status, 201);
+    assert.equal(reRegistered.payload.user.estado_registro, 'pendiente');
+    assert.equal((await request('POST', `/api/admin/users/${rejectedRegistration.dni}/approve`, {}, tokens.admin)).status, 200);
+    assert.equal((await request('POST', '/api/auth/login', {
+      email: rejectedRegistration.email, password: 'registro-pass-2027'
+    })).status, 200);
   });
 
   await report('baja lógica y restauración de usuario', async () => {

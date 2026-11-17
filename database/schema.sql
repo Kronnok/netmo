@@ -2,6 +2,7 @@ CREATE EXTENSION IF NOT EXISTS citext;
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 CREATE TYPE user_role AS ENUM ('alumno', 'profesor', 'admin');
+CREATE TYPE registration_status AS ENUM ('pendiente', 'aprobado', 'rechazado');
 CREATE TYPE notebook_status AS ENUM ('disponible', 'prestada', 'mantenimiento', 'pendiente_devolucion');
 CREATE TYPE reservation_type AS ENUM ('individual', 'lote');
 CREATE TYPE reservation_status AS ENUM ('confirmada', 'pendiente_aprobacion', 'aprobada', 'retirada', 'rechazada', 'cancelada');
@@ -13,12 +14,14 @@ CREATE TABLE users (
   dni VARCHAR(32) NOT NULL UNIQUE,
   nombre VARCHAR(120) NOT NULL,
   email CITEXT NOT NULL UNIQUE,
-  rol user_role,
-  aprobado BOOLEAN NOT NULL DEFAULT TRUE,
+  rol user_role NOT NULL,
   password_hash TEXT NOT NULL,
   baneado BOOLEAN NOT NULL DEFAULT FALSE,
   baneado_hasta TIMESTAMPTZ,
   eliminado_at TIMESTAMPTZ,
+  estado_registro registration_status NOT NULL DEFAULT 'aprobado',
+  registro_revisado_at TIMESTAMPTZ,
+  registro_revisado_por BIGINT REFERENCES users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -223,6 +226,7 @@ CREATE INDEX ticket_replies_ticket_idx ON ticket_replies(ticket_id, created_at);
 CREATE INDEX late_returns_user_idx ON late_returns(user_id, returned_at DESC);
 CREATE INDEX users_rol_nombre_idx ON users(rol, nombre);
 CREATE INDEX users_eliminado_at_idx ON users(eliminado_at) WHERE eliminado_at IS NOT NULL;
+CREATE INDEX users_estado_registro_idx ON users(estado_registro) WHERE estado_registro <> 'aprobado';
 CREATE INDEX notebooks_carro_estado_idx ON notebooks(carro_id, estado);
 CREATE INDEX carros_ubicacion_id_idx ON carros(ubicacion_id);
 

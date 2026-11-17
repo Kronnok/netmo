@@ -12,6 +12,7 @@ const db = require('../data/database');
 const authService = require('../services/auth-service');
 const apiService = require('../services/api-service');
 const passwordResetService = require('../services/password-reset-service');
+const registrationService = require('../services/registration-service');
 const controller = require('../controllers/api-controller');
 const loginRateLimiter = require('../services/login-rate-limiter');
 const routes = require('../routes');
@@ -32,11 +33,9 @@ const {
   loginEmail,
   personName,
   requiredText,
-  registrationRoleFromEmail,
   roleFromEmail,
   validateEmailRole
 } = require('../services/validation');
-const registrationService = require('../services/registration-service');
 
 after(() => db.pool.end());
 
@@ -75,9 +74,11 @@ test('clasifica dominios permitidos exactamente y deriva roles', () => {
   assert.equal(emailType('persona@otro.edu.ar'), 'otro');
   assert.equal(roleFromEmail('PERSONA@BUE.EDU.AR'), 'profesor');
   assert.equal(roleFromEmail('alumno@alu.bue.edu.ar'), 'alumno');
-  assert.equal(roleFromEmail('persona@gmail.com'), 'profesor');
+  assert.equal(roleFromEmail('persona@gmail.com'), null);
   assert.equal(validateEmailRole('persona@gmail.com', 'alumno'), 'alumno');
   assert.equal(validateEmailRole('persona@bue.edu.ar', 'profesor'), 'profesor');
+  assert.throws(() => validateEmailRole('persona@gmail.com'), /Elegí si la cuenta de @gmail.com/);
+  assert.throws(() => validateEmailRole('persona@gmail.com', 'admin'), /Elegí si la cuenta de @gmail.com/);
   for (const invalid of [
     'x@evilbue.edu.ar', 'x@a.bue.edu.ar', 'x@gmail.com.ar',
     'x@bue.edu.ar.com', 'x@otro.edu.ar'
@@ -114,7 +115,7 @@ test('refresh renueva un token válido y consulta el rol actual del usuario', as
     if (sql.includes('SELECT id, dni, nombre, email, rol')) {
       return {
         rowCount: 1,
-        rows: [{ id: '42', dni: '1234567', nombre: 'Ana', email: 'ana@example.test', rol: 'profesor', baneado: false }]
+        rows: [{ id: '42', dni: '1234567', nombre: 'Ana', email: 'ana@example.test', rol: 'profesor', estado_registro: 'aprobado', baneado: false }]
       };
     }
     return { rowCount: 1, rows: [] };
@@ -276,6 +277,7 @@ test('el alta y el login preservan la clave, y solo los fallos cuentan para el l
     nombre: 'Usuario Prueba',
     email: 'login-regression@gmail.com',
     rol: 'profesor',
+    estado_registro: 'aprobado',
     baneado: false
   };
   let savedPassword;
@@ -383,10 +385,9 @@ test('todos los servicios detrás de rutas admin rechazan alumnos y aceptan admi
     ['PATCH', '/api/admin/users/U-8'],
     ['DELETE', '/api/admin/users/U-8'],
     ['POST', '/api/admin/users/U-8/restore'],
-    ['PATCH', '/api/admin/users/U-8/rol'],
-    ['GET', '/api/admin/users/pending'],
     ['POST', '/api/admin/users/U-8/approve'],
-    ['POST', '/api/admin/users/U-8/reject']
+    ['POST', '/api/admin/users/U-8/reject'],
+    ['PATCH', '/api/admin/users/U-8/rol']
   ];
   const originalQuery = db.query;
   db.query = async () => ({ rows: [], rowCount: 1 });
@@ -518,8 +519,18 @@ test('las altas administrativas validan cuenta, almacenan hashes y crean prefere
       apiService.createUser({ nombre: 'Ana', apellido: 'Pérez', email: 'ana@example.test', dni: '123456', rol: 'profesor', password: 'long-enough' }, { id: 1, rol: 'admin' }),
       (error) => error.status === 400 && /DNI.*7 a 10 dígitos/.test(error.message)
     );
+    const callsBeforeMissingGmailRole = calls.length;
+    await assert.rejects(
+      apiService.createUser({
+        nombre: 'Ana', apellido: 'Pérez', email: 'sin-rol@gmail.com', dni: '1234567',
+        password: 'long-enough', passwordConfirmation: 'long-enough'
+      }, { id: 1, rol: 'admin' }),
+      (error) => error.status === 400 && /Elegí si la cuenta de @gmail.com/.test(error.message)
+    );
+    assert.equal(calls.length, callsBeforeMissingGmailRole);
     const result = await apiService.createUser({
-      nombre: 'Ana', apellido: 'Pérez', email: 'USER@GMAIL.COM', dni: '1234567', password: 'long-enough', passwordConfirmation: 'long-enough'
+      nombre: 'Ana', apellido: 'Pérez', email: 'USER@GMAIL.COM', dni: '1234567', rol: 'profesor',
+      password: 'long-enough', passwordConfirmation: 'long-enough'
     }, { id: 1, rol: 'admin' });
     assert.equal(result.user.email, 'user@gmail.com');
     assert.equal(result.user.rol, 'profesor');
@@ -585,7 +596,7 @@ test('la administración filtra usuarios por dominio de correo', async () => {
   };
   try {
     await apiService.users({}, { id: '1', rol: 'admin' }, {}, new URLSearchParams('tipoCorreo=gmail'));
-    assert.deepEqual(queries[0].params, [null, 'gmail', false]);
+    assert.deepEqual(queries[0].params, [null, 'gmail', false, 'aprobado']);
     assert.match(queries[0].sql, /split_part\(lower\(email::text\), '@', 2\)/);
     await assert.rejects(
       apiService.users({}, { id: '1', rol: 'admin' }, {}, new URLSearchParams('tipoCorreo=invalid')),
@@ -916,7 +927,7 @@ test('el login no aplica el máximo de 50 caracteres a cuentas preexistentes', a
   const password = 'p'.repeat(64);
   loginRateLimiter.reset();
   db.query = async (sql, params) => sql.includes('password_hash = crypt')
-    ? { rows: [{ id: '77', email, password, rol: 'alumno', baneado: false }], rowCount: 1 }
+    ? { rows: [{ id: '77', email, password, rol: 'alumno', estado_registro: 'aprobado', baneado: false }], rowCount: 1 }
     : { rows: [], rowCount: 1 };
   try {
     const result = await authService.login({ email, password }, { headers: {}, socket: { remoteAddress: '192.0.2.77' } });
@@ -1085,7 +1096,7 @@ test('los baneos aceptan solo duraciones previstas y los vencidos vuelven a aute
     return { rowCount: 1, rows: [{ dni: '1234567', nombre: 'Ana Pérez', baneado: true, baneado_hasta: null }] };
     }
     if (sql.includes('password_hash = crypt')) {
-    return { rowCount: 1, rows: [{ id: '5', dni: '1234567', nombre: 'Ana Pérez', email: 'ana@example.test', rol: 'alumno', baneado: false }] };
+    return { rowCount: 1, rows: [{ id: '5', dni: '1234567', nombre: 'Ana Pérez', email: 'ana@example.test', rol: 'alumno', estado_registro: 'aprobado', baneado: false }] };
     }
     return { rowCount: 1, rows: [] };
   };
@@ -1509,7 +1520,7 @@ test('la interfaz muestra selector reabrible, contador de texto, carro y curso e
   const api = fs.readFileSync(path.join(root, 'backend', 'services', 'api-service.js'), 'utf8');
   assert.match(html, /id="resCarro"/);
   assert.match(html, /id="resUbicacion"/);
-  assert.match(html, /id="userDni"[^>]+inputmode="numeric"[^>]+pattern="\[0-9\]\{7,10\}" maxlength="10"/);
+  assert.match(html, /id="registerDni"[^>]+inputmode="numeric"[^>]+pattern="\[0-9\]\{7,10\}" maxlength="10"/);
   assert.match(html, /Mantener sesión iniciada/);
   assert.match(html, /data-roles-el="alumno,profesor" onclick="switchView\('tickets'\)"/);
   assert.match(html, /<div class="card" data-roles-el="alumno,profesor">[\s\S]*?Notificaciones por email/);
@@ -1519,6 +1530,7 @@ test('la interfaz muestra selector reabrible, contador de texto, carro y curso e
   assert.match(app, /window\.localStorage\.removeItem\('netmo_token'\)/);
   assert.match(app, /window\.sessionStorage\.removeItem\('netmo_token'\)/);
   assert.match(app, /apiRequest\('\/api\/me'\)/);
+  assert.match(app, /El servidor no está disponible\. Verificá que la API esté iniciada/);
   assert.match(app, /expiresAt - Date\.now\(\)\/1000 >= 2\*60\*60/);
   assert.match(app, /api\/auth\/refresh/);
   assert.match(app, /fetch\(API_BASE\+'\/health', \{signal:controller\.signal\}\)/);
@@ -1547,7 +1559,7 @@ test('la interfaz muestra selector reabrible, contador de texto, carro y curso e
   assert.doesNotMatch(app, /El recordatorio por correo se envía cuando falten/);
   assert.doesNotMatch(html, /onclick="enviarRecordatoriosAdmin/);
   assert.doesNotMatch(app, /api\/admin\/reminders\/run/);
-  assert.match(html, /id="userNombre" type="text" maxlength="50"/);
+  assert.match(html, /id="registerNombre" type="text" maxlength="50"/);
   assert.match(app, /renderAdminStateSelect\(`Cambiar estado de \$\{escapeHtml\(nb\.id\)\}/);
   assert.match(app, /renderAdminStateSelect\(`Cambiar estado del ticket \$\{escapeHtml\(t\.id\)\}/);
   assert.match(app, /function adminChangeState\(select\)/);
@@ -1624,14 +1636,26 @@ test('la interfaz muestra selector reabrible, contador de texto, carro y curso e
   assert.match(app, /refreshOwnTickets\(\)/);
   assert.match(app, /initializeTextLimits\(\)/);
   assert.doesNotMatch(app, /adminSetTicketEstado/);
-  assert.match(html, /id="userPassword" type="password"[^>]+oninput="validarConfirmacionPasswordAdmin\(\)"/);
-  assert.match(html, /id="userPasswordConfirmation" type="password"[^>]+required/);
-  assert.equal((html.match(/onclick="toggleAdminUserPasswordVisibility\(/g) || []).length, 4);
-  assert.match(html, /id="userPasswordConfirmationError" class="field-error"[^>]*role="alert"/);
-  assert.match(app, /function toggleAdminUserPasswordVisibility\(/);
-  assert.match(app, /function validarConfirmacionPasswordAdmin\(\)[\s\S]*Las contraseñas no coinciden/);
+  assert.match(html, /id="registerPassword" type="password"[^>]+oninput="validarConfirmacionPasswordRegistro\(\)"/);
+  assert.match(html, /id="registerPasswordConfirmation" type="password"[^>]+required/);
+  assert.equal((html.match(/onclick="toggleRegistroPasswordVisibility\(/g) || []).length, 2);
+  assert.match(html, /id="registerPasswordConfirmationError" class="field-error"[^>]*role="alert"/);
+  assert.match(app, /function toggleRegistroPasswordVisibility\(/);
+  assert.match(app, /function validarConfirmacionPasswordRegistro\(\)[\s\S]*Las contraseñas no coinciden/);
   assert.match(app, /if\(!passwordsMatch\) return/);
   assert.match(app, /passwordConfirmation\}\)/);
+  assert.doesNotMatch(html, /id="registerRol"/);
+  assert.match(html, /id="registerRoleHint"[^>]*>El rol se asigna según el correo/);
+  assert.match(app, /rolSolicitud-\$\{escapeHtml\(solicitud\.dni\)\}/);
+  assert.match(app, /body:JSON\.stringify\(\{rol\}\)/);
+  assert.match(app, /function actualizarAprobacionRegistro\(/);
+  assert.doesNotMatch(html, /id="adminUserForm"/);
+  assert.match(html, /id="solicitudesPendientesTable"/);
+  assert.match(html, /id="solicitudesRechazadasTable"/);
+  assert.match(app, /function aprobarRegistro\(/);
+  assert.match(app, /function rechazarRegistro\(/);
+  assert.match(app, /\/api\/admin\/users\/\$\{encodeURIComponent\(dni\)\}\/approve/);
+  assert.match(app, /\/api\/admin\/users\/\$\{encodeURIComponent\(dni\)\}\/reject/);
   assert.match(html, /id="changePasswordRequestBtn"/);
   assert.match(html, /id="changePasswordCode"[^>]+maxlength="6"/);
   assert.match(html, /id="changePasswordResendCountdown"/);
@@ -2265,250 +2289,327 @@ test('la migración 014 permite respuestas automáticas sin autor humano', () =>
   assert.match(runner, /'014-ticket-automatic-replies\.sql'/);
 });
 
-test('el registro público asigna el rol según el dominio y deja la cuenta pendiente', async () => {
+test('el registro público crea una solicitud pendiente con preferencias iniciales', async () => {
   const originalTransaction = db.transaction;
-  const originalInfo = console.info;
-  const statements = [];
+  const calls = [];
+  loginRateLimiter.reset();
   db.transaction = async (callback) => callback({
     query: async (sql, params) => {
-      statements.push({ sql, params });
+      calls.push({ sql, params });
+      if (sql.includes('SELECT id, estado_registro, eliminado_at')) return { rowCount: 0, rows: [] };
       if (sql.includes('INSERT INTO users')) {
         return {
           rowCount: 1,
-          rows: [{ id: String(statements.length), dni: params[0], nombre: params[1], email: params[2], rol: params[3], aprobado: false }]
+          rows: [{
+            id: '77', dni: params[0], nombre: params[1], email: params[2], rol: params[3],
+            estado_registro: 'pendiente'
+          }]
         };
       }
       return { rowCount: 1, rows: [] };
     }
   });
-  console.info = () => {};
-  const request = { headers: {}, socket: { remoteAddress: '198.51.100.20' } };
-  loginRateLimiter.reset();
+  const request = { headers: {}, socket: { remoteAddress: '198.51.100.24' } };
   try {
-    for (const [email, rol, dni] of [
-      ['ana@alu.bue.edu.ar', 'alumno', '30000001'],
-      ['bruno@bue.edu.ar', 'profesor', '30000002'],
-      ['carla@gmail.com', null, '30000003']
-    ]) {
-      const result = await registrationService.register({
-        nombre: 'Nombre',
-        apellido: 'Apellido',
-        dni,
-        email,
-        password: 'secreto123',
-        passwordConfirmation: 'secreto123'
-      }, request);
-      assert.equal(result.user.rol, rol);
-      assert.equal(result.user.aprobado, false);
-      assert.match(result.message, /administrador/i);
-    }
-    const userInserts = statements.filter(({ sql }) => sql.includes('INSERT INTO users'));
-    assert.deepEqual(userInserts.map(({ params }) => params[3]), ['alumno', 'profesor', null]);
-    assert.match(userInserts[0].sql, /aprobado/);
-    assert.match(userInserts[0].sql, /FALSE, FALSE/);
-    assert.ok(statements.some(({ sql }) => sql.includes('INSERT INTO user_preferences')));
-  } finally {
-    console.info = originalInfo;
-    db.transaction = originalTransaction;
-    loginRateLimiter.reset();
-  }
-});
+    const result = await registrationService.register({
+      nombre: 'Ana', apellido: 'Pérez', email: 'ANA@ALU.BUE.EDU.AR', dni: '1234567',
+      password: 'long-enough', passwordConfirmation: 'long-enough'
+    }, request);
+    assert.equal(result.user.estado_registro, 'pendiente');
+    assert.equal(result.user.rol, 'alumno');
+    assert.match(result.message, /aprob/);
+    const insert = calls.find(({ sql }) => sql.includes('INSERT INTO users'));
+    assert.deepEqual(insert.params, ['1234567', 'Ana Pérez', 'ana@alu.bue.edu.ar', 'alumno', 'long-enough']);
+    assert.match(insert.sql, /estado_registro\)\s*VALUES[\s\S]*'pendiente'/);
+    const preferences = calls.find(({ sql }) => sql.includes('INSERT INTO user_preferences'));
+    assert.deepEqual(preferences.params, ['77']);
 
-test('el registro público rechaza dominios no permitidos y cuentas duplicadas', async () => {
-  const originalTransaction = db.transaction;
-  const request = { headers: {}, socket: { remoteAddress: '198.51.100.21' } };
-  loginRateLimiter.reset();
-  try {
-    db.transaction = async () => { throw new Error('no debería abrir transacción'); };
-    await assert.rejects(registrationService.register({
-      nombre: 'Nombre',
-      apellido: 'Apellido',
-      dni: '30000011',
-      email: 'persona@example.test',
-      password: 'secreto123',
-      passwordConfirmation: 'secreto123'
-    }, request), (error) => error.status === 400 && /bue\.edu\.ar/.test(error.message));
+    const gmail = await registrationService.register({
+      nombre: 'Ana', apellido: 'Pérez', email: 'ana@gmail.com', dni: '1234568',
+      password: 'long-enough', passwordConfirmation: 'long-enough'
+    }, request);
+    assert.equal(gmail.user.rol, 'alumno');
+    const gmailInsert = calls.filter(({ sql }) => sql.includes('INSERT INTO users')).at(-1);
+    assert.equal(gmailInsert.params[3], 'alumno');
+    assert.match(gmail.message, /aprob/);
 
-    db.transaction = async () => {
-      const error = new Error('duplicado');
-      error.code = '23505';
-      throw error;
-    };
-    await assert.rejects(registrationService.register({
-      nombre: 'Nombre',
-      apellido: 'Apellido',
-      dni: '30000012',
-      email: 'duplicado@alu.bue.edu.ar',
-      password: 'secreto123',
-      passwordConfirmation: 'secreto123'
-    }, request), (error) => error.status === 409 && /ya están registrados/.test(error.message));
+    await assert.rejects(
+      registrationService.register({
+        nombre: 'Ana', apellido: 'Pérez', email: 'ana@gmail.com', dni: '1234567',
+        rol: 'admin', password: 'long-enough', passwordConfirmation: 'long-enough'
+      }, request),
+      (error) => error.status === 400
+    );
+    await assert.rejects(
+      registrationService.register({
+        nombre: 'Ana', apellido: 'Pérez', email: 'ana@gmail.com', dni: '1234567',
+        password: 'long-enough', passwordConfirmation: 'distinta'
+      }, request),
+      (error) => error.status === 400 && /no coinciden/.test(error.message)
+    );
+    await assert.rejects(
+      registrationService.register({
+        nombre: 'Ana', apellido: 'Pérez', email: 'ana@example.test', dni: '1234567',
+        password: 'long-enough', passwordConfirmation: 'long-enough'
+      }, request),
+      (error) => error.status === 400 && /bue\.edu\.ar/.test(error.message)
+    );
   } finally {
     db.transaction = originalTransaction;
     loginRateLimiter.reset();
   }
 });
 
-test('una cuenta pendiente no puede iniciar sesión ni autenticarse hasta ser aprobada', async () => {
-  const originalQuery = db.query;
-  const email = 'pendiente@alu.bue.edu.ar';
-  const password = 'secreto123';
-  const request = { headers: {}, socket: { remoteAddress: '198.51.100.22' } };
-  loginRateLimiter.reset();
-  try {
-    const pending = { id: '90', email, rol: 'alumno', aprobado: false, baneado: false };
-    const queryFor = (usuario) => async (sql) => {
-      if (sql.includes('password_hash = crypt') || sql.includes('SELECT id, dni, nombre, email, rol, aprobado')) {
-        return { rowCount: 1, rows: [usuario] };
-      }
-      return { rowCount: 1, rows: [{ id: usuario.id }] };
-    };
-    db.query = queryFor(pending);
-    await assert.rejects(
-      authService.login({ email, password }, request),
-      (error) => error.status === 403 && /pendiente de aprobación/.test(error.message)
-    );
-    await assert.rejects(
-      authService.authenticate({ headers: { authorization: `Bearer ${createToken(pending.id)}` } }),
-      (error) => error.status === 403 && /pendiente de aprobación/.test(error.message)
-    );
-    db.query = queryFor({ ...pending, aprobado: true });
-    const accepted = await authService.login({ email, password }, request);
-    assert.equal(accepted.user.id, pending.id);
-  } finally {
-    db.query = originalQuery;
-    loginRateLimiter.reset();
-  }
-});
-
-test('aprobar una solicitud exige rol para gmail y respeta el rol institucional', async () => {
+test('un usuario rechazado puede volver a registrarse y la solicitud vuelve a pendiente', async () => {
   const originalTransaction = db.transaction;
-  const originalInfo = console.info;
   const calls = [];
-  let target = { id: '70', dni: '30000003', nombre: 'Carla', email: 'carla@gmail.com', rol: null, aprobado: false };
+  loginRateLimiter.reset();
   db.transaction = async (callback) => callback({
     query: async (sql, params) => {
       calls.push({ sql, params });
-      if (sql.includes('SELECT id, dni, nombre, email, rol, aprobado')) {
-        return { rowCount: 1, rows: [target] };
+      if (sql.includes('SELECT id, estado_registro, eliminado_at')) {
+        return { rowCount: 1, rows: [{ id: '91', estado_registro: 'rechazado', eliminado_at: null }] };
       }
-      if (sql.includes('to_regclass')) return { rowCount: 1, rows: [{ table_name: 'audit_log' }] };
-      if (sql.includes('UPDATE users SET rol')) {
-        return { rowCount: 1, rows: [{ ...target, rol: params[0], aprobado: true }] };
+      if (sql.includes('UPDATE users SET')) {
+        return {
+          rowCount: 1,
+          rows: [{
+            id: '91', dni: params[0], nombre: params[1], email: params[2], rol: params[3],
+            estado_registro: 'pendiente'
+          }]
+        };
       }
       return { rowCount: 1, rows: [] };
     }
   });
-  console.info = () => {};
+  const request = { headers: {}, socket: { remoteAddress: '198.51.100.25' } };
+  try {
+    const result = await registrationService.register({
+      nombre: 'Ana', apellido: 'Pérez', email: 'ana@alu.bue.edu.ar', dni: '1234567',
+      password: 'new-password', passwordConfirmation: 'new-password'
+    }, request);
+    assert.equal(result.user.estado_registro, 'pendiente');
+    const update = calls.find(({ sql }) => sql.includes('UPDATE users SET'));
+    assert.match(update.sql, /estado_registro = 'pendiente', registro_revisado_at = NULL, registro_revisado_por = NULL/);
+    assert.match(update.sql, /password_hash = crypt\(\$5, gen_salt\('bf'\)\)/);
+    assert.deepEqual(update.params, ['1234567', 'Ana Pérez', 'ana@alu.bue.edu.ar', 'alumno', 'new-password', '91']);
+    assert.equal(calls.some(({ sql }) => sql.includes('INSERT INTO users')), false);
+  } finally {
+    db.transaction = originalTransaction;
+    loginRateLimiter.reset();
+  }
+});
+
+test('el registro no permite reutilizar cuentas aprobadas, pendientes o eliminadas', async () => {
+  const originalTransaction = db.transaction;
+  loginRateLimiter.reset();
+  const request = { headers: {}, socket: { remoteAddress: '198.51.100.26' } };
+  for (const current of [
+    { id: '5', estado_registro: 'aprobado', eliminado_at: null },
+    { id: '6', estado_registro: 'pendiente', eliminado_at: null },
+    { id: '7', estado_registro: 'rechazado', eliminado_at: '2026-01-01T00:00:00Z' }
+  ]) {
+    db.transaction = async (callback) => callback({
+      query: async () => ({ rowCount: 1, rows: [current] })
+    });
+    await assert.rejects(
+      registrationService.register({
+        nombre: 'Ana', apellido: 'Pérez', email: 'ana@alu.bue.edu.ar', dni: '1234567',
+        password: 'long-enough', passwordConfirmation: 'long-enough'
+      }, request),
+      (error) => error.status === 409
+    );
+    loginRateLimiter.reset();
+  }
+  db.transaction = originalTransaction;
+  loginRateLimiter.reset();
+});
+
+test('la administración aprueba y rechaza registros con auditoría y aviso', async () => {
+  const originalTransaction = db.transaction;
+  loginRateLimiter.reset();
+  const makeTransaction = (estado, rol = 'alumno') => async (callback) => callback({
+    query: async (sql, params) => {
+      if (sql.includes('SELECT id, dni, nombre, email, rol, estado_registro')) {
+        return {
+          rowCount: 1,
+          rows: [{ id: '31', dni: '1234567', nombre: 'Ana Pérez', email: 'ana@alu.bue.edu.ar', rol, estado_registro: estado }]
+        };
+      }
+      if (sql.includes('UPDATE users SET')) {
+        return {
+          rowCount: 1,
+          rows: [{
+            dni: '1234567', nombre: 'Ana Pérez', email: 'ana@alu.bue.edu.ar', rol,
+            estado_registro: sql.includes("'aprobado'") ? 'aprobado' : 'rechazado'
+          }]
+        };
+      }
+      return { rowCount: 1, rows: [] };
+    }
+  });
+  const admin = { id: '1', rol: 'admin' };
+  try {
+    db.transaction = makeTransaction('pendiente');
+    const approved = await apiService.approveRegistration({}, admin, { dni: '1234567' });
+    assert.equal(approved.user.estado_registro, 'aprobado');
+    assert.equal(approved.message, 'Solicitud aprobada');
+
+    db.transaction = makeTransaction('pendiente');
+    const rejected = await apiService.rejectRegistration({}, admin, { dni: '1234567' });
+    assert.equal(rejected.user.estado_registro, 'rechazado');
+    assert.equal(rejected.message, 'Solicitud rechazada');
+
+    db.transaction = makeTransaction('pendiente', 'admin');
+    await assert.rejects(
+      apiService.approveRegistration({}, admin, { dni: '1234567' }),
+      (error) => error.status === 403
+    );
+    await assert.rejects(
+      apiService.approveRegistration({}, { id: '2', rol: 'alumno' }, { dni: '1234567' }),
+      (error) => error.status === 403
+    );
+  } finally {
+    db.transaction = originalTransaction;
+    loginRateLimiter.reset();
+  }
+});
+
+test('la aprobación de una cuenta @gmail.com exige y aplica el rol elegido por el administrador', async () => {
+  const originalTransaction = db.transaction;
+  const calls = [];
+  db.transaction = async (callback) => callback({
+    query: async (sql, params) => {
+      calls.push({ sql, params });
+      if (sql.includes('SELECT id, dni, nombre, email, rol, estado_registro')) {
+        return {
+          rowCount: 1,
+          rows: [{
+            id: '32', dni: '7654321', nombre: 'Ana', email: 'ana@gmail.com',
+            rol: 'alumno', estado_registro: 'pendiente'
+          }]
+        };
+      }
+      if (sql.includes('UPDATE users SET rol =')) {
+        return {
+          rowCount: 1,
+          rows: [{
+            dni: '7654321', nombre: 'Ana', email: 'ana@gmail.com', rol: params[0],
+            estado_registro: 'aprobado'
+          }]
+        };
+      }
+      return { rowCount: 1, rows: [] };
+    }
+  });
   const admin = { id: '1', rol: 'admin' };
   try {
     await assert.rejects(
-      apiService.approveUser({}, admin, { dni: target.dni }),
-      (error) => error.status === 400 && /Asigná un rol/.test(error.message)
+      apiService.approveRegistration({}, admin, { dni: '7654321' }),
+      (error) => error.status === 400 && /Elegí si la cuenta de @gmail.com/.test(error.message)
     );
-    const approved = await apiService.approveUser({ rol: 'profesor' }, admin, { dni: target.dni });
+    const approved = await apiService.approveRegistration({ rol: 'profesor' }, admin, { dni: '7654321' });
     assert.equal(approved.user.rol, 'profesor');
-    assert.equal(approved.user.aprobado, true);
-    assert.ok(calls.some(({ sql }) => sql.includes('aprobacion_cuenta')));
-
-    target = { id: '71', dni: '30000004', nombre: 'Bruno', email: 'bruno@bue.edu.ar', rol: 'profesor', aprobado: false };
-    await assert.rejects(
-      apiService.approveUser({ rol: 'alumno' }, admin, { dni: target.dni }),
-      (error) => error.status === 400 && /solo puede ser profesor/.test(error.message)
-    );
-    const institutional = await apiService.approveUser({}, admin, { dni: target.dni });
-    assert.equal(institutional.user.rol, 'profesor');
+    assert.equal(approved.user.estado_registro, 'aprobado');
+    const update = calls.find(({ sql }) => sql.includes('UPDATE users SET rol ='));
+    assert.deepEqual(update.params.slice(0, 3), ['profesor', '1', '32']);
   } finally {
-    console.info = originalInfo;
     db.transaction = originalTransaction;
   }
 });
 
-test('rechazar una solicitud elimina la cuenta y registra la decisión', async () => {
+test('el login informa cuentas pendientes o rechazadas sin permitir el acceso', async () => {
+  const originalQuery = db.query;
+  loginRateLimiter.reset();
+  const request = { headers: {}, socket: { remoteAddress: '198.51.100.27' } };
+  const baseUser = { id: '44', dni: '1234567', nombre: 'Ana', email: 'ana@alu.bue.edu.ar', rol: 'alumno', baneado: false };
+  try {
+    for (const [estado, pattern] of [
+      ['pendiente', /pendiente de aprobación/],
+      ['rechazado', /rechazada/]
+    ]) {
+      db.query = async () => ({ rowCount: 1, rows: [{ ...baseUser, estado_registro: estado }] });
+      await assert.rejects(
+        authService.login({ email: baseUser.email, password: 'long-enough' }, request),
+        (error) => error.status === 403 && pattern.test(error.message)
+      );
+      loginRateLimiter.reset();
+    }
+    db.query = async () => ({ rowCount: 1, rows: [{ ...baseUser, estado_registro: 'aprobado' }] });
+    const accepted = await authService.login({ email: baseUser.email, password: 'long-enough' }, request);
+    assert.equal(accepted.user.id, baseUser.id);
+  } finally {
+    db.query = originalQuery;
+    loginRateLimiter.reset();
+  }
+});
+
+test('el aviso de entrega se envía siempre y una sola vez por retiro', async () => {
   const originalQuery = db.query;
   const originalTransaction = db.transaction;
-  const calls = [];
-  const pending = { id: '72', dni: '30000005', nombre: 'Dana', email: 'dana@gmail.com', aprobado: false };
-  db.query = async () => ({ rowCount: 1, rows: [pending] });
-  db.transaction = async (callback) => callback({
-    query: async (sql, params) => {
-      calls.push({ sql, params });
-      if (sql.includes('to_regclass')) return { rowCount: 1, rows: [{ table_name: 'audit_log' }] };
-      return { rowCount: 1, rows: [] };
-    }
+  const originalInfo = console.info;
+  const originalProvider = process.env.MAIL_PROVIDER;
+  const originalEnv = process.env.NODE_ENV;
+  const messages = [];
+  process.env.MAIL_PROVIDER = 'console';
+  process.env.NODE_ENV = 'development';
+  console.info = (...args) => messages.push(args);
+  const queries = [];
+  db.transaction = async () => ({
+    message: 'Retiro registrado',
+    loansCreated: 2,
+    ownerId: '42',
+    deliveries: [
+      { notebook: 'NB-001', dueAt: '2026-03-10T20:30:00.000Z', curso: '6°14°' },
+      { notebook: 'NB-002', dueAt: '2026-03-10T20:30:00.000Z', curso: '6°14°' }
+    ]
   });
+  db.query = async (sql, params) => {
+    queries.push({ sql, params });
+    return { rowCount: 1, rows: [{ email: 'ana@alu.bue.edu.ar' }] };
+  };
   try {
-    const rejected = await apiService.rejectUser({}, { id: '1', rol: 'admin' }, { dni: pending.dni });
-    assert.match(rejected.message, /rechazada/i);
-    assert.ok(calls.some(({ sql }) => sql.includes('rechazo_cuenta')));
-    assert.ok(calls.some(({ sql }) => sql.includes('DELETE FROM user_preferences')));
-    assert.ok(calls.some(({ sql }) => sql.includes('DELETE FROM users WHERE id')));
-    db.query = async () => ({ rowCount: 1, rows: [{ ...pending, aprobado: true }] });
-    await assert.rejects(
-      apiService.rejectUser({}, { id: '1', rol: 'admin' }, { dni: pending.dni }),
-      (error) => error.status === 409
-    );
+    const result = await apiService.checkoutReservation({}, { id: '1', rol: 'admin' }, { id: 8 });
+    assert.equal(result.loansCreated, 2);
+    assert.equal(queries.length, 1, 'la entrega debe resolverse con una sola consulta');
+    assert.doesNotMatch(queries[0].sql, /user_preferences/);
+    assert.equal(messages.length, 1, 'debe enviarse un único correo por retiro');
+    const payload = JSON.stringify(messages[0]);
+    assert.match(payload, /Notebook entregada/);
+    assert.match(payload, /NB-001/);
+    assert.match(payload, /NB-002/);
+    assert.match(payload, /Curso/);
+    assert.match(payload, /ana@alu\.bue\.edu\.ar/);
   } finally {
     db.query = originalQuery;
     db.transaction = originalTransaction;
+    console.info = originalInfo;
+    if (originalProvider === undefined) delete process.env.MAIL_PROVIDER;
+    else process.env.MAIL_PROVIDER = originalProvider;
+    if (originalEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = originalEnv;
   }
 });
 
-test('el listado admin solo muestra cuentas aprobadas y expone sus pendientes aparte', async () => {
-  const originalQuery = db.query;
-  const statements = [];
-  db.query = async (sql) => {
-    statements.push(sql.replace(/\s+/g, ' '));
-    return { rowCount: 0, rows: [] };
-  };
-  try {
-    await apiService.users({}, { id: '1', rol: 'admin' }, {}, new URLSearchParams(''));
-    await apiService.pendingUsers({}, { id: '1', rol: 'admin' });
-    assert.match(statements[0], /aprobado = TRUE/);
-    assert.match(statements[1], /aprobado = FALSE/);
-    assert.match(statements[1], /rol_sugerido/);
-  } finally {
-    db.query = originalQuery;
-  }
-});
-
-test('la validación de rol del registro público distingue institucionales y gmail', () => {
-  assert.equal(registrationRoleFromEmail('ana@alu.bue.edu.ar'), 'alumno');
-  assert.equal(registrationRoleFromEmail('bruno@bue.edu.ar'), 'profesor');
-  assert.equal(registrationRoleFromEmail('carla@gmail.com'), null);
-  assert.throws(() => registrationRoleFromEmail('persona@example.test'), (error) => error.status === 400);
-});
-
-test('la migración 016 habilita el registro pendiente sin afectar cuentas existentes', () => {
+test('la migración 016 agrega estados de registro y el esquema/seed/documentación lo reflejan', () => {
   const root = path.resolve(__dirname, '..', '..');
-  const migration = fs.readFileSync(path.join(root, 'database', 'migrations', '016-registro-publico.sql'), 'utf8');
+  const migration = fs.readFileSync(path.join(root, 'database', 'migrations', '016-registration-approval.sql'), 'utf8');
   const schema = fs.readFileSync(path.join(root, 'database', 'schema.sql'), 'utf8');
+  const seed = fs.readFileSync(path.join(root, 'database', 'seed.sql'), 'utf8');
   const runner = fs.readFileSync(path.join(root, 'backend', 'scripts', 'db.js'), 'utf8');
-  assert.match(migration, /ADD COLUMN IF NOT EXISTS aprobado BOOLEAN NOT NULL DEFAULT TRUE/i);
-  assert.match(migration, /ALTER COLUMN rol DROP NOT NULL/i);
-  assert.match(migration, /WHERE aprobado = FALSE/i);
-  assert.match(schema, /rol user_role,/);
-  assert.match(schema, /aprobado BOOLEAN NOT NULL DEFAULT TRUE/);
-  assert.match(runner, /'016-registro-publico\.sql'/);
-});
-
-test('la interfaz permite registrarse y aprobar solicitudes pendientes', () => {
-  const root = path.resolve(__dirname, '..', '..');
-  const html = fs.readFileSync(path.join(root, 'frontend', 'index.html'), 'utf8');
-  const app = fs.readFileSync(path.join(root, 'frontend', 'app.js'), 'utf8');
-  assert.match(html, /id="view-register"/);
-  assert.match(html, /id="registerEmail"[^>]*oninput="actualizarRolRegistro\(\)"/);
-  assert.match(html, /id="registerPasswordConfirmation"/);
-  assert.match(html, /onclick="mostrarRegistro\(\)"/);
-  assert.match(html, /id="pendingUsersTable"/);
-  assert.match(html, /id="pendingUsersBadge"/);
-  assert.match(app, /function registrarCuenta\(e\)/);
-  assert.match(app, /function mostrarRegistro\(\)/);
-  assert.match(app, /function actualizarRolRegistro\(\)/);
-  assert.match(app, /\/api\/auth\/register/);
-  assert.match(app, /function aprobarCuentaPendiente\(dni\)/);
-  assert.match(app, /function rechazarCuentaPendiente\(dni\)/);
-  assert.match(app, /\/api\/admin\/users\/\$\{encodeURIComponent\(dni\)\}\/approve/);
-  assert.match(app, /\/api\/admin\/users\/\$\{encodeURIComponent\(dni\)\}\/reject/);
-  assert.match(app, /apiRequest\('\/api\/admin\/users\/pending'\)/);
-  assert.match(app, /usuariosPendientes = loaded\.pendingUsers\?\.users \|\| \[\]/);
+  const project = fs.readFileSync(path.join(root, 'PROYECTO.md'), 'utf8');
+  const deploy = fs.readFileSync(path.join(root, 'DEPLOY.md'), 'utf8');
+  const readme = fs.readFileSync(path.join(root, 'README.md'), 'utf8');
+  assert.match(schema, /CREATE TYPE registration_status AS ENUM \('pendiente', 'aprobado', 'rechazado'\)/);
+  assert.match(schema, /estado_registro registration_status NOT NULL DEFAULT 'aprobado'/);
+  assert.match(schema, /registro_revisado_por BIGINT REFERENCES users\(id\) ON DELETE SET NULL/);
+  assert.match(schema, /users_estado_registro_idx/);
+  assert.match(migration, /ADD COLUMN IF NOT EXISTS estado_registro registration_status NOT NULL DEFAULT 'aprobado'/);
+  assert.match(migration, /ADD COLUMN IF NOT EXISTS registro_revisado_at TIMESTAMPTZ/);
+  assert.match(migration, /ADD COLUMN IF NOT EXISTS registro_revisado_por BIGINT REFERENCES users\(id\) ON DELETE SET NULL/);
+  assert.match(seed, /estado_registro/);
+  assert.match(runner, /'016-registration-approval\.sql'/);
+  assert.match(project, /registro público/i);
+  assert.match(deploy, /aprobación|registro público/i);
+  assert.match(readme, /registro|aprobación/i);
 });

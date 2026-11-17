@@ -18,6 +18,7 @@ const {
   dniIdentifier
 } = require('./validation');
 const { sendMail } = require('./mail-service');
+const { notifyRegistrationDecision } = require('./registration-service');
 const { mapTicketRow } = require('./ticket-mapper');
 
 const TICKET_AUTO_REPLY_MESSAGE = 'Recibimos tu reporte. El equipo de NetMO lo va a revisar y te responderá por este medio. Si querés, podés agregar más información en esta conversación.';
@@ -26,24 +27,11 @@ async function notifyByEmail(userId, subject, html) {
   try {
     const result = await db.query(`SELECT u.email FROM users u
       JOIN user_preferences p ON p.user_id = u.id
-      WHERE u.id = $1 AND p.email_notifications = TRUE`, [userId]);
+      WHERE u.id = $1 AND u.estado_registro = 'aprobado' AND p.email_notifications = TRUE`, [userId]);
     if (!result.rowCount) return;
     await sendMail({ to: result.rows[0].email, subject, html });
   } catch {
     console.error('No se pudo enviar una notificación por correo.');
-  }
-}
-
-async function notifyAccountApproved(user) {
-  try {
-    const roleLabel = { alumno: 'alumno', profesor: 'profesor', admin: 'administrador' }[user.rol] || user.rol;
-    await sendMail({
-      to: user.email,
-      subject: 'Tu cuenta de NetMO fue aprobada',
-      html: `<p>Hola ${escapeEmailHtml(user.nombre)},</p><p>Un administrador aprobó tu cuenta de NetMO con el rol de ${roleLabel}. Ya podés iniciar sesión con tu correo y contraseña.</p>`
-    });
-  } catch {
-    console.error('No se pudo enviar el correo de aprobación de cuenta.');
   }
 }
 
@@ -52,7 +40,7 @@ async function notifyLoanReturnByEmail(loanId) {
     const result = await db.query(`SELECT u.email FROM loans l
       JOIN users u ON u.id = l.user_id
       JOIN user_preferences p ON p.user_id = u.id
-      WHERE l.id = $1 AND p.email_notifications = TRUE`, [loanId]);
+      WHERE l.id = $1 AND u.estado_registro = 'aprobado' AND p.email_notifications = TRUE`, [loanId]);
     if (!result.rowCount) return;
     await sendMail({
       to: result.rows[0].email,
@@ -64,18 +52,25 @@ async function notifyLoanReturnByEmail(loanId) {
   }
 }
 
-async function notifyLoanCheckoutByEmail(userId, notebook, dueAt) {
+async function notifyLoanCheckoutByEmail(userId, deliveries) {
   try {
-    const dueTime = new Date(dueAt).toLocaleTimeString('es-AR', {
-      timeZone: 'America/Argentina/Buenos_Aires',
-      hour: '2-digit',
-      minute: '2-digit'
+    if (!Array.isArray(deliveries) || deliveries.length === 0) return;
+    const result = await db.query(`SELECT u.email FROM users u
+      WHERE u.id = $1 AND u.estado_registro = 'aprobado'`, [userId]);
+    if (!result.rowCount) return;
+    const rows = deliveries.map((delivery) => {
+      const dueTime = new Date(delivery.dueAt).toLocaleString('es-AR', {
+        timeZone: 'America/Argentina/Buenos_Aires',
+        dateStyle: 'short',
+        timeStyle: 'short'
+      });
+      return `<li>Notebook ${escapeEmailHtml(delivery.notebook)} — devolución antes del ${escapeEmailHtml(dueTime)}${delivery.curso ? ` · Curso ${escapeEmailHtml(delivery.curso)}` : ''}</li>`;
+    }).join('');
+    await sendMail({
+      to: result.rows[0].email,
+      subject: 'Notebook entregada',
+      html: `<p>Registramos la entrega de tu notebook. Recordá devolverla en el plazo indicado.</p><ul>${rows}</ul>`
     });
-    await notifyByEmail(
-      userId,
-      'Notebook entregada',
-      `<p>Notebook ${escapeEmailHtml(notebook)} entregada, devolvela antes de ${dueTime}.</p>`
-    );
   } catch {
     console.error('No se pudo enviar una notificación por correo.');
   }
@@ -206,7 +201,7 @@ async function completeReservationCheckout(client, id) {
   return {
     message: 'Retiro registrado',
     loansCreated: notebooks.length,
-    deliveries: notebooks.map((notebook) => ({ notebook: notebook.codigo, dueAt: venceAt })),
+    deliveries: notebooks.map((notebook) => ({ notebook: notebook.codigo, dueAt: venceAt, curso: reservation.curso })),
     ownerId: reservation.owner_id
   };
 }
@@ -296,7 +291,7 @@ const actions = {
   async professors(_body, user) {
     requireAdmin(user, 'Solo admin puede consultar profesores');
     const result = await db.query(`SELECT dni, nombre, email FROM users
-      WHERE rol = 'profesor' AND aprobado = TRUE AND eliminado_at IS NULL ORDER BY nombre`);
+      WHERE rol = 'profesor' AND eliminado_at IS NULL AND estado_registro = 'aprobado' ORDER BY nombre`);
     return { professors: result.rows };
   },
   async users(_body, user, _params, query) {
@@ -311,7 +306,13 @@ const actions = {
     if (deleted && !['si', 'no'].includes(deleted)) {
       throw new AppError('El filtro de cuentas eliminadas no es válido', 400);
     }
-    const result = await db.query(`SELECT dni, nombre, email, rol, eliminado_at,
+    const registration = query?.get('registro');
+    if (registration && !['pendiente', 'aprobado', 'rechazado', 'todos'].includes(registration)) {
+      throw new AppError('El filtro de registro no es válido', 400);
+    }
+    const registrationFilter = deleted === 'si' ? (registration || 'todos') : (registration || 'aprobado');
+    const result = await db.query(`SELECT dni, nombre, email, rol, estado_registro, eliminado_at,
+      registro_revisado_at,
       (baneado AND (baneado_hasta IS NULL OR baneado_hasta > now())) AS baneado,
       baneado_hasta,
       CASE split_part(lower(email::text), '@', 2)
@@ -321,8 +322,7 @@ const actions = {
         ELSE 'otro'
       END AS tipo_correo
       FROM users
-      WHERE aprobado = TRUE
-        AND ($1::user_role IS NULL OR rol = $1::user_role)
+      WHERE ($1::user_role IS NULL OR rol = $1::user_role)
         AND ($2::text IS NULL OR CASE split_part(lower(email::text), '@', 2)
           WHEN 'bue.edu.ar' THEN 'profesor'
           WHEN 'alu.bue.edu.ar' THEN 'alumno'
@@ -331,7 +331,8 @@ const actions = {
         END = $2)
         AND ($3::boolean IS TRUE OR eliminado_at IS NULL)
         AND ($3::boolean IS NOT TRUE OR eliminado_at IS NOT NULL)
-      ORDER BY nombre`, [role || null, emailType || null, deleted === 'si']);
+        AND ($4::text = 'todos' OR estado_registro::text = $4)
+      ORDER BY nombre`, [role || null, emailType || null, deleted === 'si', registrationFilter]);
     return { users: result.rows };
   },
   async createUser(body, user) {
@@ -360,71 +361,54 @@ const actions = {
       throw error;
     }
   },
-  async pendingUsers(_body, user) {
-    requireAdmin(user, 'Solo admin puede consultar solicitudes pendientes');
-    const result = await db.query(`SELECT dni, nombre, email, rol, created_at,
-      CASE split_part(lower(email::text), '@', 2)
-        WHEN 'bue.edu.ar' THEN 'profesor'
-        WHEN 'alu.bue.edu.ar' THEN 'alumno'
-        WHEN 'gmail.com' THEN 'gmail'
-        ELSE 'otro'
-      END AS tipo_correo,
-      CASE split_part(lower(email::text), '@', 2)
-        WHEN 'bue.edu.ar' THEN 'profesor'
-        WHEN 'alu.bue.edu.ar' THEN 'alumno'
-        ELSE NULL
-      END AS rol_sugerido
-      FROM users
-      WHERE aprobado = FALSE AND eliminado_at IS NULL
-      ORDER BY created_at`);
-    return { users: result.rows };
-  },
-  async approveUser(body, user, { dni }) {
-    requireAdmin(user, 'Solo admin puede aprobar solicitudes');
-    const approved = await db.transaction(async (client) => {
-      await client.query('LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE');
-      const current = await client.query(`SELECT id, dni, nombre, email, rol, aprobado
+  async approveRegistration(body, user, { dni }) {
+    requireAdmin(user, 'Solo admin puede aprobar registros');
+    const result = await db.transaction(async (client) => {
+      const current = await client.query(`SELECT id, dni, nombre, email, rol, estado_registro
         FROM users WHERE dni = $1 AND eliminado_at IS NULL FOR UPDATE`, [dni]);
-      if (!current.rowCount) throw new AppError('Solicitud no encontrada', 404);
+      if (!current.rowCount) throw new AppError('Solicitud de registro no encontrada', 404);
       const target = current.rows[0];
-      if (target.aprobado !== false) throw new AppError('La cuenta ya está aprobada', 409);
-      const requestedRole = body.rol || target.rol;
-      if (!requestedRole) throw new AppError('Asigná un rol para aprobar esta cuenta', 400);
-      const role = validateEmailRole(target.email, requestedRole);
-      const updated = await client.query(`UPDATE users SET rol = $1, aprobado = TRUE
-        WHERE id = $2
-        RETURNING dni, nombre, email, rol, aprobado`, [role, target.id]);
-      const auditTable = await client.query("SELECT to_regclass('public.audit_log') AS table_name");
-      if (auditTable.rows[0]?.table_name) {
-        await client.query(`INSERT INTO audit_log (user_id, accion, detalle)
-          VALUES ($1, 'aprobacion_cuenta', $2)`, [
-          user.id, JSON.stringify({ user_id: target.id, email: target.email, rol: role })
-        ]);
-      }
+      if (target.rol === 'admin') throw new AppError('No se puede aprobar una cuenta administradora desde el registro', 403);
+      if (target.estado_registro === 'aprobado') throw new AppError('La cuenta ya está aprobada', 409);
+      // El rol institucional se deriva del dominio; para @gmail.com lo elige el administrador.
+      const role = validateEmailRole(target.email, body?.rol);
+      const updated = await client.query(`UPDATE users SET rol = $1,
+        estado_registro = 'aprobado', registro_revisado_at = now(), registro_revisado_por = $2
+        WHERE id = $3
+        RETURNING dni, nombre, email, rol, estado_registro`, [role, user.id, target.id]);
+      await client.query(`INSERT INTO audit_log (user_id, accion, detalle) VALUES ($1, 'aprobacion_registro', $2)`, [
+        user.id, JSON.stringify({
+          user_id: target.id,
+          estado_anterior: target.estado_registro,
+          rol_anterior: target.rol,
+          rol_nuevo: role
+        })
+      ]);
       return updated.rows[0];
     });
-    await notifyAccountApproved(approved);
-    return { user: approved, message: 'Cuenta aprobada' };
+    await notifyRegistrationDecision(result, 'aprobado');
+    return { user: result, message: 'Solicitud aprobada' };
   },
-  async rejectUser(_body, user, { dni }) {
-    requireAdmin(user, 'Solo admin puede rechazar solicitudes');
-    const result = await db.query(`SELECT id, dni, nombre, email, aprobado FROM users
-      WHERE dni = $1 AND eliminado_at IS NULL`, [dni]);
-    if (!result.rowCount) throw new AppError('Solicitud no encontrada', 404);
-    const pending = result.rows[0];
-    if (pending.aprobado !== false) throw new AppError('Solo se pueden rechazar solicitudes pendientes', 409);
-    await db.transaction(async (client) => {
-      const auditTable = await client.query("SELECT to_regclass('public.audit_log') AS table_name");
-      if (auditTable.rows[0]?.table_name) {
-        await client.query(`INSERT INTO audit_log (user_id, accion, detalle)
-          VALUES ($1, 'rechazo_cuenta', $2)`, [
-          user.id, JSON.stringify({ user_id: pending.id, dni: pending.dni, email: pending.email })
-        ]);
-      }
-      await client.query('DELETE FROM user_preferences WHERE user_id = $1', [pending.id]);
-      await client.query('DELETE FROM users WHERE id = $1', [pending.id]);
+  async rejectRegistration(_body, user, { dni }) {
+    requireAdmin(user, 'Solo admin puede rechazar registros');
+    const result = await db.transaction(async (client) => {
+      const current = await client.query(`SELECT id, dni, nombre, email, rol, estado_registro
+        FROM users WHERE dni = $1 AND eliminado_at IS NULL FOR UPDATE`, [dni]);
+      if (!current.rowCount) throw new AppError('Solicitud de registro no encontrada', 404);
+      const target = current.rows[0];
+      if (target.rol === 'admin') throw new AppError('No se puede rechazar una cuenta administradora', 403);
+      if (target.estado_registro !== 'pendiente') throw new AppError('La solicitud no está pendiente de revisión', 409);
+      const updated = await client.query(`UPDATE users SET
+        estado_registro = 'rechazado', registro_revisado_at = now(), registro_revisado_por = $1
+        WHERE id = $2
+        RETURNING dni, nombre, email, rol, estado_registro`, [user.id, target.id]);
+      await client.query(`INSERT INTO audit_log (user_id, accion, detalle) VALUES ($1, 'rechazo_registro', $2)`, [
+        user.id, JSON.stringify({ user_id: target.id, estado_anterior: target.estado_registro })
+      ]);
+      return updated.rows[0];
     });
-    return { user: { dni: pending.dni, email: pending.email }, message: 'Solicitud rechazada' };
+    await notifyRegistrationDecision(result, 'rechazado');
+    return { user: result, message: 'Solicitud rechazada' };
   },
   async preferences(_body, user) {
     const result = await db.query('SELECT email_notifications AS email, return_reminder_minutes AS recordatorio FROM user_preferences WHERE user_id = $1', [user.id]);
@@ -797,9 +781,7 @@ const actions = {
   async checkoutReservation(_body, user, { id }) {
     requireAdmin(user, 'Solo admin puede registrar retiros');
     const result = await db.transaction((client) => completeReservationCheckout(client, id));
-    for (const delivery of result.deliveries || []) {
-      await notifyLoanCheckoutByEmail(result.ownerId, delivery.notebook, delivery.dueAt);
-    }
+    await notifyLoanCheckoutByEmail(result.ownerId, result.deliveries);
     return { message: result.message, loansCreated: result.loansCreated };
   },
   async approveAndCheckoutReservation(_body, user, { id }) {
@@ -815,9 +797,7 @@ const actions = {
       await client.query("UPDATE reservations SET estado = 'aprobada' WHERE id = $1", [id]);
       return completeReservationCheckout(client, id);
     });
-    for (const delivery of result.deliveries || []) {
-      await notifyLoanCheckoutByEmail(result.ownerId, delivery.notebook, delivery.dueAt);
-    }
+    await notifyLoanCheckoutByEmail(result.ownerId, result.deliveries);
     return { message: result.message, loansCreated: result.loansCreated };
   },
   async loans(_body, user) {
@@ -1181,7 +1161,7 @@ const actions = {
     const users = await db.query(`SELECT summary.*, (u.baneado AND (u.baneado_hasta IS NULL OR u.baneado_hasta > now())) AS baneado,
       u.baneado_hasta
       FROM user_late_return_summary summary JOIN users u ON u.id = summary.id
-      WHERE u.eliminado_at IS NULL
+      WHERE u.eliminado_at IS NULL AND u.estado_registro = 'aprobado'
       ORDER BY summary.tardanzas DESC, summary.nombre`);
     const history = await db.query(`SELECT u.nombre, u.rol, u.dni, n.codigo AS notebook_id,
       lr.returned_at AS fecha FROM late_returns lr JOIN users u ON u.id = lr.user_id
@@ -1196,7 +1176,9 @@ const actions = {
         return await db.transaction(async (client) => {
           const current = await client.query('SELECT id, rol FROM users WHERE dni = $1 AND eliminado_at IS NULL FOR UPDATE', [dni]);
           if (!current.rowCount) throw new AppError('Usuario no encontrado o no modificable', 404);
-          const nextRole = current.rows[0].rol === 'admin' ? 'admin' : roleFromEmail(email);
+          const nextRole = current.rows[0].rol === 'admin'
+            ? 'admin'
+            : (roleFromEmail(email) || current.rows[0].rol);
           const updated = await client.query(`UPDATE users SET email = $1, rol = $2
             WHERE id = $3 RETURNING dni, nombre, email, rol`, [email, nextRole, current.rows[0].id]);
           return { user: updated.rows[0] };

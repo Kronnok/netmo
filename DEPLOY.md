@@ -31,25 +31,6 @@ de notebooks para permitir renumerarlos. La migración 011 crea el catálogo
 editable de ubicaciones, agrega el estado de envío del recordatorio de
 vencimiento y habilita respuestas en tickets. La migración 013 relaciona cada
 reporte de falla con el préstamo seleccionado sin alterar reportes anteriores.
-La migración 016 agrega `users.aprobado` (verdadero por defecto, para no afectar
-cuentas existentes), permite `users.rol` nulo en solicitudes `@gmail.com` y crea
-un índice parcial de cuentas pendientes. Después de migrar, las solicitudes
-nuevas quedan visibles en Administración → Usuarios y roles para aprobarlas.
-
-### Orden de despliegue
-
-Render publica `main` automáticamente y su build no ejecuta migraciones. Antes de
-pushear un cambio que dependa de columnas nuevas, aplicá las migraciones:
-
-```sh
-$env:DATABASE_URL = "postgresql://.../neondb?sslmode=require"
-npm run db:migrate
-```
-
-Después verificá el esquema y recién entonces pusheá. Si el código se publica
-antes que la migración, las consultas que usan las columnas nuevas fallan con
-error 500 hasta que la migración se aplique; si ya pasó, ejecutá el comando y
-volvé a desplegar.
 
 ## 2. API en Render
 
@@ -70,10 +51,15 @@ servicio completá:
 - `CRON_SECRET`: secreto generado para Render y usado por el cron externo de
   recordatorios; es obligatorio en producción.
 
-  Las cuentas nuevas se crean desde la sección **Usuarios** del panel de
-  administración; no existe registro público. Los DNI nuevos deben tener de 7 a 10
-  dígitos. Desde **Inventario** se administran carros, ubicaciones y altas
-  consecutivas de notebooks.
+  El registro público de cuentas se hace desde el inicio de sesión y cada
+  solicitud queda pendiente de aprobación hasta que un administrador la apruebe o
+  rechace en la sección **Usuarios**. El rol se deriva del dominio; para
+  `@gmail.com` el administrador elige alumno o profesor al aprobar. Una solicitud
+  rechazada puede volver a registrarse corrigiendo sus datos. Los DNI nuevos deben
+  tener de 7 a 10 dígitos.
+  Desde **Inventario** se administran carros, ubicaciones y altas consecutivas de
+  notebooks. El correo de entrega de una notebook es transaccional: se envía
+  siempre al registrar la entrega, sin depender de las preferencias del usuario.
 
 Render publica la API y comprueba `/health`. Configurá `DATABASE_URL` y
 `CORS_ORIGIN` como variables privadas del servicio; `JWT_SECRET` se genera en

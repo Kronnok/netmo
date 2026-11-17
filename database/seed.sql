@@ -1,10 +1,10 @@
-INSERT INTO users (dni, nombre, email, rol, password_hash, baneado) VALUES
-  ('2024-0417', 'Teo Prado', 'tprado@ottokrause.edu.ar', 'alumno', crypt(current_setting('netmo.seed.student_password'), gen_salt('bf')), FALSE),
-  ('2024-0528', 'Lucía Fernández', 'lfernandez@ottokrause.edu.ar', 'alumno', crypt(current_setting('netmo.seed.student_password'), gen_salt('bf')), FALSE),
-  ('2024-0639', 'Mateo Rodríguez', 'mrodriguez@ottokrause.edu.ar', 'alumno', crypt(current_setting('netmo.seed.student_password'), gen_salt('bf')), FALSE),
-  ('PRF-010', 'Prof. Ana Gómez', 'agomez@ottokrause.edu.ar', 'profesor', crypt(current_setting('netmo.seed.teacher_password'), gen_salt('bf')), FALSE),
-  ('PRF-011', 'Prof. Diego Suárez', 'dsuarez@ottokrause.edu.ar', 'profesor', crypt(current_setting('netmo.seed.network_teacher_password'), gen_salt('bf')), FALSE),
-  ('ADM-001', 'Admin NetMO', 'admin@ottokrause.edu.ar', 'admin', crypt(current_setting('netmo.seed.admin_password'), gen_salt('bf')), FALSE)
+INSERT INTO users (dni, nombre, email, rol, password_hash, baneado, estado_registro) VALUES
+  ('2024-0417', 'Teo Prado', 'tprado@ottokrause.edu.ar', 'alumno', crypt(current_setting('netmo.seed.student_password'), gen_salt('bf')), FALSE, 'aprobado'),
+  ('2024-0528', 'Lucía Fernández', 'lfernandez@ottokrause.edu.ar', 'alumno', crypt(current_setting('netmo.seed.student_password'), gen_salt('bf')), FALSE, 'aprobado'),
+  ('2024-0639', 'Mateo Rodríguez', 'mrodriguez@ottokrause.edu.ar', 'alumno', crypt(current_setting('netmo.seed.student_password'), gen_salt('bf')), FALSE, 'aprobado'),
+  ('PRF-010', 'Prof. Ana Gómez', 'agomez@ottokrause.edu.ar', 'profesor', crypt(current_setting('netmo.seed.teacher_password'), gen_salt('bf')), FALSE, 'aprobado'),
+  ('PRF-011', 'Prof. Diego Suárez', 'dsuarez@ottokrause.edu.ar', 'profesor', crypt(current_setting('netmo.seed.network_teacher_password'), gen_salt('bf')), FALSE, 'aprobado'),
+  ('ADM-001', 'Admin NetMO', 'admin@ottokrause.edu.ar', 'admin', crypt(current_setting('netmo.seed.admin_password'), gen_salt('bf')), FALSE, 'aprobado')
 ON CONFLICT (dni) DO NOTHING;
 
 INSERT INTO user_preferences (user_id, email_notifications, return_reminder_minutes)

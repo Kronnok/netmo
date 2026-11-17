@@ -649,6 +649,8 @@
   .auth-view h2{font-size:1.35rem;margin-bottom:.3rem;}
   .auth-view > p.sub{color:var(--text-muted);font-size:.87rem;margin-bottom:1.5rem;}
   .auth-switch{margin-top:1.3rem;text-align:center;font-size:.85rem;color:var(--text-muted);background:none;border:0;width:100%;}
+  .auth-link{background:none;border:0;color:var(--role-accent);font:inherit;font-weight:600;cursor:pointer;text-decoration:underline;padding:0;}
+  .field-success{color:var(--green-text);}
   .login-password-wrap{position:relative;}
   .login-password-wrap input{padding-right:3.3rem;}
   .login-password-toggle{

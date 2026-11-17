@@ -4,6 +4,7 @@ const { test } = require('node:test');
 process.env.JWT_SECRET = 'password-reset-test-secret-with-at-least-32-bytes';
 process.env.NODE_ENV = 'development';
 process.env.MAIL_PROVIDER = 'console';
+process.env.DATABASE_URL = process.env.DATABASE_URL || 'postgresql://127.0.0.1:1/netmo_password_reset_test';
 
 const db = require('../data/database');
 const rateLimiter = require('../services/login-rate-limiter');

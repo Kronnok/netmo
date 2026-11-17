@@ -19,7 +19,7 @@ const migrations = [
   '013-ticket-loan-link.sql',
   '014-ticket-automatic-replies.sql',
   '015-soft-delete-users.sql',
-  '016-registro-publico.sql'
+  '016-registration-approval.sql'
 ];
 
 async function migrate() {

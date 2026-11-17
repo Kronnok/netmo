@@ -32,7 +32,8 @@ persistencia es PostgreSQL 16.
    ```
 
    El servidor usa el puerto `3000` por defecto. El frontend siempre usa la API
-   configurada en `frontend/config.js`; las cuentas son creadas por administración.
+   configurada en `frontend/config.js`; el registro público de alumnos y
+   profesores queda pendiente de aprobación administrativa.
 
 ## Despliegue
 
@@ -53,8 +54,10 @@ previos al vencimiento y respuestas de tickets. La migración 012 agrega IDs
 estables para carros y ubicaciones, manteniendo el número y el slug como valores
 editables. Los recordatorios automáticos aún están deshabilitados. La migración
 013 vincula cada reporte de falla con el préstamo
-seleccionado y conserva los reportes anteriores. Las cuentas nuevas tienen rol
-Profesor por defecto; los usuarios con rol Alumno existentes mantienen su
+seleccionado y conserva los reportes anteriores. La migración 016 agrega el
+estado de registro (`pendiente`, `aprobado`, `rechazado`) y la auditoría de
+revisión; las cuentas existentes quedan aprobadas. Las cuentas nuevas quedan
+pendientes y el rol se deriva del dominio; los usuarios existentes mantienen su
 historial y pueden desactivarse desde administración.
 `npm run db:seed` registra la aplicación del seed para evitar ejecutarlo una
 segunda vez. Las credenciales se suministran mediante variables de entorno y no
@@ -62,10 +65,15 @@ deben guardarse en el repositorio.
 
 Las cuentas nuevas de alumnos y profesores usan `@alu.bue.edu.ar`,
 `@bue.edu.ar` o `@gmail.com`; las cuentas históricas no se modifican. El rol se
-deriva del dominio institucional y se puede elegir para `@gmail.com`. La
+deriva del dominio (`@bue.edu.ar` es profesor y `@alu.bue.edu.ar` es alumno); para
+`@gmail.com` el administrador elige alumno o profesor al aprobar la solicitud. El
+registro público crea una solicitud pendiente que un administrador debe aprobar;
+una solicitud rechazada puede volver a registrarse corrigiendo sus datos. La
 recuperación y las notificaciones usan `MAIL_PROVIDER=brevo` (Brevo) o
 `MAIL_PROVIDER=gas` (Google Apps Script), o `console` solo en desarrollo;
-configurá sus variables en `.env.example`.
+configurá sus variables en `.env.example`. El aviso de entrega de notebooks es
+transaccional y se envía siempre, aunque el usuario tenga desactivadas las
+notificaciones por correo.
 
 La instalación no publica credenciales de ejemplo. Configurá contraseñas
 privadas mediante `.env.example` y las variables de entorno del seed; si una

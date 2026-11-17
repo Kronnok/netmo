@@ -65,33 +65,25 @@ function roleFromEmail(email) {
     throw new AppError('Usá un correo @bue.edu.ar, @alu.bue.edu.ar o @gmail.com', 400);
   }
   if (domain === 'alu.bue.edu.ar') return 'alumno';
-  return 'profesor';
-}
-
-// Rol automático del registro público: los institucionales lo tienen fijo y
-// @gmail.com queda sin rol hasta que un administrador lo asigne al aprobar.
-function registrationRoleFromEmail(email) {
-  const domain = String(email).trim().toLowerCase().slice(String(email).trim().lastIndexOf('@') + 1);
-  if (!ALLOWED_EMAIL_DOMAINS.includes(domain)) {
-    throw new AppError('Usá un correo @bue.edu.ar, @alu.bue.edu.ar o @gmail.com', 400);
-  }
-  if (domain === 'alu.bue.edu.ar') return 'alumno';
   if (domain === 'bue.edu.ar') return 'profesor';
+  // Para @gmail.com el rol lo define un administrador al aprobar la solicitud.
   return null;
 }
 
 function validateEmailRole(email, role) {
-  const defaultRole = roleFromEmail(email);
+  const domainRole = roleFromEmail(email);
   const domain = String(email).trim().toLowerCase().slice(String(email).trim().lastIndexOf('@') + 1);
-  if (domain === 'gmail.com') {
-    if (!['alumno', 'profesor'].includes(role)) throw new AppError('Rol inválido', 400);
+  if (!domainRole) {
+    if (!['alumno', 'profesor'].includes(role)) {
+      throw new AppError('Elegí si la cuenta de @gmail.com será de alumno o profesor', 400);
+    }
     return role;
   }
-  if (role !== defaultRole) {
+  if (role !== undefined && role !== null && role !== '' && role !== domainRole) {
     const domainLabel = domain === 'alu.bue.edu.ar' ? '@alu.bue.edu.ar' : '@bue.edu.ar';
-    throw new AppError(`Un correo ${domainLabel} solo puede ser ${defaultRole}`, 400);
+    throw new AppError(`Un correo ${domainLabel} solo puede ser ${domainRole}`, 400);
   }
-  return defaultRole;
+  return domainRole;
 }
 
 function accountPassword(value) {
@@ -127,7 +119,6 @@ module.exports = {
   accountEmail,
   emailType,
   roleFromEmail,
-  registrationRoleFromEmail,
   validateEmailRole,
   loginEmail,
   accountPassword,
