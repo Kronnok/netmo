@@ -20,6 +20,7 @@ const {
 const { sendMail } = require('./mail-service');
 const { notifyRegistrationDecision } = require('./registration-service');
 const { mapTicketRow } = require('./ticket-mapper');
+const { anonymizeUser } = require('./user-anonymization');
 
 const TICKET_AUTO_REPLY_MESSAGE = 'Recibimos tu reporte. El equipo de NetMO lo va a revisar y te responderá por este medio. Si querés, podés agregar más información en esta conversación.';
 
@@ -56,7 +57,8 @@ async function notifyLoanCheckoutByEmail(userId, deliveries) {
   try {
     if (!Array.isArray(deliveries) || deliveries.length === 0) return;
     const result = await db.query(`SELECT u.email FROM users u
-      WHERE u.id = $1 AND u.estado_registro = 'aprobado'`, [userId]);
+      JOIN user_preferences p ON p.user_id = u.id
+      WHERE u.id = $1 AND u.estado_registro = 'aprobado' AND p.email_notifications = TRUE`, [userId]);
     if (!result.rowCount) return;
     const rows = deliveries.map((delivery) => {
       const dueTime = new Date(delivery.dueAt).toLocaleString('es-AR', {
@@ -74,6 +76,73 @@ async function notifyLoanCheckoutByEmail(userId, deliveries) {
   } catch {
     console.error('No se pudo enviar una notificación por correo.');
   }
+}
+
+async function processReturnReminders() {
+  const client = await db.pool.connect();
+  let locked = false;
+  try {
+    const lock = await client.query('SELECT pg_try_advisory_lock(781904222) AS locked');
+    locked = Boolean(lock.rows[0]?.locked);
+    if (!locked) {
+      return { sent: 0, failed: 0, skipped: true, message: 'Ya hay un envío de recordatorios en curso.' };
+    }
+    const pending = await db.query(`SELECT l.id, l.vence_at, l.curso, n.codigo AS notebook, u.email
+      FROM loans l
+      JOIN users u ON u.id = l.user_id
+      JOIN notebooks n ON n.id = l.notebook_id
+      JOIN user_preferences p ON p.user_id = u.id
+      WHERE l.estado <> 'devuelto'
+        AND l.reminder_sent_at IS NULL
+        AND u.eliminado_at IS NULL
+        AND u.estado_registro = 'aprobado'
+        AND p.email_notifications = TRUE
+        AND p.return_reminder_minutes > 0
+        AND l.vence_at <= now() + make_interval(mins => p.return_reminder_minutes)
+      ORDER BY l.vence_at, l.id
+      LIMIT 200`);
+    let sent = 0;
+    let failed = 0;
+    for (const loan of pending.rows) {
+      const dueTime = new Date(loan.vence_at).toLocaleString('es-AR', {
+        timeZone: 'America/Argentina/Buenos_Aires',
+        dateStyle: 'short',
+        timeStyle: 'short'
+      });
+      try {
+        await sendMail({
+          to: loan.email,
+          subject: 'Recordatorio de devolución de notebook',
+          html: `<p>Hola,</p>
+            <p>Te recordamos que la notebook <strong>${escapeEmailHtml(loan.notebook)}</strong> debe devolverse antes del ${escapeEmailHtml(dueTime)}.</p>
+            ${loan.curso ? `<p>Curso: ${escapeEmailHtml(loan.curso)}</p>` : ''}
+            <p>Si ya la devolviste, ignorá este mensaje.</p>`
+        });
+        await db.query('UPDATE loans SET reminder_sent_at = now() WHERE id = $1 AND reminder_sent_at IS NULL', [loan.id]);
+        sent += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+    const message = sent === 0 && failed === 0
+      ? 'No hay recordatorios pendientes.'
+      : `Recordatorios enviados: ${sent}. Fallaron: ${failed}.`;
+    return { sent, failed, skipped: false, message };
+  } finally {
+    if (locked) {
+      try {
+        await client.query('SELECT pg_advisory_unlock(781904222)');
+      } catch {}
+    }
+    client.release();
+  }
+}
+
+function finishReminderRun(result) {
+  if (!result.skipped && result.sent === 0 && result.failed > 0) {
+    throw new AppError('No se pudieron enviar los recordatorios. Revisá la configuración de correo.', 503);
+  }
+  return result;
 }
 
 function searchPattern(value) {
@@ -1150,11 +1219,11 @@ const actions = {
       || provided.length !== expected.length) {
       throw new AppError('No autorizado', 401);
     }
-    throw new AppError('El envío automático de recordatorios no está disponible actualmente', 503);
+    return finishReminderRun(await processReturnReminders());
   },
   async runAdminReminders(_body, user) {
     requireAdmin(user, 'Solo admin puede enviar recordatorios');
-    throw new AppError('El envío automático de recordatorios no está disponible actualmente', 503);
+    return finishReminderRun(await processReturnReminders());
   },
   async lateReturns(_body, user) {
     requireAdmin(user, 'Solo admin puede consultar demoras');
@@ -1202,26 +1271,28 @@ const actions = {
     return { user: result.rows[0] };
   },
   async deleteUser(_body, user, { dni }) {
-    requireAdmin(user, 'Solo admin puede dar de baja usuarios');
-    const target = await db.query('SELECT id, rol, eliminado_at FROM users WHERE dni = $1', [dni]);
-    if (!target.rowCount) throw new AppError('Usuario no encontrado', 404);
-    const found = target.rows[0];
-    if (String(found.id) === String(user.id)) throw new AppError('No podés dar de baja tu propia cuenta', 403);
-    if (found.rol === 'admin') throw new AppError('No se puede dar de baja una cuenta administradora', 403);
-    if (found.eliminado_at) throw new AppError('La cuenta ya estaba dada de baja', 409);
-    const result = await db.query(`UPDATE users SET eliminado_at = now(), baneado = FALSE, baneado_hasta = NULL
-      WHERE id = $1 AND eliminado_at IS NULL
-      RETURNING dni, nombre, email, rol, eliminado_at`, [found.id]);
-    if (!result.rowCount) throw new AppError('La cuenta ya estaba dada de baja', 409);
-    return { user: result.rows[0], message: 'Cuenta dada de baja' };
-  },
-  async restoreUser(_body, user, { dni }) {
-    requireAdmin(user, 'Solo admin puede restaurar usuarios');
-    const result = await db.query(`UPDATE users SET eliminado_at = NULL
-      WHERE dni = $1 AND eliminado_at IS NOT NULL
-      RETURNING dni, nombre, email, rol, eliminado_at`, [dni]);
-    if (!result.rowCount) throw new AppError('La cuenta no está dada de baja', 404);
-    return { user: result.rows[0], message: 'Cuenta restaurada' };
+    requireAdmin(user, 'Solo admin puede eliminar usuarios');
+    return db.transaction(async (client) => {
+      const target = await client.query(`SELECT id, rol, eliminado_at FROM users
+        WHERE dni = $1 FOR UPDATE`, [dni]);
+      if (!target.rowCount) throw new AppError('Usuario no encontrado', 404);
+      const found = target.rows[0];
+      if (String(found.id) === String(user.id)) throw new AppError('No podés eliminar tu propia cuenta', 403);
+      if (found.rol === 'admin') throw new AppError('No se puede eliminar una cuenta administradora', 403);
+      if (found.eliminado_at) throw new AppError('La cuenta ya estaba eliminada', 409);
+      const openLoan = await client.query(`SELECT 1 FROM loans
+        WHERE user_id = $1 AND estado <> 'devuelto' LIMIT 1`, [found.id]);
+      if (openLoan.rowCount) {
+        throw new AppError('El usuario tiene préstamos sin devolver. Registrá la devolución antes de eliminar la cuenta.', 409);
+      }
+      const anonymized = await anonymizeUser(client, found.id);
+      await client.query(`INSERT INTO audit_log (user_id, accion, detalle) VALUES ($1, 'baja_usuario', $2)`,
+        [user.id, JSON.stringify({ user_id: found.id, rol: found.rol })]);
+      return {
+        user: anonymized,
+        message: 'Cuenta eliminada. El correo y el DNI quedaron libres para volver a registrarse.'
+      };
+    });
   },
   async updateUserRole(body, user, { dni }) {
     requireAdmin(user, 'Solo admin puede cambiar roles');

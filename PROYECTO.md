@@ -16,7 +16,7 @@ Los permisos de la interfaz se presentan por rol, pero la autorización efectiva
 |---|---|
 | `alumno` | Consultar inventario; administrar sus preferencias, reservas, préstamos y tickets; reservar una notebook por vez indicando su curso; reportar fallas y responder sus tickets. |
 | `profesor` | Las funciones comunes; además, reservar más de una notebook y solicitar lotes de al menos tres equipos indicando el curso. Los lotes requieren aprobación administrativa. |
-| `admin` | Aprobar o rechazar solicitudes de registro; administrar roles, carros, ubicaciones y notebooks; ver reservas y préstamos, registrar entregas y devoluciones; administrar tickets y respuestas; revisar demoras, banear usuarios con vencimiento y dar de baja o restaurar cuentas. |
+| `admin` | Aprobar o rechazar solicitudes de registro; administrar roles, carros, ubicaciones y notebooks; ver reservas y préstamos, registrar entregas y devoluciones; administrar tickets y respuestas; revisar demoras, banear usuarios con vencimiento y eliminar cuentas con borrado de datos personales. |
 
 El seed contiene cuentas de ejemplo para instalaciones nuevas. Cualquier persona puede registrarse desde el inicio de sesión con nombre, apellido, correo, DNI y contraseña; la solicitud queda pendiente hasta que un administrador la apruebe o la rechace. Un usuario rechazado puede corregir sus datos y volver a registrarse. Los usuarios existentes conservan sus credenciales y los valores de su DNI; el DNI solo se muestra al propio usuario y a administración.
 
@@ -29,8 +29,8 @@ El seed contiene cuentas de ejemplo para instalaciones nuevas. Cualquier persona
 | Mis préstamos | Muestra préstamos activos, historial, hora de vencimiento, cuenta regresiva y avisos previos; la devolución la registra administración. |
 | Reservas | Crea reservas individuales o solicitudes de lote filtrando equipos por ubicación del carro, muestra las propias y permite cancelar las que aún son cancelables. |
 | Reportar falla / Mis tickets | Crea reportes asociados a notebooks del historial propio o a “Otra / no sé”; muestra el seguimiento y el hilo de respuestas. |
-| Perfil | Muestra los datos de cuenta y permite configurar notificaciones por correo y minutos de recordatorio (0 desactiva el aviso). |
-| Administración: Usuarios | Muestra solicitudes de registro pendientes y rechazadas para aprobarlas o rechazarlas, consulta las listas reales, permite cambiar roles, banear cuentas y dar de baja o restaurar cuentas sin perder el historial. |
+| Perfil | Muestra los datos de cuenta y permite configurar notificaciones por correo y minutos de recordatorio (0 desactiva el aviso); el recordatorio se envía cuando falta ese plazo para el vencimiento. |
+| Administración: Usuarios | Muestra solicitudes de registro pendientes y rechazadas para aprobarlas o rechazarlas, consulta las listas reales, permite cambiar roles, banear cuentas y dar de baja cuentas sin perder el historial. |
 | Administración: Inventario | Lista y filtra notebooks; administra carros y ubicaciones editables, renumera carros y da de alta o mueve notebooks. |
 | Administración: Entregas y devoluciones | Busca usuarios y préstamos activos, registra devoluciones individuales o de un lote y actualiza la lista periódicamente. |
 | Administración: Préstamos | Lista reservas individuales y por lote, permite aprobar lotes y registrar entrega; notebooks disponibles pueden asignarse al entregar. |
@@ -51,7 +51,7 @@ El seed contiene cuentas de ejemplo para instalaciones nuevas. Cualquier persona
 
 Las altas, el registro y los cambios de correo de alumnos/profesores aceptan únicamente `@alu.bue.edu.ar`, `@bue.edu.ar` y `@gmail.com`. El rol institucional se deriva del dominio (`@bue.edu.ar` es profesor y `@alu.bue.edu.ar` es alumno); para `@gmail.com` el administrador elige alumno o profesor al aprobar la solicitud. Nunca se puede registrar un administrador. No se migran ni bloquean cuentas existentes.
 
-Las cuentas de alumno y profesor pueden darse de baja de forma lógica desde Usuarios. La cuenta queda inactiva (`users.eliminado_at`), no puede iniciar sesión, recuperar ni cambiar su contraseña y desaparece de los listados, pero conserva préstamos, devoluciones, tickets y tardanzas. El panel Cuentas eliminadas permite restaurarlas. No se puede dar de baja la propia cuenta ni una cuenta administradora.
+Las cuentas de alumno y profesor pueden eliminarse desde Usuarios. La baja borra los datos personales: el nombre pasa a `Cuenta eliminada`, el correo a `eliminado+<id>@netmo.invalid`, el DNI a `ELIM-<id>`, se invalida la contraseña y se eliminan preferencias y códigos de recuperación. La fila se conserva anonimizada y marcada con `eliminado_at` para no perder préstamos, devoluciones, tickets y tardanzas. El correo y el DNI originales quedan libres para registrarse de nuevo y la baja es irreversible: no hay restauración. No se puede eliminar la propia cuenta, una cuenta administradora ni una cuenta con préstamos sin devolver.
 
 ### Reservas
 
@@ -68,7 +68,7 @@ Las reglas de año, día y horario usan `America/Argentina/Buenos_Aires` tanto e
 
 ### Préstamos y devoluciones
 
-1. El préstamo se crea al registrar la entrega de una reserva; los lotes pendientes se pueden aprobar y entregar en una transacción. Al registrar la entrega se envía siempre un único correo transaccional con las notebooks, el curso y la fecha/hora de devolución, sin depender de las preferencias de notificación del usuario.
+1. El préstamo se crea al registrar la entrega de una reserva; los lotes pendientes se pueden aprobar y entregar en una transacción. Al registrar la entrega se envía como máximo un correo transaccional con las notebooks, el curso y la fecha/hora de devolución, solo si el usuario tiene activadas las notificaciones por correo.
 2. El usuario solo consulta el préstamo, vencimiento y cuenta regresiva; no inicia una devolución.
 3. Administración registra la recepción directamente. El préstamo pasa a `devuelto`; la notebook queda en mantenimiento si tiene un ticket abierto o en progreso, o disponible en caso contrario.
 4. Un trigger registra la demora si la hora efectiva de devolución supera el vencimiento. Una vista cuenta tardanzas y marca candidato a sanción desde tres.
@@ -83,7 +83,7 @@ El cómputo de demora ocurre al confirmar la devolución, no al solicitarla. La 
 
 ### Preferencias e inventario
 
-Las preferencias admiten recordatorios de 0, 15, 30 o 60 minutos. El inventario permite estados `disponible`, `prestada`, `mantenimiento` y `pendiente_devolucion`. El cambio manual a `prestada` o `pendiente_devolucion` no asigna necesariamente `prestado_a`; la restricción de la tabla puede rechazarlo cuando no hay usuario asociado.
+Las preferencias admiten recordatorios de 0, 15, 30 o 60 minutos. Con un valor mayor a cero, el envío de recordatorios busca los préstamos abiertos cuyo vencimiento cae dentro de ese plazo (incluidos los ya vencidos) y envía un correo una sola vez por préstamo; `0` o las notificaciones desactivadas excluyen al usuario. El envío se dispara desde el botón de administración o por cron con `POST /api/internal/reminders`. El inventario permite estados `disponible`, `prestada`, `mantenimiento` y `pendiente_devolucion`. El cambio manual a `prestada` o `pendiente_devolucion` no asigna necesariamente `prestado_a`; la restricción de la tabla puede rechazarlo cuando no hay usuario asociado.
 
 ## 5. Arquitectura
 
@@ -149,11 +149,10 @@ Salvo health, registro y login, las rutas requieren `Authorization: Bearer <toke
 | GET | `/api/admin/users` | Admin | — | Usuarios aprobados y activos de todos los roles en `{users}`. |
 | GET | `/api/admin/users?rol=alumno\|profesor\|admin` | Admin | — | Filtra las cuentas aprobadas y activas por rol. |
 | GET | `/api/admin/users?registro=pendiente\|rechazado\|aprobado\|todos` | Admin | — | Filtra por estado de registro; por defecto devuelve aprobados. |
-| GET | `/api/admin/users?eliminados=si` | Admin | — | Lista solo las cuentas dadas de baja. |
+| GET | `/api/admin/users?eliminados=si` | Admin | — | Consulta las cuentas eliminadas, ya anonimizadas; no existe una acción de restauración ni un panel en la interfaz. |
 | POST | `/api/admin/users` | Admin | `{nombre, apellido, email, dni, rol, password}` | Alta administrativa conservada por compatibilidad; crea cuenta aprobada y preferencias; con `@gmail.com` el rol es obligatorio; HTTP 201. |
 | PATCH | `/api/admin/users/:dni` | Admin | `{baneado, duracionDias?}` | `{user}`; duración 1, 3, 7, 15, 30 días o indefinida; no modifica administradores. |
-| DELETE | `/api/admin/users/:dni` | Admin | — | Baja lógica: completa `eliminado_at`; no borra historial ni permite administradores o la propia cuenta. |
-| POST | `/api/admin/users/:dni/restore` | Admin | — | Restaura una cuenta dada de baja. |
+| DELETE | `/api/admin/users/:dni` | Admin | — | Elimina la cuenta: borra datos personales, anonimiza la fila y libera correo y DNI; no permite administradores, la propia cuenta ni cuentas con préstamos abiertos; conserva el historial. |
 | POST | `/api/admin/users/:dni/approve` | Admin | `{rol}` para `@gmail.com` | Aprueba una solicitud pendiente, aplica el rol elegido cuando corresponde y avisa por correo. |
 | POST | `/api/admin/users/:dni/reject` | Admin | — | Rechaza una solicitud pendiente; la cuenta queda `rechazado` y puede volver a registrarse. |
 | PATCH | `/api/admin/users/:dni/rol` | Admin | `{rol, password?}` | `{user}`; no permite cambiar el propio rol ni eliminar el último admin; al ascender exige contraseña. |
@@ -194,7 +193,8 @@ Salvo health, registro y login, las rutas requieren `Authorization: Bearer <toke
 | GET | `/api/tickets/:codigo/replies` | Dueño del ticket o admin | — | Hilo de respuestas. |
 | POST | `/api/tickets/:codigo/replies` | Dueño del ticket o admin | `{mensaje}` | Agrega una respuesta de hasta 500 caracteres. |
 | PATCH | `/api/tickets/:codigo` | Admin | `{estado}` | `{ticket}`. |
-| POST | `/api/internal/reminders` | Cron con `x-cron-secret` | — | Envía recordatorios pendientes de vencimiento; idempotente. |
+| POST | `/api/internal/reminders` | Cron con `x-cron-secret` | — | Envía un recordatorio por préstamo abierto según la preferencia de cada usuario; no duplica envíos y usa un lock para evitar ejecuciones simultáneas. |
+| POST | `/api/admin/reminders/run` | Admin | — | Ejecuta el mismo envío desde administración y devuelve `{sent, failed, message}`. |
 | GET | `/api/admin/late-returns` | Admin | — | Usuarios/resumen de tardanzas en `{users}` e historial en `{history}`. |
 Las búsquedas administrativas aceptan hasta 50 caracteres y devuelven un máximo de 50 resultados. Métodos CORS anunciados: `GET`, `POST`, `PATCH`, `DELETE` y `OPTIONS`.
 
@@ -204,7 +204,7 @@ PostgreSQL usa `citext` para emails y `pgcrypto` para hash de contraseñas. Las 
 
 | Tabla | Columnas principales (tipo) y relaciones |
 |---|---|
-| `users` | `id BIGSERIAL PK`; `dni VARCHAR(32) UNIQUE`; `nombre VARCHAR(120)`; `email CITEXT UNIQUE`; `rol user_role`; `password_hash TEXT`; `baneado BOOLEAN`; `baneado_hasta TIMESTAMPTZ nullable`; `eliminado_at TIMESTAMPTZ nullable`; `created_at TIMESTAMPTZ`. La baja lógica completa `eliminado_at` y conserva todo el historial. |
+| `users` | `id BIGSERIAL PK`; `dni VARCHAR(32) UNIQUE`; `nombre VARCHAR(120)`; `email CITEXT UNIQUE`; `rol user_role`; `password_hash TEXT`; `baneado BOOLEAN`; `baneado_hasta TIMESTAMPTZ nullable`; `eliminado_at TIMESTAMPTZ nullable`; `created_at TIMESTAMPTZ`. La baja anonimiza la fila (`Cuenta eliminada`, `eliminado+<id>@netmo.invalid`, `ELIM-<id>`) y conserva el historial. |
 | `user_preferences` | `user_id BIGINT PK/FK → users(id)`; `email_notifications BOOLEAN`; `return_reminder_minutes INTEGER` con valores permitidos 0/15/30/60; `updated_at TIMESTAMPTZ`. |
 | `ubicaciones` | `slug VARCHAR(32) PK`; `nombre VARCHAR(50)`; catálogo editable con las ubicaciones iniciales. |
 | `carros` | `numero INTEGER PK` entre 1 y 999; `ubicacion VARCHAR(20) nullable FK → ubicaciones(slug)`; `created_at TIMESTAMPTZ`. |
@@ -285,7 +285,7 @@ Los manifiestos y documentos describen el destino previsto; el estado operativo 
 
 1. **Sesiones:** no existe revocación individual del token antes de su vencimiento; la sesión se conserva en el navegador según la preferencia del usuario.
 2. **Acciones no disponibles:** los cambios manuales de inventario no incluyen cambios arbitrarios de estado; se administran ubicación y carro.
-3. **Notificaciones:** se envían avisos existentes por correo; el envío automático de recordatorios todavía no está implementado.
+3. **Notificaciones:** se envían avisos y recordatorios de devolución por correo; el envío automático depende de un cron externo que llame a `/api/internal/reminders` con `x-cron-secret`.
 4. **Validación/interfaz:** los dominios permitidos para altas/cambios se validan en el backend; no se migran cuentas existentes.
 5. **Pruebas:** las pruebas API no cubren flujos contra PostgreSQL real; las pruebas de backup usan herramientas simuladas.
 6. **Documentación:** no existe `CONTEXT.md` en raíz; el estado operativo real de servicios externos no se puede determinar desde el repositorio.

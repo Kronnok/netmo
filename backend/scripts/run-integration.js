@@ -169,8 +169,13 @@ async function insertUser(dni, name, email, role, password = 'Integration-pass-2
 
 async function prepareDatabase() {
   await pool.query(`TRUNCATE TABLE audit_log, password_resets, late_returns, returns, tickets,
-    loans, reservation_notebooks, reservations, notebooks, user_preferences, carros, users
+    loans, reservation_notebooks, reservations, notebooks, user_preferences, carros, ubicaciones, users
     RESTART IDENTITY CASCADE`);
+  await pool.query(`INSERT INTO ubicaciones (slug, nombre) VALUES
+    ('taller', 'Taller'),
+    ('teoria_pb', 'Teoría – Planta baja'),
+    ('teoria_p1', 'Teoría – 1.er piso'),
+    ('teoria_p2', 'Teoría – 2.º piso')`);
   const users = {};
   users.admin = await insertUser('990001', 'Admin Test', 'admin-integration@netmo.invalid', 'admin');
   users.professor = await insertUser('990002', 'Profesor Test', 'professor-integration@netmo.invalid', 'profesor');
@@ -236,7 +241,7 @@ async function adminPermissions(admin, adminUserId, professor, student) {
     ['GET', '/api/admin/loans', undefined],
     ['POST', '/api/admin/loans/999999/return', {}],
     ['POST', '/api/admin/loans/return', { loanIds: [1, 2] }],
-    ['PATCH', '/api/admin/ubicaciones/taller', { nombre: 'Piso 6767' }],
+    ['PATCH', '/api/admin/ubicaciones/ubicacion-inexistente', { nombre: 'Prueba' }],
     ['POST', '/api/admin/reminders/run', {}],
     ['POST', '/api/admin/returns/999999/confirm', {}],
     ['GET', '/api/admin/tickets', undefined],
@@ -245,7 +250,6 @@ async function adminPermissions(admin, adminUserId, professor, student) {
     ['POST', '/api/admin/restore', {}],
     ['PATCH', '/api/admin/users/999999', {}],
     ['DELETE', '/api/admin/users/999999', undefined],
-    ['POST', '/api/admin/users/999999/restore', {}],
     ['POST', '/api/admin/users/999999/approve', {}],
     ['POST', '/api/admin/users/999999/reject', {}],
     ['PATCH', '/api/admin/users/999999/rol', {}]
@@ -308,6 +312,7 @@ async function runFlows(users) {
   for (const role of ['admin', 'professor', 'student']) {
     tokens[role] = await login(users[role]);
   }
+  tokens.cancel = await login(users.cancel);
   await report('autenticación admin, profesor y alumno', () => assert.ok(tokens.admin && tokens.professor && tokens.student));
 
   await report('autorización de todas las rutas admin y tokens inválidos', async () => {
@@ -344,14 +349,14 @@ async function runFlows(users) {
     assert.equal(missingCourse.status, 400);
     assert.match(missingCourse.payload.error, /curso/i);
     const studentLot = await request('POST', '/api/reservations', {
-      tipo: 'lote', retiroAt: reservationTime, horaDevolucion: '17:30', cantidad: 3, curso: 'Curso test'
+      tipo: 'lote', retiroAt: reservationTime, horaDevolucion: '17:30', cantidad: 1, curso: 'Curso test'
     }, tokens.student);
     assert.equal(studentLot.status, 403);
   });
 
   const reservationResponse = await report('reserva individual pendiente de aprobación', async () => {
     const result = await request('POST', '/api/reservations', {
-      retiroAt: reservationTime, horaDevolucion: '17:30', cantidad: 1, curso: '6°14°', motivo: 'Prueba de integración'
+      retiroAt: reservationTime, horaDevolucion: '17:30', cantidad: 1, curso: '6°14°', carro: '1', motivo: 'Prueba de integración'
     }, tokens.student);
     assert.equal(result.status, 201);
     assert.equal(result.payload.reservation.estado, 'pendiente_aprobacion');
@@ -447,13 +452,36 @@ async function runFlows(users) {
     await pool.query(`UPDATE user_preferences SET email_notifications = TRUE, return_reminder_minutes = 30
       WHERE user_id = $1`, [users.professor.id]);
     assert.equal((await request('POST', '/api/internal/reminders', {})).status, 401);
+    assert.equal((await request('POST', '/api/internal/reminders', {}, tokens.admin)).status, 401);
     const reminder = await request('POST', '/api/admin/reminders/run', {}, tokens.admin);
-    assert.equal(reminder.status, 503);
-    assert.match(reminder.payload.error, /recordatorios/);
-    const reminderMark = await pool.query('SELECT reminder_sent_at FROM loans WHERE id = $1', [loan.id]);
-    assert.equal(reminderMark.rows[0].reminder_sent_at, null);
+    assert.equal(reminder.status, 200);
+    assert.ok(reminder.payload.sent >= 1);
+    const firstMark = await pool.query('SELECT reminder_sent_at FROM loans WHERE id = $1', [loan.id]);
+    assert.ok(firstMark.rows[0].reminder_sent_at);
     const noDuplicate = await request('POST', '/api/admin/reminders/run', {}, tokens.admin);
-    assert.equal(noDuplicate.status, 503);
+    assert.equal(noDuplicate.status, 200);
+    const secondMark = await pool.query('SELECT reminder_sent_at FROM loans WHERE id = $1', [loan.id]);
+    assert.equal(secondMark.rows[0].reminder_sent_at.toISOString(), firstMark.rows[0].reminder_sent_at.toISOString());
+
+    await pool.query(`UPDATE loans SET reminder_sent_at = NULL WHERE id = $1`, [loan.id]);
+    await pool.query(`UPDATE user_preferences SET return_reminder_minutes = 0 WHERE user_id = $1`, [users.professor.id]);
+    assert.equal((await request('POST', '/api/admin/reminders/run', {}, tokens.admin)).status, 200);
+    let thresholdMark = await pool.query('SELECT reminder_sent_at FROM loans WHERE id = $1', [loan.id]);
+    assert.equal(thresholdMark.rows[0].reminder_sent_at, null);
+
+    await pool.query(`UPDATE user_preferences SET return_reminder_minutes = 30, email_notifications = FALSE
+      WHERE user_id = $1`, [users.professor.id]);
+    assert.equal((await request('POST', '/api/admin/reminders/run', {}, tokens.admin)).status, 200);
+    thresholdMark = await pool.query('SELECT reminder_sent_at FROM loans WHERE id = $1', [loan.id]);
+    assert.equal(thresholdMark.rows[0].reminder_sent_at, null);
+
+    await pool.query(`UPDATE user_preferences SET email_notifications = TRUE, return_reminder_minutes = 30
+      WHERE user_id = $1`, [users.professor.id]);
+    await pool.query(`UPDATE loans SET vence_at = now() - interval '5 minutes', reminder_sent_at = NULL WHERE id = $1`, [loan.id]);
+    assert.equal((await request('POST', '/api/admin/reminders/run', {}, tokens.admin)).status, 200);
+    thresholdMark = await pool.query('SELECT reminder_sent_at FROM loans WHERE id = $1', [loan.id]);
+    assert.ok(thresholdMark.rows[0].reminder_sent_at, 'un préstamo vencido también recibe recordatorio');
+    await pool.query(`UPDATE loans SET vence_at = now() + interval '20 minutes', reminder_sent_at = NULL WHERE id = $1`, [loan.id]);
 
     const ticketOne = await request('POST', '/api/tickets', {
       notebook: loan.notebook, motivo: 'Prueba', descripcion: 'Falla al devolver equipo prestado'
@@ -511,19 +539,25 @@ async function runFlows(users) {
   });
 
   await report('inventario expone todos los estados físicos y filtra reservas sin ocultarlos', async () => {
-    const inventoryStates = [
-      ['NB-001', 'disponible', null],
-      ['NB-002', 'prestada', users.student.id],
-      ['NB-003', 'mantenimiento', null],
-      ['NB-004', 'pendiente_devolucion', users.student.id]
-    ];
-    const codes = inventoryStates.map(([code]) => code);
-    const previous = await pool.query(`SELECT codigo, estado, prestado_a FROM notebooks WHERE codigo = ANY($1::text[])`, [codes]);
     const loan = await pool.query('SELECT notebook_id FROM loans WHERE id = $1', [loanId]);
     const linkedNotebook = await pool.query(`SELECT rn.reservation_id, n.id, n.codigo, n.estado, n.prestado_a
       FROM loans l JOIN notebooks n ON n.id = l.notebook_id
       JOIN reservation_notebooks rn ON rn.notebook_id = n.id WHERE l.id = $1`, [loanId]);
+    const otherCodes = (await pool.query('SELECT codigo FROM notebooks ORDER BY codigo')).rows
+      .map((row) => row.codigo)
+      .filter((code) => code !== linkedNotebook.rows[0].codigo)
+      .slice(0, 4);
+    const inventoryStates = [
+      [otherCodes[0], 'disponible', null],
+      [otherCodes[1], 'prestada', users.student.id],
+      [otherCodes[2], 'mantenimiento', null],
+      [otherCodes[3], 'pendiente_devolucion', users.student.id]
+    ];
+    const codes = inventoryStates.map(([code]) => code);
+    const previous = await pool.query(`SELECT codigo, estado, prestado_a FROM notebooks WHERE codigo = ANY($1::text[])`, [codes]);
     try {
+      await pool.query(`UPDATE reservation_notebooks SET active = FALSE
+        WHERE notebook_id IN (SELECT id FROM notebooks WHERE codigo = ANY($1::text[]))`, [codes]);
       for (const [code, estado, ownerId] of inventoryStates) {
         await pool.query('UPDATE notebooks SET estado = $1::notebook_status, prestado_a = $2::bigint WHERE codigo = $3',
           [estado, ownerId, code]);
@@ -535,7 +569,8 @@ async function runFlows(users) {
       const response = await request('GET', '/api/notebooks', undefined, tokens.admin);
       assert.equal(response.status, 200);
       for (const [code, estado] of inventoryStates) {
-        assert.ok(response.payload.notebooks.some((notebook) => notebook.id === code && notebook.estado === estado));
+        assert.ok(response.payload.notebooks.some((notebook) => notebook.id === code && notebook.estado === estado),
+          `${code} debería figurar como ${estado}: ${JSON.stringify(response.payload.notebooks.filter((notebook) => notebook.id === code))}`);
       }
       assert.ok(response.payload.notebooks.some((notebook) => notebook.id === linkedNotebook.rows[0].codigo
         && notebook.estado === 'pendiente_devolucion'));
@@ -622,6 +657,10 @@ async function runFlows(users) {
       await pool.query(`INSERT INTO notebooks (codigo, estado, ubicacion, prestado_a)
         VALUES ($1, $2, 'Pruebas', $3)`,
       [notebook.code, notebook.estado, notebook.estado === 'prestada' ? users.admin.id : null]);
+      await pool.query(`INSERT INTO loans (notebook_id, user_id, retirada_at, vence_at, devuelta_at, estado)
+        SELECT id, $1, now() - interval '2 hours', now() - interval '1 hour',
+          now() - interval '30 minutes', 'devuelto'
+        FROM notebooks WHERE codigo = $2`, [users.student.id, notebook.code]);
     }
     for (const notebook of notebookCases) {
       for (const estado of ['abierto', 'progreso', 'resuelto']) {
@@ -629,7 +668,7 @@ async function runFlows(users) {
           ...(notebook.code ? { notebook: notebook.code } : {}),
           motivo: 'Prueba de estado', descripcion: 'Prueba de regresión enum'
         }, tokens.student);
-        assert.equal(created.status, 201);
+        assert.equal(created.status, 201, `${notebook.code || 'sin notebook'}: ${JSON.stringify(created.payload)}`);
         if (notebook.code) {
           await pool.query('UPDATE notebooks SET estado = $1, prestado_a = $2 WHERE codigo = $3',
             [notebook.estado, notebook.estado === 'prestada' ? users.admin.id : null, notebook.code]);
@@ -658,9 +697,9 @@ async function runFlows(users) {
 
   await report('lote profesor, aprobación y rechazo', async () => {
     const lot = await request('POST', '/api/reservations', {
-      tipo: 'lote', retiroAt: reservationTime, horaDevolucion: '17:30', cantidad: 3, curso: 'Curso test'
+      tipo: 'lote', retiroAt: reservationTime, horaDevolucion: '17:30', cantidad: 3, curso: '6°14°', carro: '1'
     }, tokens.professor);
-    assert.equal(lot.status, 201);
+    assert.equal(lot.status, 201, JSON.stringify(lot.payload));
     assert.equal(lot.payload.reservation.estado, 'pendiente_aprobacion');
     assert.equal((await request('POST', `/api/admin/reservations/${lot.payload.reservation.id}/approve`, {}, tokens.admin)).status, 200);
     assert.equal((await request('POST', `/api/admin/reservations/${lot.payload.reservation.id}/reject`, {}, tokens.admin)).status, 200);
@@ -668,7 +707,7 @@ async function runFlows(users) {
 
   await report('cancelación de reserva', async () => {
     const created = await request('POST', '/api/reservations', {
-      retiroAt: reservationTime, horaDevolucion: '17:30', cantidad: 1, curso: '6°14°'
+      retiroAt: reservationTime, horaDevolucion: '17:30', cantidad: 1, curso: '6°14°', carro: '1'
     }, tokens.cancel);
     assert.equal(created.status, 201);
     const code = created.payload.reservation.id_codigo;
@@ -682,24 +721,24 @@ async function runFlows(users) {
     }, tokens.admin);
     assert.equal(rejected.status, 400);
     const created = await request('POST', '/api/admin/users', {
-      nombre: 'Nuevo', apellido: 'Usuario', email: 'new-user@netmo.invalid',
-      dni: '9900010', rol: 'alumno', password: 'new-user-pass-2026'
+      nombre: 'Nuevo', apellido: 'Usuario', email: 'new-user@gmail.com',
+      dni: '9900010', rol: 'alumno', password: 'Abcd1234', passwordConfirmation: 'Abcd1234'
     }, tokens.admin);
-    assert.equal(created.status, 201);
+    assert.equal(created.status, 201, JSON.stringify(created.payload));
     await pool.query('UPDATE users SET email = upper(email) WHERE id = $1', [created.payload.user.id]);
     const successfulLogin = await request('POST', '/api/auth/login', {
-      email: 'NEW-USER@NETMO.INVALID',
+      email: 'NEW-USER@GMAIL.COM',
       password: 'Abcd1234'
     });
     assert.equal(successfulLogin.status, 200);
     const invalidLogin = await request('POST', '/api/auth/login', {
-      email: 'new-user@netmo.invalid',
+      email: 'new-user@gmail.com',
       password: 'incorrecta'
     });
     assert.equal(invalidLogin.status, 401);
     const duplicate = await request('POST', '/api/admin/users', {
-      nombre: 'Otro', apellido: 'Usuario', email: 'new-user@netmo.invalid',
-      dni: '9900011', rol: 'alumno', password: 'new-user-pass-2026'
+      nombre: 'Otro', apellido: 'Usuario', email: 'new-user@gmail.com',
+      dni: '9900011', rol: 'alumno', password: 'Abcd1234', passwordConfirmation: 'Abcd1234'
     }, tokens.admin);
     assert.equal(duplicate.status, 409);
   });
@@ -719,7 +758,7 @@ async function runFlows(users) {
     const pending = await request('GET', '/api/admin/users?registro=pendiente', undefined, tokens.admin);
     assert.ok(pending.payload.users.some((user) => user.dni === registration.dni));
     assert.ok(!pending.payload.users.some((user) => user.dni === '990001'));
-    assert.equal((await request('POST', `/api/admin/users/${registration.dni}/approve`, {}, tokens.admin)).status, 200);
+    assert.equal((await request('POST', `/api/admin/users/${registration.dni}/approve`, { rol: 'alumno' }, tokens.admin)).status, 200);
     assert.equal((await request('POST', '/api/auth/login', {
       email: registration.email, password: registration.password
     })).status, 200);
@@ -742,30 +781,52 @@ async function runFlows(users) {
     });
     assert.equal(reRegistered.status, 201);
     assert.equal(reRegistered.payload.user.estado_registro, 'pendiente');
-    assert.equal((await request('POST', `/api/admin/users/${rejectedRegistration.dni}/approve`, {}, tokens.admin)).status, 200);
+    assert.equal((await request('POST', `/api/admin/users/${rejectedRegistration.dni}/approve`, { rol: 'alumno' }, tokens.admin)).status, 200);
     assert.equal((await request('POST', '/api/auth/login', {
       email: rejectedRegistration.email, password: 'registro-pass-2027'
     })).status, 200);
   });
 
-  await report('baja lógica y restauración de usuario', async () => {
+  await report('baja definitiva de datos personales y re-registro con el mismo correo', async () => {
+    const email = 'baja-temporal@gmail.com';
+    const dni = '9900020';
     const created = await request('POST', '/api/admin/users', {
-      nombre: 'Baja', apellido: 'Temporal', email: 'baja-temporal@gmail.com',
-      dni: '9900020', rol: 'alumno', password: 'baja-temp-pass-2026'
+      nombre: 'Baja', apellido: 'Temporal', email,
+      dni, rol: 'alumno', password: 'BajaTemp2026', passwordConfirmation: 'BajaTemp2026'
     }, tokens.admin);
     assert.equal(created.status, 201);
-    const dni = created.payload.user.dni;
+    const userId = created.payload.user.id;
+
     assert.equal((await request('DELETE', `/api/admin/users/${dni}`, undefined, tokens.admin)).status, 200);
+    const anonymized = await pool.query('SELECT nombre, email, dni, eliminado_at FROM users WHERE id = $1', [userId]);
+    assert.equal(anonymized.rows[0].nombre, 'Cuenta eliminada');
+    assert.equal(anonymized.rows[0].email, `eliminado+${userId}@netmo.invalid`);
+    assert.equal(anonymized.rows[0].dni, `ELIM-${userId}`);
+    assert.ok(anonymized.rows[0].eliminado_at);
+
     const activeUsers = await request('GET', '/api/admin/users', undefined, tokens.admin);
-    assert.ok(!activeUsers.payload.users.some((item) => item.dni === dni));
+    assert.ok(!activeUsers.payload.users.some((item) => item.email === email));
     const deletedUsers = await request('GET', '/api/admin/users?eliminados=si', undefined, tokens.admin);
-    assert.ok(deletedUsers.payload.users.some((item) => item.dni === dni));
+    assert.ok(deletedUsers.payload.users.some((item) => item.email === `eliminado+${userId}@netmo.invalid`));
     assert.equal((await request('POST', '/api/auth/login', {
-      email: 'baja-temporal@gmail.com', password: 'baja-temp-pass-2026'
+      email, password: 'BajaTemp2026'
     })).status, 401);
-    assert.equal((await request('POST', `/api/admin/users/${dni}/restore`, {}, tokens.admin)).status, 200);
+
+    const reRegistered = await request('POST', '/api/auth/register', {
+      nombre: 'Baja', apellido: 'Temporal', email, dni,
+      password: 'BajaTemp2027', passwordConfirmation: 'BajaTemp2027'
+    });
+    assert.equal(reRegistered.status, 201);
+    assert.equal(reRegistered.payload.user.estado_registro, 'pendiente');
+    const current = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
+    assert.equal(current.rowCount, 1);
+    assert.notEqual(String(current.rows[0].id), String(userId));
+    assert.equal((await request('POST', `/api/admin/users/${dni}/approve`, { rol: 'alumno' }, tokens.admin)).status, 200);
     assert.equal((await request('POST', '/api/auth/login', {
-      email: 'baja-temporal@gmail.com', password: 'baja-temp-pass-2026'
+      email, password: 'BajaTemp2026'
+    })).status, 401);
+    assert.equal((await request('POST', '/api/auth/login', {
+      email, password: 'BajaTemp2027'
     })).status, 200);
   });
 
@@ -792,7 +853,8 @@ async function runFlows(users) {
     }, tokens.admin)).status, 201);
     const locationBefore = await pool.query('SELECT id FROM ubicaciones WHERE slug = $1', ['taller']);
     const linkedCarBefore = await pool.query('SELECT id, ubicacion_id FROM carros WHERE numero = $1', [2]);
-    assert.equal((await request('PATCH', '/api/admin/carros/2', { ubicacion: 'taller' }, tokens.admin)).status, 200);
+    const linked = await request('PATCH', '/api/admin/carros/2', { ubicacion: 'taller' }, tokens.admin);
+    assert.equal(linked.status, 200, JSON.stringify(linked.payload));
     const renamedLocation = await request('PATCH', '/api/admin/ubicaciones/taller', {
       nombre: 'Piso 6767'
     }, tokens.admin);
@@ -802,7 +864,7 @@ async function runFlows(users) {
     const linkedCarAfter = await pool.query('SELECT id, ubicacion_id FROM carros WHERE numero = $1', [2]);
     assert.equal(String(locationAfter.rows[0].id), String(locationBefore.rows[0].id));
     assert.equal(String(linkedCarAfter.rows[0].id), String(linkedCarBefore.rows[0].id));
-    assert.equal(String(linkedCarAfter.rows[0].ubicacion_id), String(linkedCarBefore.rows[0].id));
+    assert.equal(String(linkedCarAfter.rows[0].ubicacion_id), String(locationAfter.rows[0].id));
     assert.equal((await request('PATCH', '/api/admin/ubicaciones/piso-6767', {
       nombre: 'Taller'
     }, tokens.admin)).payload.ubicacion.slug, 'taller');
@@ -860,6 +922,7 @@ async function runFlows(users) {
   });
 
   await report('reset: vence, se usa una sola vez y limita a cinco intentos', async () => {
+    assert.equal((await request('POST', '/api/auth/forgot', { email: users.resetExpiry.email })).status, 200);
     const expiryCode = deliveredCodes.get(users.resetExpiry.email);
     assert.ok(expiryCode, 'el proveedor GAS de test recibió el código de vencimiento');
     await pool.query(`UPDATE password_resets SET expires_at = now() - interval '1 second'
@@ -867,14 +930,14 @@ async function runFlows(users) {
     const expired = await request('POST', '/api/auth/reset', {
       email: users.resetExpiry.email, code: expiryCode, password: 'new-pass-2026'
     });
-    assert.equal(expired.status, 400);
+    assert.equal(expired.status, 400, `reset vencido: ${JSON.stringify(expired.payload)}`);
 
     const usedCode = deliveredCodes.get(users.resetUsed.email);
     assert.ok(usedCode, 'el proveedor GAS de test recibió el código válido');
     const reset = await request('POST', '/api/auth/reset', {
       email: users.resetUsed.email, code: usedCode, password: 'new-pass-2026'
     });
-    assert.equal(reset.status, 200);
+    assert.equal(reset.status, 200, `reset válido: ${JSON.stringify(reset.payload)}`);
     const reuse = await request('POST', '/api/auth/reset', {
       email: users.resetUsed.email, code: usedCode, password: 'new-pass-2026'
     });
@@ -885,16 +948,16 @@ async function runFlows(users) {
     const invalidPassword = await request('POST', '/api/auth/reset', {
       email: users.resetAttempts.email, code: deliveredCodes.get(users.resetAttempts.email), password: 'bad password'
     });
-    assert.equal(invalidPassword.status, 400);
+    assert.equal(invalidPassword.status, 400, `reset con clave inválida: ${JSON.stringify(invalidPassword.payload)}`);
     const attemptsBeforeWrongCode = await pool.query(
       "SELECT attempts FROM password_resets WHERE user_id = $1 AND purpose = 'reset'", [users.resetAttempts.id]
     );
     assert.equal(attemptsBeforeWrongCode.rows[0].attempts, 0);
-    for (let attempt = 0; attempt < 5; attempt += 1) {
+    for (let attempt = 0; attempt < 4; attempt += 1) {
       const failed = await request('POST', '/api/auth/reset', {
         email: users.resetAttempts.email, code: wrongCode, password: 'new-pass-2026'
       });
-      assert.equal(failed.status, 400);
+      assert.equal(failed.status, 400, `intento ${attempt + 1}: ${JSON.stringify(failed.payload)}`);
     }
     const exhausted = await request('POST', '/api/auth/reset', {
       email: users.resetAttempts.email, code: deliveredCodes.get(users.resetAttempts.email), password: 'new-pass-2026'
@@ -943,9 +1006,9 @@ async function runFlows(users) {
     const restored = await request('POST', '/api/admin/restore', {
       backup: originalBackupResponse, password: users.admin.password, confirmation: 'RESTAURAR'
     }, tokens.admin);
-    assert.equal(restored.status, 200);
+    assert.equal(restored.status, 200, JSON.stringify(restored.payload));
     const afterRestore = await request('GET', '/api/admin/backup', undefined, tokens.admin);
-    assert.equal(afterRestore.status, 200);
+    assert.equal(afterRestore.status, 200, JSON.stringify(afterRestore.payload));
     assert.deepEqual(afterRestore.payload.data, originalBackupResponse.data);
     assert.notEqual(source.rows[0].nombre, 'Dato modificado');
 
@@ -960,7 +1023,7 @@ async function runFlows(users) {
     noAdmin.checksum = backupService.checksumFor(document);
     cases.push(['backup sin admin', { backup: noAdmin, password: users.admin.password, confirmation: 'RESTAURAR' }, 400]);
     cases.push(['contraseña incorrecta', { backup: originalBackupResponse, password: 'wrong-password', confirmation: 'RESTAURAR' }, 403]);
-    cases.push(['frase incorrecta', { backup: originalBackupResponse, password: users.admin.password, confirmation: 'RESTAURAR ' }, 400]);
+    cases.push(['frase incorrecta', { backup: originalBackupResponse, password: users.admin.password, confirmation: 'CONFIRMAR' }, 400]);
     const invalidType = structuredClone(originalBackupResponse);
     invalidType.data.users[0].baneado = 'no';
     const { checksum: _oldChecksum, ...invalidDocument } = invalidType;

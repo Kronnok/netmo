@@ -546,7 +546,7 @@
           <label class="label" for="preferenciasEmail">Notificaciones por email</label>
           <input type="checkbox" id="preferenciasEmail" onchange="actualizarPreferencias()">
         </div>
-        <p class="hint" id="preferenciasRecordatorioInfo" style="margin:.4rem 0 1rem;">Las preferencias se guardan, pero los recordatorios automáticos aún no están disponibles.</p>
+        <p class="hint" id="preferenciasRecordatorioInfo" style="margin:.4rem 0 1rem;">El recordatorio por correo se envía cuando falten 30 minutos para el vencimiento.</p>
         <div class="info-row">
           <label class="label" for="preferenciasRecordatorio">Recordatorio de devolución</label>
           <select id="preferenciasRecordatorio" class="btn btn-sm" onchange="actualizarPreferencias()">
@@ -646,15 +646,6 @@
         <tbody id="administradoresTable"></tbody>
       </table>
     </div>
-    <div class="card" style="margin-top:1.5rem;">
-      <div class="card-header">
-        <div><h3>Cuentas eliminadas</h3><p>Las cuentas dadas de baja no pueden iniciar sesión, pero conservan su historial. Podés restaurarlas cuando quieras.</p></div>
-      </div>
-      <table>
-        <thead><tr><th>Nombre</th><th>Correo</th><th>DNI</th><th>Rol y fecha de baja</th><th>Acción</th></tr></thead>
-        <tbody id="cuentasEliminadasTable"></tbody>
-      </table>
-    </div>
   </section>
 
   <!-- ============ VIEW: ADMIN · INVENTARIO ============ -->
@@ -740,9 +731,9 @@
     <div class="card">
       <div class="card-header">
         <div><h3>Entregas y devoluciones</h3><p>Préstamos pendientes de devolución; podés registrar una recepción antes del vencimiento.</p></div>
-        <button class="btn btn-primary" type="button" disabled aria-describedby="remindersUnavailableMessage">Enviar recordatorios</button>
+        <button class="btn btn-primary" type="button" onclick="enviarRecordatoriosAdmin(this)" aria-describedby="remindersStatusMessage">Enviar recordatorios</button>
       </div>
-      <p id="remindersUnavailableMessage" class="hint" role="status">El envío automático de recordatorios todavía no está habilitado.</p>
+      <p id="remindersStatusMessage" class="hint" role="status">Envía un correo a los préstamos que vencen dentro del plazo elegido por cada usuario.</p>
       <div class="form-grid">
         <div class="field"><label for="circulationSearch">Buscar</label>
           <input id="circulationSearch" type="search" maxlength="50" placeholder="Persona, correo, DNI, equipo o préstamo" oninput="programarBusquedaPrestamos()" autocomplete="off"></div>

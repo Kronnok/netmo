@@ -2,7 +2,6 @@
    ESTADO EN MEMORIA
 ====================================================================== */
 let usuariosRegistrados = [];
-let usuariosEliminados = [];
 let usuariosConTardanzas = [];
 let solicitudesPendientes = [];
 let solicitudesRechazadas = [];
@@ -417,7 +416,6 @@ async function cargarEstadoAPI(){
     requests.push(
       ['lateReturns', apiRequest('/api/admin/late-returns')],
       ['users', apiRequest('/api/admin/users')],
-      ['deletedUsers', apiRequest('/api/admin/users?eliminados=si')],
       ['pendingUsers', apiRequest('/api/admin/users?registro=pendiente')],
       ['rejectedUsers', apiRequest('/api/admin/users?registro=rechazado')]
     );
@@ -465,7 +463,6 @@ async function cargarEstadoAPI(){
   }));
   if(esAdmin){
     usuariosRegistrados = loaded.users.users;
-    usuariosEliminados = loaded.deletedUsers?.users || [];
     solicitudesPendientes = loaded.pendingUsers?.users || [];
     solicitudesRechazadas = loaded.rejectedUsers?.users || [];
     usuariosConTardanzas = loaded.lateReturns.users;
@@ -1029,46 +1026,15 @@ async function cambiarEstadoCuenta(dni, baneado){
 async function darBajaUsuario(dni){
   const usuario = usuariosRegistrados.find(item=>item.dni===dni);
   if(!usuario || usuario.rol==='admin') return;
-  if(!window.confirm(`¿Dar de baja la cuenta de ${usuario.nombre}? No podrá iniciar sesión, pero su historial de préstamos, devoluciones y tickets se conservará.`)) return;
+  if(!window.confirm(`¿Eliminar la cuenta de ${usuario.nombre}? Se borrarán su nombre, correo, DNI y contraseña. El correo y el DNI quedarán libres para registrarse de nuevo, pero la baja no se puede deshacer. El historial de préstamos, devoluciones y tickets se conservará de forma anónima.`)) return;
   try{
-    await apiRequest(`/api/admin/users/${encodeURIComponent(dni)}`, {method:'DELETE'});
+    const result = await apiRequest(`/api/admin/users/${encodeURIComponent(dni)}`, {method:'DELETE'});
     await cargarEstadoAPI();
     renderAll();
-    showToast(`Cuenta de ${usuario.nombre} dada de baja.`, 'success');
+    showToast(result.message || `Cuenta de ${usuario.nombre} eliminada.`, 'success');
   }catch(error){
     showToast(error.message, 'warn');
   }
-}
-
-async function restaurarUsuario(dni){
-  const usuario = usuariosEliminados.find(item=>item.dni===dni);
-  if(!usuario) return;
-  if(!window.confirm(`¿Restaurar la cuenta de ${usuario.nombre}? Volverá a poder iniciar sesión.`)) return;
-  try{
-    await apiRequest(`/api/admin/users/${encodeURIComponent(dni)}/restore`, {method:'POST'});
-    await cargarEstadoAPI();
-    renderAll();
-    showToast(`Cuenta de ${usuario.nombre} restaurada.`, 'success');
-  }catch(error){
-    showToast(error.message, 'warn');
-  }
-}
-
-function renderCuentasEliminadas(){
-  const tbody = document.getElementById('cuentasEliminadasTable');
-  if(!tbody) return;
-  if(!usuariosEliminados.length){
-    tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state"><p>No hay cuentas dadas de baja.</p></div></td></tr>`;
-    return;
-  }
-  tbody.innerHTML = usuariosEliminados.map(usuario=>`
-    <tr>
-      <td>${escapeHtml(usuario.nombre)}</td>
-      <td>${escapeHtml(usuario.email)}</td>
-      <td class="mono">${escapeHtml(usuario.dni)}</td>
-      <td>${escapeHtml(rolLabel[usuario.rol] || usuario.rol)} · ${formatBusinessDateTime(usuario.eliminado_at)}</td>
-      <td><button class="btn btn-sm btn-success-outline" onclick="restaurarUsuario(${escapeHtml(JSON.stringify(usuario.dni))})">Restaurar</button></td>
-    </tr>`).join('');
 }
 
 async function cambiarCorreoUsuario(dni){
@@ -1590,7 +1556,6 @@ function renderAll(){
   renderPerfil();
   renderProfesoresTable();
   renderSolicitudesRegistro();
-  renderCuentasEliminadas();
   renderAdminInventario();
   renderDevoluciones();
   renderLotes();
@@ -3108,8 +3073,12 @@ function renderPerfil(){
   const preferencias = currentUser.preferencias || {email:true, recordatorio:'30'};
   document.getElementById('preferenciasEmail').checked = preferencias.email;
   document.getElementById('preferenciasRecordatorio').value = preferencias.recordatorio;
-  document.getElementById('preferenciasRecordatorioInfo').textContent =
-    'Las preferencias se guardan, pero los recordatorios automáticos aún no están disponibles.';
+  const minutes = Number(preferencias.recordatorio || 0);
+  document.getElementById('preferenciasRecordatorioInfo').textContent = !preferencias.email
+    ? 'Las notificaciones por correo están desactivadas: no vas a recibir recordatorios de devolución.'
+    : minutes === 0
+      ? 'Elegiste no recibir recordatorios automáticos de devolución.'
+      : `El recordatorio por correo se envía cuando falten ${minutes} minutos para el vencimiento.`;
 }
 
 async function actualizarPreferencias(){
@@ -3129,7 +3098,27 @@ async function actualizarPreferencias(){
     showToast(error.message, 'warn');
     return;
   }
+  renderPerfil();
   showToast('Preferencias actualizadas.', 'success');
+}
+
+async function enviarRecordatoriosAdmin(button){
+  if(button?.disabled) return;
+  const status = document.getElementById('remindersStatusMessage');
+  if(button) button.disabled = true;
+  try{
+    const result = await apiRequest('/api/admin/reminders/run', {method:'POST', body:'{}'});
+    const message = result.message || `Recordatorios enviados: ${result.sent || 0}`;
+    if(status) status.textContent = message;
+    showToast(message, result.failed ? 'warn' : 'success');
+    await cargarEstadoAPI();
+    renderAll();
+  }catch(error){
+    if(status) status.textContent = error.message;
+    showToast(error.message, 'warn');
+  }finally{
+    if(button) button.disabled = false;
+  }
 }
 
 /* ======================================================================

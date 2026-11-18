@@ -34,6 +34,10 @@ de notebooks para permitir renumerarlos. La migración 011 crea el catálogo
 editable de ubicaciones, agrega el estado de envío del recordatorio de
 vencimiento y habilita respuestas en tickets. La migración 013 relaciona cada
 reporte de falla con el préstamo seleccionado sin alterar reportes anteriores.
+Las migraciones 015 y 016 agregan la baja de cuentas y el estado de registro; la
+017 anonimiza las cuentas ya eliminadas. Una baja borra nombre, correo, DNI y
+contraseña, conserva el historial de forma anónima y no se puede restaurar; el
+correo y el DNI quedan disponibles para un nuevo registro.
 
 ## 2. API en Render
 
@@ -62,7 +66,7 @@ servicio completá:
   tener de 7 a 10 dígitos.
   Desde **Inventario** se administran carros, ubicaciones y altas consecutivas de
   notebooks. El correo de entrega de una notebook es transaccional: se envía
-  siempre al registrar la entrega, sin depender de las preferencias del usuario.
+  como máximo una vez por retiro y respeta las preferencias del usuario.
 
 Render publica la API y comprueba `/health`. Configurá `DATABASE_URL` y
 `CORS_ORIGIN` como variables privadas del servicio; `JWT_SECRET` se genera en
@@ -110,7 +114,11 @@ crea un trabajo HTTP POST con esa URL y ese encabezado, en intervalo de cinco
 minutos. Guardá el valor del encabezado como secreto en el proveedor, nunca en
 el repositorio. Render gratuito puede dormir; un `setInterval` dentro de la
 API no garantiza la ejecución. El endpoint respeta los minutos configurados
-por cada usuario y no reenvía un recordatorio ya marcado.
+por cada usuario (0/15/30/60, incluidos los préstamos ya vencidos), omite a
+quienes desactivaron las notificaciones y no reenvía un recordatorio ya marcado.
+Si el envío falla, el préstamo queda sin marcar y se reintenta en la próxima
+ejecución; un lock evita dos ejecuciones simultáneas. También se puede disparar
+manualmente desde **Usuarios** con el botón «Enviar recordatorios».
 
 ## 3. Frontend estático
 

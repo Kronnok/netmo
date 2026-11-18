@@ -9,6 +9,7 @@ const {
   dniIdentifier
 } = require('./validation');
 const { sendMail } = require('./mail-service');
+const { anonymizeUser } = require('./user-anonymization');
 const rateLimiter = require('./login-rate-limiter');
 
 const REGISTRATION_NAMESPACE = 'registration';
@@ -84,20 +85,23 @@ async function register(body, request) {
       if (existing.rowCount) {
         const current = existing.rows[0];
         if (current.eliminado_at) {
-          throw new AppError('El email o el DNI ya están registrados', 409);
+          // Compatibilidad con cuentas eliminadas antes de la anonimización:
+          // se borran sus datos personales y se registra una cuenta nueva.
+          await anonymizeUser(client, current.id);
+        } else {
+          if (current.estado_registro !== 'rechazado') {
+            throw new AppError('Ya existe una cuenta o solicitud con esos datos', 409);
+          }
+          const updated = await client.query(`UPDATE users SET
+            dni = $1, nombre = $2, email = $3, rol = $4,
+            password_hash = crypt($5, gen_salt('bf')),
+            estado_registro = 'pendiente', registro_revisado_at = NULL, registro_revisado_por = NULL,
+            baneado = FALSE, baneado_hasta = NULL
+            WHERE id = $6
+            RETURNING id, dni, nombre, email, rol, estado_registro`,
+          [dni, nombreCompleto, email, role, password, current.id]);
+          return { user: updated.rows[0], reapplied: true };
         }
-        if (current.estado_registro !== 'rechazado') {
-          throw new AppError('Ya existe una cuenta o solicitud con esos datos', 409);
-        }
-        const updated = await client.query(`UPDATE users SET
-          dni = $1, nombre = $2, email = $3, rol = $4,
-          password_hash = crypt($5, gen_salt('bf')),
-          estado_registro = 'pendiente', registro_revisado_at = NULL, registro_revisado_por = NULL,
-          baneado = FALSE, baneado_hasta = NULL
-          WHERE id = $6
-          RETURNING id, dni, nombre, email, rol, estado_registro`,
-        [dni, nombreCompleto, email, role, password, current.id]);
-        return { user: updated.rows[0], reapplied: true };
       }
 
       const inserted = await client.query(`INSERT INTO users

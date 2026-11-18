@@ -55,7 +55,6 @@ const routes = [
   ['POST', /^\/api\/admin\/restore$/, 'restoreAdminBackup'],
   ['PATCH', /^\/api\/admin\/users\/([^/]+)$/, 'updateUser', ['dni']],
   ['DELETE', /^\/api\/admin\/users\/([^/]+)$/, 'deleteUser', ['dni']],
-  ['POST', /^\/api\/admin\/users\/([^/]+)\/restore$/, 'restoreUser', ['dni']],
   ['POST', /^\/api\/admin\/users\/([^/]+)\/approve$/, 'approveRegistration', ['dni']],
   ['POST', /^\/api\/admin\/users\/([^/]+)\/reject$/, 'rejectRegistration', ['dni']],
   ['PATCH', /^\/api\/admin\/users\/([^/]+)\/rol$/, 'updateUserRole', ['dni']]

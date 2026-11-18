@@ -384,7 +384,6 @@ test('todos los servicios detrás de rutas admin rechazan alumnos y aceptan admi
     ['GET', '/api/admin/late-returns'],
     ['PATCH', '/api/admin/users/U-8'],
     ['DELETE', '/api/admin/users/U-8'],
-    ['POST', '/api/admin/users/U-8/restore'],
     ['POST', '/api/admin/users/U-8/approve'],
     ['POST', '/api/admin/users/U-8/reject'],
     ['PATCH', '/api/admin/users/U-8/rol']
@@ -655,44 +654,69 @@ test('el listado de usuarios separa las cuentas activas de las dadas de baja', a
   }
 });
 
-test('la baja de usuarios es lógica, restaurable y protege a los administradores', async () => {
-  const originalQuery = db.query;
+test('la baja anonimiza los datos personales, libera el correo y no se puede restaurar', async () => {
+  const originalTransaction = db.transaction;
   const calls = [];
-  db.query = async (sql, params) => {
-    calls.push({ sql, params });
-    if (sql.includes('SELECT id, rol, eliminado_at FROM users WHERE dni')) {
-      return { rowCount: 1, rows: [{ id: '9', rol: 'alumno', eliminado_at: null }] };
+  const makeClient = (target = { id: '9', rol: 'alumno', eliminado_at: null }, openLoan = false) => ({
+    query: async (sql, params) => {
+      calls.push({ sql, params });
+      if (sql.includes('SELECT id, rol, eliminado_at FROM users')) {
+        return { rowCount: 1, rows: [target] };
+      }
+      if (sql.includes('SELECT 1 FROM loans')) {
+        return { rowCount: openLoan ? 1 : 0, rows: openLoan ? [{ '?column?': 1 }] : [] };
+      }
+      if (sql.includes("nombre = 'Cuenta eliminada'")) {
+        return {
+          rowCount: 1,
+          rows: [{
+            dni: 'ELIM-9', nombre: 'Cuenta eliminada',
+            email: 'eliminado+9@netmo.invalid', rol: 'alumno', eliminado_at: new Date()
+          }]
+        };
+      }
+      return { rowCount: 1, rows: [] };
     }
-    if (sql.includes('UPDATE users SET eliminado_at = now()')) {
-      return { rowCount: 1, rows: [{ dni: '1234567', nombre: 'Ana', email: 'ana@example.test', rol: 'alumno', eliminado_at: new Date() }] };
-    }
-    if (sql.includes('UPDATE users SET eliminado_at = NULL')) {
-      return { rowCount: 1, rows: [{ dni: '1234567', nombre: 'Ana', email: 'ana@example.test', rol: 'alumno', eliminado_at: null }] };
-    }
-    return { rowCount: 0, rows: [] };
-  };
+  });
+  db.transaction = async (callback) => callback(makeClient());
   try {
     const deleted = await apiService.deleteUser({}, { id: '1', rol: 'admin' }, { dni: '1234567' });
-    assert.ok(deleted.user.eliminado_at);
-    assert.match(calls.at(-1).sql, /UPDATE users SET eliminado_at = now\(\)/);
-    const restored = await apiService.restoreUser({}, { id: '1', rol: 'admin' }, { dni: '1234567' });
-    assert.equal(restored.user.eliminado_at, null);
+    assert.equal(deleted.user.nombre, 'Cuenta eliminada');
+    assert.equal(deleted.user.email, 'eliminado+9@netmo.invalid');
+    assert.equal(deleted.user.dni, 'ELIM-9');
+    assert.match(deleted.message, /quedaron libres/);
+    const anonymize = calls.find(({ sql }) => sql.includes("nombre = 'Cuenta eliminada'"));
+    assert.match(anonymize.sql, /email = 'eliminado\+' \|\| id \|\| '@netmo\.invalid'/);
+    assert.match(anonymize.sql, /dni = 'ELIM-' \|\| id/);
+    assert.match(anonymize.sql, /password_hash = crypt\(encode\(gen_random_bytes/);
+    assert.ok(calls.some(({ sql }) => sql.includes('DELETE FROM password_resets')));
+    assert.ok(calls.some(({ sql }) => sql.includes('DELETE FROM user_preferences')));
+    assert.ok(calls.some(({ sql }) => sql.includes("'baja_usuario'")));
+    assert.equal(apiService.restoreUser, undefined);
+
     await assert.rejects(
       apiService.deleteUser({}, { id: '1', rol: 'alumno' }, { dni: '1234567' }),
       (error) => error.status === 403
     );
-    db.query = async (sql) => {
-      if (sql.includes('SELECT id, rol, eliminado_at FROM users WHERE dni')) {
-        return { rowCount: 1, rows: [{ id: '9', rol: 'admin', eliminado_at: null }] };
-      }
-      return { rowCount: 0, rows: [] };
-    };
     await assert.rejects(
-      apiService.deleteUser({}, { id: '1', rol: 'admin' }, { dni: '1234567' }),
-      (error) => error.status === 403 && /administradora/.test(error.message)
+      apiService.deleteUser({}, { id: '9', rol: 'admin' }, { dni: '1234567' }),
+      (error) => error.status === 403 && /propia cuenta/.test(error.message)
     );
   } finally {
-    db.query = originalQuery;
+    db.transaction = (callback) => callback(makeClient({ id: '9', rol: 'admin', eliminado_at: null }));
+    try {
+      await assert.rejects(
+        apiService.deleteUser({}, { id: '1', rol: 'admin' }, { dni: '1234567' }),
+        (error) => error.status === 403 && /administradora/.test(error.message)
+      );
+      db.transaction = (callback) => callback(makeClient({ id: '9', rol: 'alumno', eliminado_at: null }, true));
+      await assert.rejects(
+        apiService.deleteUser({}, { id: '1', rol: 'admin' }, { dni: '1234567' }),
+        (error) => error.status === 409 && /préstamos sin devolver/.test(error.message)
+      );
+    } finally {
+      db.transaction = originalTransaction;
+    }
   }
 });
 
@@ -1553,12 +1577,11 @@ test('la interfaz muestra selector reabrible, contador de texto, carro y curso e
   assert.match(html, /type="number" id="resCursoAnio"/);
   assert.match(html, /type="number" id="resCursoDivision"/);
   assert.match(html, /id="fallaDesc" maxlength="4000"/);
-  assert.match(html, /<button class="btn btn-primary" type="button" disabled aria-describedby="remindersUnavailableMessage">Enviar recordatorios<\/button>/);
+  assert.match(html, /<button class="btn btn-primary" type="button" onclick="enviarRecordatoriosAdmin\(this\)" aria-describedby="remindersStatusMessage">Enviar recordatorios<\/button>/);
   assert.match(html, /id="preferenciasRecordatorioInfo"/);
-  assert.match(app, /Las preferencias se guardan, pero los recordatorios automáticos aún no están disponibles/);
-  assert.doesNotMatch(app, /El recordatorio por correo se envía cuando falten/);
-  assert.doesNotMatch(html, /onclick="enviarRecordatoriosAdmin/);
-  assert.doesNotMatch(app, /api\/admin\/reminders\/run/);
+  assert.match(app, /El recordatorio por correo se envía cuando falten \$\{minutes\} minutos/);
+  assert.match(html, /onclick="enviarRecordatoriosAdmin/);
+  assert.match(app, /api\/admin\/reminders\/run/);
   assert.match(html, /id="registerNombre" type="text" maxlength="50"/);
   assert.match(app, /renderAdminStateSelect\(`Cambiar estado de \$\{escapeHtml\(nb\.id\)\}/);
   assert.match(app, /renderAdminStateSelect\(`Cambiar estado del ticket \$\{escapeHtml\(t\.id\)\}/);
@@ -1670,10 +1693,11 @@ test('la interfaz muestra selector reabrible, contador de texto, carro y curso e
   assert.match(app, /function cargarCursoRecordado\(/);
   assert.match(app, /netmo_curso_/);
   assert.match(api, /const curso = courseDivision\(body\.curso\)/);
-  assert.match(html, /id="cuentasEliminadasTable"/);
+  assert.doesNotMatch(html, /id="cuentasEliminadasTable"/);
   assert.match(app, /function darBajaUsuario\(/);
-  assert.match(app, /function restaurarUsuario\(/);
-  assert.match(app, /\/restore`/);
+  assert.doesNotMatch(app, /function restaurarUsuario\(/);
+  assert.doesNotMatch(app, /\/restore`/);
+  assert.match(app, /El correo y el DNI quedarán libres para registrarse de nuevo/);
   assert.match(html, /id="roleHomeBanner"/);
   assert.match(app, /document\.documentElement\.dataset\.role = rolActivo/);
   assert.match(styles, /html\[data-role="alumno"\]/);
@@ -2099,20 +2123,35 @@ test('la confirmación de devoluciones antiguas sigue usando la ruta compatible'
   }
 });
 
-test('los recordatorios automáticos aún no se envían ni se marcan como enviados', async () => {
+test('los recordatorios respetan el secreto, la preferencia, el umbral y no duplican envíos', async () => {
   const originalQuery = db.query;
-  const originalTransaction = db.transaction;
+  const originalPool = db.pool;
+  const originalInfo = console.info;
+  const originalError = console.error;
   const previousSecret = process.env.CRON_SECRET;
+  const previousProvider = process.env.MAIL_PROVIDER;
+  const previousEnv = process.env.NODE_ENV;
   process.env.CRON_SECRET = 'unit-test-cron-secret';
-  let queries = 0;
-  let transactions = 0;
-  db.query = async () => {
-    queries += 1;
-    return { rowCount: 0, rows: [] };
+  process.env.MAIL_PROVIDER = 'console';
+  process.env.NODE_ENV = 'development';
+  console.info = () => {};
+  console.error = () => {};
+  const calls = [];
+  let pending = [];
+  db.pool = {
+    connect: async () => ({
+      query: async (sql) => {
+        calls.push({ sql });
+        if (sql.includes('pg_try_advisory_lock')) return { rows: [{ locked: true }] };
+        return { rows: [] };
+      },
+      release: () => {}
+    })
   };
-  db.transaction = async () => {
-    transactions += 1;
-    return null;
+  db.query = async (sql, params) => {
+    calls.push({ sql, params });
+    if (sql.includes('FROM loans l')) return { rowCount: pending.length, rows: pending };
+    return { rowCount: 1, rows: [] };
   };
   try {
     await assert.rejects(
@@ -2123,26 +2162,63 @@ test('los recordatorios automáticos aún no se envían ni se marcan como enviad
       apiService.sendReturnReminders({ headers: {} }),
       (error) => error.status === 401
     );
-    const request = { headers: { 'x-cron-secret': process.env.CRON_SECRET } };
-    await assert.rejects(
-      apiService.sendReturnReminders(request),
-      (error) => error.status === 503 && /recordatorios/.test(error.message)
-    );
     await assert.rejects(
       apiService.runAdminReminders({}, { id: 2, rol: 'alumno' }),
       (error) => error.status === 403
     );
+    assert.equal(calls.length, 0, 'los rechazos no deben consultar la base');
+
+    const request = { headers: { 'x-cron-secret': process.env.CRON_SECRET } };
+    const empty = await apiService.sendReturnReminders(request);
+    assert.equal(empty.sent, 0);
+    assert.match(empty.message, /No hay recordatorios pendientes/);
+    const select = calls.find(({ sql }) => sql.includes('FROM loans l'));
+    assert.match(select.sql, /p\.email_notifications = TRUE/);
+    assert.match(select.sql, /p\.return_reminder_minutes > 0/);
+    assert.match(select.sql, /l\.reminder_sent_at IS NULL/);
+    assert.match(select.sql, /l\.vence_at <= now\(\) \+ make_interval/);
+    assert.doesNotMatch(select.sql, /vence_at >=/);
+
+    pending = [{
+      id: '77', vence_at: new Date('2026-03-10T20:30:00Z'),
+      curso: '6°14°', notebook: 'NB-001', email: 'ana@alu.bue.edu.ar'
+    }];
+    const sent = await apiService.sendReturnReminders(request);
+    assert.equal(sent.sent, 1);
+    assert.equal(sent.failed, 0);
+    const mark = calls.find(({ sql }) => sql.includes('SET reminder_sent_at = now()'));
+    assert.ok(mark, 'debe marcar el recordatorio después del envío');
+    assert.deepEqual(mark.params, ['77']);
+
+    pending = [];
+    const duplicate = await apiService.runAdminReminders({}, { id: 1, rol: 'admin' });
+    assert.equal(duplicate.sent, 0);
+    assert.match(duplicate.message, /No hay recordatorios pendientes/);
+
+    pending = [{
+      id: '78', vence_at: new Date('2026-03-10T20:30:00Z'),
+      curso: null, notebook: 'NB-002', email: 'ana@alu.bue.edu.ar'
+    }];
+    calls.length = 0;
+    process.env.MAIL_PROVIDER = 'brevo';
+    delete process.env.MAIL_API_KEY;
     await assert.rejects(
       apiService.runAdminReminders({}, { id: 1, rol: 'admin' }),
-      (error) => error.status === 503 && /recordatorios/.test(error.message)
+      (error) => error.status === 503 && /No se pudieron enviar/.test(error.message)
     );
-    assert.equal(queries, 0);
-    assert.equal(transactions, 0);
+    assert.equal(calls.some(({ sql }) => sql.includes('SET reminder_sent_at = now()')), false,
+      'un envío fallido no debe marcarse como enviado');
   } finally {
     db.query = originalQuery;
-    db.transaction = originalTransaction;
+    db.pool = originalPool;
+    console.info = originalInfo;
+    console.error = originalError;
     if (previousSecret === undefined) delete process.env.CRON_SECRET;
     else process.env.CRON_SECRET = previousSecret;
+    if (previousProvider === undefined) delete process.env.MAIL_PROVIDER;
+    else process.env.MAIL_PROVIDER = previousProvider;
+    if (previousEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previousEnv;
   }
 });
 
@@ -2400,14 +2476,14 @@ test('un usuario rechazado puede volver a registrarse y la solicitud vuelve a pe
   }
 });
 
-test('el registro no permite reutilizar cuentas aprobadas, pendientes o eliminadas', async () => {
+test('el registro no reutiliza cuentas activas y anonimiza las eliminadas para crear una nueva', async () => {
   const originalTransaction = db.transaction;
   loginRateLimiter.reset();
   const request = { headers: {}, socket: { remoteAddress: '198.51.100.26' } };
+  const calls = [];
   for (const current of [
     { id: '5', estado_registro: 'aprobado', eliminado_at: null },
-    { id: '6', estado_registro: 'pendiente', eliminado_at: null },
-    { id: '7', estado_registro: 'rechazado', eliminado_at: '2026-01-01T00:00:00Z' }
+    { id: '6', estado_registro: 'pendiente', eliminado_at: null }
   ]) {
     db.transaction = async (callback) => callback({
       query: async () => ({ rowCount: 1, rows: [current] })
@@ -2421,8 +2497,48 @@ test('el registro no permite reutilizar cuentas aprobadas, pendientes o eliminad
     );
     loginRateLimiter.reset();
   }
-  db.transaction = originalTransaction;
-  loginRateLimiter.reset();
+  try {
+    db.transaction = async (callback) => callback({
+      query: async (sql, params) => {
+        calls.push({ sql, params });
+        if (sql.includes('SELECT id, estado_registro, eliminado_at')) {
+          return { rowCount: 1, rows: [{ id: '7', estado_registro: 'rechazado', eliminado_at: '2026-01-01T00:00:00Z' }] };
+        }
+        if (sql.includes("nombre = 'Cuenta eliminada'")) {
+          return {
+            rowCount: 1,
+            rows: [{
+              dni: 'ELIM-7', nombre: 'Cuenta eliminada',
+              email: 'eliminado+7@netmo.invalid', rol: 'alumno', eliminado_at: new Date()
+            }]
+          };
+        }
+        if (sql.includes('INSERT INTO users')) {
+          return {
+            rowCount: 1,
+            rows: [{
+              id: '99', dni: params[0], nombre: params[1], email: params[2], rol: params[3],
+              estado_registro: 'pendiente'
+            }]
+          };
+        }
+        return { rowCount: 1, rows: [] };
+      }
+    });
+    loginRateLimiter.reset();
+    const result = await registrationService.register({
+      nombre: 'Ana', apellido: 'Pérez', email: 'ana@alu.bue.edu.ar', dni: '1234567',
+      password: 'long-enough', passwordConfirmation: 'long-enough'
+    }, request);
+    assert.equal(result.user.id, '99');
+    assert.equal(result.user.email, 'ana@alu.bue.edu.ar');
+    assert.ok(calls.some(({ sql }) => sql.includes("nombre = 'Cuenta eliminada'")));
+    const insert = calls.find(({ sql }) => sql.includes('INSERT INTO users'));
+    assert.deepEqual(insert.params.slice(0, 4), ['1234567', 'Ana Pérez', 'ana@alu.bue.edu.ar', 'alumno']);
+  } finally {
+    db.transaction = originalTransaction;
+    loginRateLimiter.reset();
+  }
 });
 
 test('la administración aprueba y rechaza registros con auditoría y aviso', async () => {
@@ -2572,7 +2688,8 @@ test('el aviso de entrega se envía siempre y una sola vez por retiro', async ()
     const result = await apiService.checkoutReservation({}, { id: '1', rol: 'admin' }, { id: 8 });
     assert.equal(result.loansCreated, 2);
     assert.equal(queries.length, 1, 'la entrega debe resolverse con una sola consulta');
-    assert.doesNotMatch(queries[0].sql, /user_preferences/);
+    assert.match(queries[0].sql, /user_preferences/);
+    assert.match(queries[0].sql, /email_notifications = TRUE/);
     assert.equal(messages.length, 1, 'debe enviarse un único correo por retiro');
     const payload = JSON.stringify(messages[0]);
     assert.match(payload, /Notebook entregada/);
