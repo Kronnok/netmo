@@ -33,7 +33,6 @@ let reservationSubmitting = false;
 let lateReturnsInterval = null;
 let loanReminderInterval = null;
 let circulationInterval = null;
-let circulationSearchTimer = null;
 let reservationsSearchTimer = null;
 let returnHistorySearchTimer = null;
 let circulationLoans = [];
@@ -69,11 +68,6 @@ const persistedFiltersByView = {
   'admin-profesores': ['profesoresSearchInput', 'usersEmailType'],
   'admin-inventario': ['adminSearchInput', 'adminFilterEstado'],
   'admin-devoluciones': ['returnsHistorySearch'],
-  'admin-circulation': [
-    'circulationSearch', 'circulationState', 'circulationOverdue', 'circulationDateFrom',
-    'circulationDateTo', 'circulationReason', 'circulationUser', 'circulationEquipment',
-    'circulationCarro', 'circulationLocation'
-  ],
   'admin-lotes': ['adminReservationsSearch'],
   'admin-tickets': ['adminTicketsSearch', 'adminTicketsState'],
   'admin-tardanzas': ['lateReturnsSearch']
@@ -345,13 +339,11 @@ function expireSession(message){
   if(lateReturnsInterval) clearInterval(lateReturnsInterval);
   if(loanReminderInterval) clearInterval(loanReminderInterval);
   if(circulationInterval) clearInterval(circulationInterval);
-  if(circulationSearchTimer) clearTimeout(circulationSearchTimer);
   if(reservationsSearchTimer) clearTimeout(reservationsSearchTimer);
   if(returnHistorySearchTimer) clearTimeout(returnHistorySearchTimer);
   lateReturnsInterval = null;
   loanReminderInterval = null;
   circulationInterval = null;
-  circulationSearchTimer = null;
   reservationsSearchTimer = null;
   returnHistorySearchTimer = null;
   authToken = null;
@@ -1564,7 +1556,6 @@ function renderAll(){
   renderInventarioForms();
   renderFallaNotebookOptions();
   renderCirculationLoans();
-  renderCirculationFilters();
   renderLoanReminders();
 }
 
@@ -2497,66 +2488,14 @@ function buscarReservasAdmin(value){
   },300);
 }
 
-function programarBusquedaPrestamos(){
-  saveFiltersForView('admin-circulation');
-  debounceSearch('circulation', ()=>void buscarPrestamosAdmin(), 250);
-}
-
 async function buscarPrestamosAdmin(){
   if(!authToken || rolActivo!=='admin') return;
   try{
-    const filters = new URLSearchParams();
-    for(const [key, id] of [
-      ['estado', 'circulationState'],
-      ['vencidas', 'circulationOverdue'],
-      ['desde', 'circulationDateFrom'],
-      ['hasta', 'circulationDateTo'],
-      ['q', 'circulationSearch'],
-      ['motivo', 'circulationReason'],
-      ['usuario', 'circulationUser'],
-      ['equipo', 'circulationEquipment']
-    ]){
-      const value = document.getElementById(id)?.value.trim();
-      if(value) filters.set(key, value);
-    }
-    const carro = document.getElementById('circulationCarro')?.value;
-    const ubicacion = document.getElementById('circulationLocation')?.value;
-    if(carro) filters.set('carro', carro);
-    if(ubicacion) filters.set('ubicacion', ubicacion);
-    const data = await apiRequest(`/api/admin/loans?${filters}`);
+    const data = await apiRequest('/api/admin/loans');
     circulationLoans = data.loans;
-    const count = document.getElementById('circulationResultsCount');
-    if(count) count.textContent = `${circulationLoans.length} resultados`;
     renderCirculationLoans();
   }catch(error){
     renderCirculationLoans(error.message);
-  }
-}
-
-function limpiarFiltrosPrestamos(){
-  for(const id of ['circulationSearch','circulationReason','circulationUser','circulationEquipment',
-    'circulationDateFrom','circulationDateTo','circulationCarro','circulationLocation','circulationOverdue']){
-    const element = document.getElementById(id);
-    if(element) element.value = '';
-  }
-  document.getElementById('circulationState').value = 'pendientes';
-  programarBusquedaPrestamos();
-}
-
-function renderCirculationFilters(){
-  const carroSelect = document.getElementById('circulationCarro');
-  if(carroSelect){
-    const selected = carroSelect.value;
-    carroSelect.innerHTML = `<option value="">Todos los carros</option>${carros.map(carro=>
-      `<option value="${escapeHtml(carro.numero)}">Carro ${escapeHtml(carro.numero)}</option>`).join('')}`;
-    if(carros.some(carro=>String(carro.numero)===selected)) carroSelect.value = selected;
-  }
-  const locationSelect = document.getElementById('circulationLocation');
-  if(locationSelect){
-    const selected = locationSelect.value;
-    locationSelect.innerHTML = `<option value="">Todas las ubicaciones</option>${ubicaciones.map(location=>
-      `<option value="${escapeHtml(location.slug)}">${escapeHtml(location.nombre)}</option>`).join('')}`;
-    if(ubicaciones.some(location=>location.slug===selected)) locationSelect.value = selected;
   }
 }
 
@@ -2593,7 +2532,7 @@ function renderCirculationLoans(message=''){
         <button class="btn btn-sm btn-primary" onclick="registrarDevolucionAdmin(${escapeHtml(JSON.stringify(loan.id))}, ${escapeHtml(JSON.stringify(loan.notebook))})">${returnPending?'Confirmar recepción':'Registrar devolución'}</button>`}
       </div>`;
     }).join('');
-    return `<section class="card" data-loan-owner="${escapeHtml(first.user_id)}" style="margin-top:1rem"><h4>${escapeHtml(first.usuario)} · ${escapeHtml(first.email)} · DNI ${escapeHtml(first.dni)}</h4><button type="button" class="btn btn-sm" onclick="seleccionarDevolucionesUsuario(${escapeHtml(JSON.stringify(first.user_id))})">Seleccionar las de este usuario</button>${cards}</section>`;
+    return `<section class="loan-user-group" data-loan-owner="${escapeHtml(first.user_id)}"><h4>${escapeHtml(first.usuario)} · ${escapeHtml(first.email)} · DNI ${escapeHtml(first.dni)}</h4><button type="button" class="btn btn-sm" onclick="seleccionarDevolucionesUsuario(${escapeHtml(JSON.stringify(first.user_id))})">Seleccionar las de este usuario</button>${cards}</section>`;
   }).join('');
   actualizarSeleccionDevoluciones();
 }
@@ -2611,54 +2550,15 @@ function actualizarSeleccionDevoluciones(){
   const selected = document.querySelectorAll('#circulationResults input[data-loan-id]:checked');
   const button = document.getElementById('returnSelectedFloating');
   if(!button) return;
+  button.hidden = selected.length === 0;
   button.disabled = selected.length === 0;
   button.textContent = `Devolver seleccionadas (${selected.length})`;
-}
-
-function seleccionarTodasDevoluciones(){
-  document.querySelectorAll('#circulationResults input[data-loan-id]').forEach(input=>{ input.checked = true; });
-  actualizarSeleccionDevoluciones();
 }
 
 function seleccionarDevolucionesUsuario(userId){
   const section = [...document.querySelectorAll('#circulationResults section[data-loan-owner]')]
     .find(item=>item.dataset.loanOwner===String(userId));
   section?.querySelectorAll('input[data-loan-id]').forEach(input=>{ input.checked = true; });
-  actualizarSeleccionDevoluciones();
-}
-
-function seleccionarDevolucionesVencidas(){
-  const inputs = [...document.querySelectorAll('#circulationResults input[data-loan-id]')];
-  inputs.forEach(input=>{ input.checked = input.dataset.overdue==='true'; });
-  actualizarSeleccionDevoluciones();
-}
-
-function seleccionarDevolucionesPorNumeros(){
-  const input = document.getElementById('returnByNumbers');
-  const message = document.getElementById('returnByNumbersMessage');
-  const text = input.value.trim();
-  if(!text || !/^\d+(?:\s*-\s*\d+)?(?:\s*,\s*\d+(?:\s*-\s*\d+)?)*$/.test(text)){
-    message.textContent = 'Usá números separados por coma y rangos como 10-14.';
-    return;
-  }
-  const numbers = new Set();
-  for(const part of text.split(',')){
-    const [start, end = start] = part.split('-').map(value=>Number(value.trim()));
-    if(!Number.isSafeInteger(start) || !Number.isSafeInteger(end)
-      || start < 1 || end < start || end - start > 100){
-      message.textContent = 'El rango de números no es válido.';
-      return;
-    }
-    for(let number=start; number<=end; number+=1) numbers.add(number);
-  }
-  const loans = circulationLoans.filter(loan=>loan.estado!=='devuelto'
-    && numbers.has(Number(String(loan.notebook).match(/(\d+)$/)?.[1])));
-  document.querySelectorAll('#circulationResults input[data-loan-id]').forEach(checkbox=>{
-    checkbox.checked = loans.some(loan=>String(loan.id)===checkbox.dataset.loanId);
-  });
-  const found = new Set(loans.map(loan=>Number(String(loan.notebook).match(/(\d+)$/)?.[1])));
-  const missing = [...numbers].filter(number=>!found.has(number)).sort((a,b)=>a-b);
-  message.textContent = missing.length ? `No están prestadas: ${missing.join(', ')}.` : `${loans.length} notebook(s) seleccionadas.`;
   actualizarSeleccionDevoluciones();
 }
 
@@ -3100,25 +3000,6 @@ async function actualizarPreferencias(){
   }
   renderPerfil();
   showToast('Preferencias actualizadas.', 'success');
-}
-
-async function enviarRecordatoriosAdmin(button){
-  if(button?.disabled) return;
-  const status = document.getElementById('remindersStatusMessage');
-  if(button) button.disabled = true;
-  try{
-    const result = await apiRequest('/api/admin/reminders/run', {method:'POST', body:'{}'});
-    const message = result.message || `Recordatorios enviados: ${result.sent || 0}`;
-    if(status) status.textContent = message;
-    showToast(message, result.failed ? 'warn' : 'success');
-    await cargarEstadoAPI();
-    renderAll();
-  }catch(error){
-    if(status) status.textContent = error.message;
-    showToast(error.message, 'warn');
-  }finally{
-    if(button) button.disabled = false;
-  }
 }
 
 /* ======================================================================

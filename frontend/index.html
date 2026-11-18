@@ -728,53 +728,8 @@
 
   <!-- ============ VIEW: ADMIN · ENTREGAS Y DEVOLUCIONES ============ -->
   <section class="view" id="view-admin-circulation">
-    <div class="card">
-      <div class="card-header">
-        <div><h3>Entregas y devoluciones</h3><p>Préstamos pendientes de devolución; podés registrar una recepción antes del vencimiento.</p></div>
-        <button class="btn btn-primary" type="button" onclick="enviarRecordatoriosAdmin(this)" aria-describedby="remindersStatusMessage">Enviar recordatorios</button>
-      </div>
-      <p id="remindersStatusMessage" class="hint" role="status">Envía un correo a los préstamos que vencen dentro del plazo elegido por cada usuario.</p>
-      <div class="form-grid">
-        <div class="field"><label for="circulationSearch">Buscar</label>
-          <input id="circulationSearch" type="search" maxlength="50" placeholder="Persona, correo, DNI, equipo o préstamo" oninput="programarBusquedaPrestamos()" autocomplete="off"></div>
-        <div class="field"><label for="circulationState">Estado</label>
-          <select id="circulationState" class="btn btn-sm" onchange="programarBusquedaPrestamos()">
-            <option value="pendientes">Pendientes</option><option value="todos">Todos</option>
-            <option value="activo">Activo</option><option value="devolucion_pendiente">Devolución informada</option>
-            <option value="devuelto">Devuelto</option>
-          </select></div>
-        <div class="field"><label for="circulationOverdue">Vencimiento</label>
-          <select id="circulationOverdue" class="btn btn-sm" onchange="programarBusquedaPrestamos()">
-            <option value="">Todas las fechas</option><option value="si">Vencidas</option><option value="no">Sin vencer</option>
-          </select></div>
-        <div class="field"><label for="circulationDateFrom">Desde</label>
-          <input id="circulationDateFrom" type="date" onchange="programarBusquedaPrestamos()"></div>
-        <div class="field"><label for="circulationDateTo">Hasta</label>
-          <input id="circulationDateTo" type="date" onchange="programarBusquedaPrestamos()"></div>
-        <div class="field"><label for="circulationReason">Motivo</label>
-          <input id="circulationReason" type="search" maxlength="50" oninput="programarBusquedaPrestamos()" autocomplete="off"></div>
-        <div class="field"><label for="circulationUser">Usuario o profesor</label>
-          <input id="circulationUser" type="search" maxlength="50" oninput="programarBusquedaPrestamos()" autocomplete="off"></div>
-        <div class="field"><label for="circulationEquipment">Computadora o equipo</label>
-          <input id="circulationEquipment" type="search" maxlength="50" oninput="programarBusquedaPrestamos()" autocomplete="off"></div>
-        <div class="field"><label for="circulationCarro">Carro</label>
-          <select id="circulationCarro" onchange="programarBusquedaPrestamos()"><option value="">Todos los carros</option></select></div>
-        <div class="field"><label for="circulationLocation">Ubicación</label>
-          <select id="circulationLocation" onchange="programarBusquedaPrestamos()"><option value="">Todas las ubicaciones</option></select></div>
-      </div>
-      <div class="search-bar-wrap"><button type="button" class="btn btn-sm" onclick="limpiarFiltrosPrestamos()">Limpiar filtros</button><span id="circulationResultsCount" class="hint" aria-live="polite"></span></div>
-      <div class="loan-bulk-toolbar" aria-label="Selección de devoluciones">
-        <button type="button" class="btn btn-sm" onclick="seleccionarTodasDevoluciones()">Seleccionar todas</button>
-        <button type="button" class="btn btn-sm" onclick="seleccionarDevolucionesVencidas()">Seleccionar las vencidas</button>
-        <div class="field loan-number-select"><label for="returnByNumbers">Devolver por números</label>
-          <input id="returnByNumbers" type="text" maxlength="100" placeholder="3, 5, 10-14">
-          <button type="button" class="btn btn-sm" onclick="seleccionarDevolucionesPorNumeros()">Seleccionar</button>
-          <span id="returnByNumbersMessage" class="hint" role="status"></span>
-        </div>
-      </div>
-      <div id="circulationResults" aria-live="polite"></div>
-    </div>
-    <button type="button" id="returnSelectedFloating" class="btn btn-primary loan-return-floating" onclick="registrarDevolucionesSeleccionadas()" disabled>Devolver seleccionadas (0)</button>
+    <div id="circulationResults" aria-live="polite"></div>
+    <button type="button" id="returnSelectedFloating" class="btn btn-primary loan-return-floating" onclick="registrarDevolucionesSeleccionadas()" disabled hidden>Devolver seleccionadas (0)</button>
   </section>
 
   <!-- ============ VIEW: ADMIN · LOTES DE PROFESORES ============ -->

@@ -438,10 +438,11 @@
   .badge-abierto{background:var(--orange-bg);color:var(--orange-text);}
   .badge-progreso{background:var(--blue-bg);color:var(--blue-text);}
   .badge-unknown{background:var(--surface-2);color:var(--text-muted);}
-  .loan-bulk-toolbar{display:flex;align-items:flex-start;gap:.6rem;flex-wrap:wrap;margin:1rem 0;}
-  .loan-number-select{display:grid;grid-template-columns:minmax(180px,1fr) auto;gap:.45rem;min-width:min(100%,360px);}
-  .loan-number-select label,.loan-number-select .hint{grid-column:1/-1;}
+  .loan-user-group{margin-top:1rem;}
+  .loan-user-group:first-child{margin-top:0;}
+  .loan-user-group>h4{margin:0 0 .5rem;}
   .loan-return-floating{position:fixed;right:1.5rem;bottom:1.5rem;z-index:20;box-shadow:0 6px 24px rgba(0,0,0,.2);}
+  .loan-return-floating[hidden]{display:none;}
   .loan-return-floating:disabled{opacity:.55;cursor:not-allowed;}
   .form-step-heading{margin:.5rem 0;color:var(--text);font-size:1rem;}
   .reservation-summary{margin:.65rem 0;padding:.8rem;border-radius:var(--radius-sm);background:var(--surface-2);color:var(--text);font-size:.9rem;}
