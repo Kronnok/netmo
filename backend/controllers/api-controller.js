@@ -43,6 +43,7 @@ function send(response, status, payload, corsHeaders) {
   response.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
     'Content-Length': Buffer.byteLength(serialized),
+    'Cache-Control': 'no-store',
     ...corsHeaders
   });
   response.end(serialized);

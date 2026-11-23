@@ -24,10 +24,14 @@ function createValidBackup() {
     baneado: false,
     baneado_hasta: null,
     eliminado_at: null,
+    estado_registro: 'aprobado',
+    registro_revisado_at: null,
+    registro_revisado_por: null,
     created_at: '2026-10-25T10:00:00.000Z'
   }];
   const columns = Object.fromEntries(tableNames.map((table) => [table, new Set([
     'id', 'dni', 'nombre', 'email', 'rol', 'password_hash', 'baneado', 'baneado_hasta', 'eliminado_at',
+    'estado_registro', 'registro_revisado_at', 'registro_revisado_por',
     'created_at', 'user_id', 'email_notifications', 'return_reminder_minutes', 'updated_at', 'slug', 'nombre',
     'numero', 'ubicacion_id', 'codigo', 'estado', 'ubicacion', 'carro_id', 'prestado_a', 'owner_id', 'tipo',
     'carro', 'curso', 'cantidad', 'retiro_at', 'motivo', 'reservation_id', 'notebook_id',
@@ -102,6 +106,18 @@ test('el backup admite hora prevista nula en devoluciones históricas', () => {
     backup.available,
     backup.columns
   ));
+});
+
+test('el backup admite metadatos de registro y autor de respuesta nulos', () => {
+  const backup = createValidBackup();
+  backup.data.tickets.push({
+    id: '5', codigo: 'TCK-5', owner_id: '1', motivo: 'Falla', descripcion: 'No inicia', estado: 'abierto'
+  });
+  backup.data.ticket_replies.push({
+    id: '2', ticket_id: '5', author_id: null, mensaje: 'Respuesta automática.',
+    created_at: '2026-10-25T10:00:00.000Z'
+  });
+  assert.doesNotThrow(() => backupService.validateRows(backup, backup.available, backup.columns));
 });
 
 test('rechaza referencias inconsistentes en datos de backup', () => {

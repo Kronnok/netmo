@@ -33,6 +33,7 @@ let reservationSubmitting = false;
 let lateReturnsInterval = null;
 let loanReminderInterval = null;
 let circulationInterval = null;
+let registrationsInterval = null;
 let reservationsSearchTimer = null;
 let returnHistorySearchTimer = null;
 let circulationLoans = [];
@@ -245,7 +246,7 @@ const pageMeta = {
   'admin-circulation':  ['Entregas y devoluciones', 'Registrá las entregas y devoluciones de notebooks.'],
   'admin-lotes':        ['Préstamos', 'Aprobá y registrá el retiro de las solicitudes de préstamo (individuales o por lote).'],
   'admin-tickets':      ['Fallas reportadas', 'Tickets enviados por alumnos y profesores. Actualizá el estado del equipo según corresponda.'],
-  'admin-tardanzas':    ['Devoluciones y bloqueos', 'Historial de demoras, evaluación de sanciones y cuentas bloqueadas.'],
+  'admin-tardanzas':    ['Bloqueos', 'Historial de demoras, evaluación de sanciones y cuentas bloqueadas.'],
   'admin-backup':       ['Copias de seguridad', 'Descargá una copia o restaurá los datos del sistema.'],
 };
 
@@ -909,6 +910,10 @@ function rolSolicitudHtml(solicitud, {selectable=false}={}){
 function renderSolicitudesRegistro(){
   const pendientes = document.getElementById('solicitudesPendientesTable');
   if(pendientes){
+    const selectedRoles = {};
+    pendientes.querySelectorAll('select[id^="rolSolicitud-"]').forEach(select=>{
+      if(select.value) selectedRoles[select.id] = select.value;
+    });
     pendientes.innerHTML = solicitudesPendientes.length
       ? solicitudesPendientes.map(solicitud=>{
         const type = solicitud.tipo_correo || clasificarCorreo(solicitud.email);
@@ -927,6 +932,13 @@ function renderSolicitudesRegistro(){
         </tr>`;
       }).join('')
       : `<tr><td colspan="6"><div class="empty-state"><p>No hay solicitudes pendientes.</p></div></td></tr>`;
+    Object.entries(selectedRoles).forEach(([id, value])=>{
+      const select = document.getElementById(id);
+      if(select && Array.from(select.options).some(option=>option.value===value)){
+        select.value = value;
+        actualizarAprobacionRegistro(select);
+      }
+    });
   }
   const rechazadas = document.getElementById('solicitudesRechazadasTable');
   if(rechazadas){
@@ -1404,6 +1416,12 @@ function switchView(name){
   lateReturnsInterval = null;
   if(circulationInterval) clearInterval(circulationInterval);
   circulationInterval = null;
+  if(registrationsInterval) clearInterval(registrationsInterval);
+  registrationsInterval = null;
+  if(name==='admin-profesores' && authToken && rolActivo==='admin'){
+    void refreshAdminRegistrations();
+    registrationsInterval = setInterval(()=>void refreshAdminRegistrations(), 30000);
+  }
   if(name==='admin-tardanzas'){
     renderTardanzas();
     if(authToken && rolActivo==='admin'){
@@ -1419,6 +1437,24 @@ function switchView(name){
   }
   if(authToken && ['prestamos', 'admin-lotes'].includes(name)){
     void cargarEstadoAPI().then(renderAll).catch(error=>showToast(error.message, 'warn'));
+  }
+}
+
+async function refreshAdminRegistrations(){
+  if(!authToken || rolActivo!=='admin' || !document.getElementById('view-admin-profesores').classList.contains('active')) return;
+  try{
+    const [usersData, pendingData, rejectedData] = await Promise.all([
+      apiRequest('/api/admin/users'),
+      apiRequest('/api/admin/users?registro=pendiente'),
+      apiRequest('/api/admin/users?registro=rechazado')
+    ]);
+    usuariosRegistrados = usersData.users;
+    solicitudesPendientes = pendingData.users || [];
+    solicitudesRechazadas = rejectedData.users || [];
+    renderProfesoresTable();
+    renderSolicitudesRegistro();
+  }catch(error){
+    showToast(error.message, 'warn');
   }
 }
 
@@ -2170,7 +2206,7 @@ function renderDevoluciones(message=''){
   const counter = document.getElementById('returnsHistoryResultsCount');
   if(counter) counter.textContent = `${historialDevoluciones.length} resultados`;
   wrap.innerHTML = `<div class="inventory-table-scroll"><table class="inventory-table">
-    <thead><tr><th>Notebook</th><th>Devolvió</th><th>DNI</th><th>Préstamo</th><th>Entrega</th><th>Recibió</th><th>Fecha y hora</th><th>Estado</th></tr></thead>
+    <thead><tr><th>Notebook</th><th>Devolvió</th><th>DNI</th><th>Préstamo</th><th>Entrega</th><th>Recibió</th><th>Devolución</th><th>Estado</th></tr></thead>
     <tbody>${historialDevoluciones.map(item=>{
       const state = item.demorada ? 'Devuelta con demora' : 'Devuelta a tiempo';
       return `<tr><td class="mono">${escapeHtml(item.notebook)}</td>

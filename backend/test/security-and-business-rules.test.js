@@ -1678,6 +1678,11 @@ test('la interfaz muestra selector reabrible, contador de texto, carro y curso e
   assert.match(html, /id="solicitudesRechazadasTable"/);
   assert.match(app, /function aprobarRegistro\(/);
   assert.match(app, /function rechazarRegistro\(/);
+  assert.match(app, /async function refreshAdminRegistrations\(/);
+  assert.match(app, /apiRequest\('\/api\/admin\/users\?registro=pendiente'\)/);
+  assert.match(app, /registrationsInterval = setInterval\([\s\S]{0,120}refreshAdminRegistrations\(\), 30000/);
+  assert.match(app, /\['Bloqueos', 'Historial de demoras/);
+  assert.match(app, /<th>Recibió<\/th><th>Devolución<\/th>/);
   assert.match(app, /\/api\/admin\/users\/\$\{encodeURIComponent\(dni\)\}\/approve/);
   assert.match(app, /\/api\/admin\/users\/\$\{encodeURIComponent\(dni\)\}\/reject/);
   assert.match(html, /id="changePasswordRequestBtn"/);

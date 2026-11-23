@@ -47,7 +47,7 @@ const REQUIRED_FIELDS = {
   loans: ['id', 'notebook_id', 'user_id', 'vence_at', 'estado'],
   returns: ['id', 'loan_id'],
   tickets: ['id', 'codigo', 'owner_id', 'motivo', 'descripcion', 'estado'],
-  ticket_replies: ['id', 'ticket_id', 'author_id', 'mensaje', 'created_at'],
+  ticket_replies: ['id', 'ticket_id', 'mensaje', 'created_at'],
   late_returns: ['id', 'loan_id', 'user_id', 'notebook_id', 'returned_at', 'due_at']
 };
 
@@ -64,6 +64,8 @@ const ENUMS = {
 const NULLABLE_FIELDS = new Set([
   'users.baneado_hasta',
   'users.eliminado_at',
+  'users.registro_revisado_at',
+  'users.registro_revisado_por',
   'carros.ubicacion_id',
   'notebooks.carro_id', 'notebooks.prestado_a',
   'reservations.carro', 'reservations.curso', 'reservations.hora_devolucion',
@@ -71,6 +73,7 @@ const NULLABLE_FIELDS = new Set([
   'loans.reminder_sent_at',
   'returns.hora_prevista', 'returns.confirmado_at', 'returns.confirmado_por',
   'tickets.loan_id', 'tickets.notebook_id', 'tickets.resolved_at', 'tickets.resolved_by',
+  'ticket_replies.author_id',
   'audit_log.user_id'
 ]);
 
