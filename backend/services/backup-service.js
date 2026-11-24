@@ -53,6 +53,7 @@ const REQUIRED_FIELDS = {
 
 const ENUMS = {
   'users.rol': ['alumno', 'profesor', 'admin'],
+  'users.baneo_origen': ['manual', 'automatico'],
   'notebooks.estado': ['disponible', 'prestada', 'mantenimiento', 'pendiente_devolucion'],
   'reservations.tipo': ['individual', 'lote'],
   'reservations.estado': ['confirmada', 'pendiente_aprobacion', 'aprobada', 'retirada', 'rechazada', 'cancelada'],
@@ -63,6 +64,8 @@ const ENUMS = {
 
 const NULLABLE_FIELDS = new Set([
   'users.baneado_hasta',
+  'users.baneo_origen',
+  'users.tardanzas_reset_at',
   'users.eliminado_at',
   'users.registro_revisado_at',
   'users.registro_revisado_por',
@@ -133,7 +136,10 @@ async function createBackup(user) {
         if (table !== 'carros') throw new Error(`No existe la tabla requerida ${table}`);
         continue;
       }
-      const result = await client.query(`SELECT * FROM "${table}"`);
+      const orderBy = table === 'reservation_notebooks'
+        ? 'reservation_id, notebook_id'
+        : table === 'user_preferences' ? 'user_id' : 'id';
+      const result = await client.query(`SELECT * FROM "${table}" ORDER BY ${orderBy}`);
       data[table] = result.rows;
       conteos[table] = result.rowCount;
     }

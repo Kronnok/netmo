@@ -20,7 +20,8 @@ const migrations = [
   '014-ticket-automatic-replies.sql',
   '015-soft-delete-users.sql',
   '016-registration-approval.sql',
-  '017-anonymize-deleted-users.sql'
+  '017-anonymize-deleted-users.sql',
+  '018-automatic-late-return-blocks.sql'
 ];
 
 async function migrate() {

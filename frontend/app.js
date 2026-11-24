@@ -2908,7 +2908,8 @@ function renderTardanzas(){
 
   const query = normalizeSearchText(document.getElementById('lateReturnsSearch')?.value);
   const todosUsuarios = usuariosConTardanzas.filter(user=>normalizeSearchText([
-    user.nombre, user.rol, rolLabel[user.rol], user.dni, user.baneado ? 'bloqueada bloqueado' : 'activa'
+    user.nombre, user.rol, rolLabel[user.rol], user.dni, user.baneado ? 'bloqueada bloqueado' : 'activa',
+    user.baneo_origen === 'automatico' ? 'bloqueo automatico' : 'bloqueo manual'
   ].join(' ')).includes(query));
   const filteredHistory = historialTardanzas.filter(item=>normalizeSearchText([
     item.nombre, item.rol, rolLabel[item.rol], item.dni, item.notebookId, item.fecha
@@ -2925,7 +2926,7 @@ function renderTardanzas(){
           <td>${escapeHtml(u.nombre)}</td>
           <td>${escapeHtml(rolLabel[u.rol] || u.rol)}</td>
           <td class="mono">${escapeHtml(u.dni)}</td>
-          <td>${escapeHtml(u.tardanzas ?? 0)}</td>
+          <td><span class="${(u.tardanzas ?? 0) >= 5 ? 'badge badge-vencido' : ''}">${escapeHtml(u.tardanzas ?? 0)} / 5</span></td>
           <td>${(u.candidato_a_sancion ?? (u.tardanzas >= 3)) ? 'Sí' : 'No'}</td>
           <td><span class="badge ${u.baneado ? 'badge-vencido' : 'badge-resuelto'}">${u.baneado ? 'Bloqueada' : 'Activa'}</span></td>
         </tr>`).join('');
@@ -2939,12 +2940,15 @@ function renderTardanzas(){
     blockedWrap.innerHTML = bloqueados.length
       ? bloqueados.map(u=>{
         const until = u.baneado_hasta ? `Hasta ${formatBusinessDateTime(u.baneado_hasta)}` : 'Bloqueo indefinido';
+        const motivo = u.baneo_origen === 'automatico'
+          ? 'Bloqueo automático por 5 devoluciones tardías'
+          : 'Bloqueo manual';
         return `
         <div class="action-card" style="cursor:default;margin-bottom:.8rem;">
           <div class="action-icon" style="background:var(--red-bg);color:var(--red-text);">🚫</div>
           <div class="action-info">
             <h4>${escapeHtml(u.nombre)} <span class="hint">(${escapeHtml(rolLabel[u.rol] || u.rol)} · ${escapeHtml(u.dni)})</span></h4>
-            <p>${escapeHtml(until)} · ${escapeHtml(u.tardanzas ?? 0)} entrega${u.tardanzas===1?'':'s'} tardía${u.tardanzas===1?'':'s'}</p>
+            <p>${escapeHtml(motivo)} · ${escapeHtml(until)} · ${escapeHtml(u.tardanzas ?? 0)} entrega${u.tardanzas===1?'':'s'} tardía${u.tardanzas===1?'':'s'}</p>
           </div>
           <button class="btn btn-sm btn-success-outline" onclick="cambiarBaneo(${escapeHtml(JSON.stringify(u.dni))}, false)">Desbloquear usuario</button>
         </div>`;
@@ -2955,6 +2959,11 @@ function renderTardanzas(){
   const pendientesAviso = usuariosConTardanzas.filter(u=>u.tardanzas>=3 && !u.baneado).length;
   if(pendientesAviso>0){ badge.style.display='inline-flex'; badge.textContent = pendientesAviso; }
   else{ badge.style.display='none'; }
+
+  const avisoBloqueo = document.getElementById('lateReturnsBlockInfo');
+  if(avisoBloqueo){
+    avisoBloqueo.textContent = 'Al llegar a 5 devoluciones tardías la cuenta se bloquea automáticamente durante 7 días. Al desbloquearse, el contador vuelve a 0 y el historial se conserva.';
+  }
 
   if(filteredHistory.length===0){
     tbody.innerHTML = '<tr><td colspan="4"><div class="empty-state"><p>Todavía no hay entregas tardías registradas.</p></div></td></tr>';

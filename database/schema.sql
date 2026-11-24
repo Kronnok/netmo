@@ -18,6 +18,8 @@ CREATE TABLE users (
   password_hash TEXT NOT NULL,
   baneado BOOLEAN NOT NULL DEFAULT FALSE,
   baneado_hasta TIMESTAMPTZ,
+  baneo_origen VARCHAR(16) CHECK (baneo_origen IS NULL OR baneo_origen IN ('manual', 'automatico')),
+  tardanzas_reset_at TIMESTAMPTZ,
   eliminado_at TIMESTAMPTZ,
   estado_registro registration_status NOT NULL DEFAULT 'aprobado',
   registro_revisado_at TIMESTAMPTZ,
@@ -248,8 +250,10 @@ FOR EACH ROW EXECUTE FUNCTION sync_late_return();
 
 CREATE VIEW user_late_return_summary AS
 SELECT u.id, u.dni, u.nombre, u.rol, COUNT(lr.id)::INTEGER AS tardanzas,
-       COUNT(lr.id) >= 3 AS candidato_a_sancion
+       COUNT(lr.id) >= 3 AS candidato_a_sancion,
+       COUNT(lr.id) >= 5 AS bloqueo_automatico
 FROM users u
 LEFT JOIN late_returns lr ON lr.user_id = u.id
+  AND (u.tardanzas_reset_at IS NULL OR lr.returned_at >= u.tardanzas_reset_at)
 WHERE u.rol <> 'admin'
 GROUP BY u.id, u.dni, u.nombre, u.rol;

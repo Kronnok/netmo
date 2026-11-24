@@ -186,6 +186,7 @@ async function prepareDatabase() {
   users.resetExpiry = await insertUser('990007', 'Reset Vencido', 'reset-expiry@netmo.invalid', 'alumno');
   users.resetUsed = await insertUser('990008', 'Reset Usado', 'reset-used@netmo.invalid', 'alumno');
   users.resetAttempts = await insertUser('990009', 'Reset Intentos', 'reset-attempts@netmo.invalid', 'alumno');
+  users.lateBlock = await insertUser('990010', 'Alumno Bloqueo Automático', 'late-block@netmo.invalid', 'alumno');
   await pool.query("UPDATE users SET baneado = TRUE, baneado_hasta = now() - interval '1 minute' WHERE id = $1", [users.expiredBan.id]);
   await pool.query("UPDATE users SET baneado = TRUE, baneado_hasta = now() + interval '1 hour' WHERE id = $1", [users.activeBan.id]);
   const carro = await pool.query('INSERT INTO carros (numero) VALUES (1) RETURNING id');
@@ -1050,6 +1051,92 @@ async function runFlows(users) {
       assert.equal(response.status, expectedStatus, label);
       await assertBackupUnchanged(tokens.admin, originalBackupResponse, users.admin.password);
     }
+  });
+
+  await report('el quinto retraso bloquea la cuenta siete días y el desbloqueo reinicia el contador', async () => {
+    const notebook = await pool.query(`SELECT n.id FROM notebooks n
+      WHERE NOT EXISTS (SELECT 1 FROM loans l WHERE l.notebook_id = n.id AND l.estado <> 'devuelto')
+      ORDER BY n.id LIMIT 1`);
+    assert.ok(notebook.rowCount, 'debe haber una notebook disponible');
+    const notebookId = notebook.rows[0].id;
+
+    async function registerLateReturn() {
+      const loan = await pool.query(`INSERT INTO loans (notebook_id, user_id, vence_at, estado)
+        VALUES ($1, $2, now() - interval '1 hour', 'activo') RETURNING id`,
+      [notebookId, users.lateBlock.id]);
+      await pool.query("UPDATE notebooks SET estado = 'prestada', prestado_a = $2 WHERE id = $1",
+        [notebookId, users.lateBlock.id]);
+      const response = await request('POST', `/api/admin/loans/${loan.rows[0].id}/return`, {}, tokens.admin);
+      assert.equal(response.status, 200, JSON.stringify(response.payload));
+    }
+
+    for (let index = 0; index < 4; index += 1) await registerLateReturn();
+    let summary = await request('GET', '/api/admin/late-returns', undefined, tokens.admin);
+    let row = summary.payload.users.find((user) => user.dni === users.lateBlock.dni);
+    assert.equal(row.tardanzas, 4);
+    assert.equal(row.bloqueo_automatico, false);
+    assert.equal(row.baneado, false);
+    assert.equal((await request('POST', '/api/auth/login', {
+      email: users.lateBlock.email, password: users.lateBlock.password
+    })).status, 200);
+
+    await registerLateReturn();
+    const denied = await request('POST', '/api/auth/login', {
+      email: users.lateBlock.email, password: users.lateBlock.password
+    });
+    assert.equal(denied.status, 403);
+    assert.match(denied.payload.error, /bloqueada automáticamente/i);
+    assert.match(denied.payload.error, /5 devoluciones tardías/i);
+
+    const blockedUser = await pool.query(`SELECT baneado, baneo_origen, baneado_hasta
+      FROM users WHERE id = $1`, [users.lateBlock.id]);
+    assert.equal(blockedUser.rows[0].baneado, true);
+    assert.equal(blockedUser.rows[0].baneo_origen, 'automatico');
+    const remainingHours = (new Date(blockedUser.rows[0].baneado_hasta).getTime() - Date.now()) / 3_600_000;
+    assert.ok(remainingHours > 24 * 6.9 && remainingHours <= 24 * 7.1, 'el bloqueo debe durar siete días');
+
+    summary = await request('GET', '/api/admin/late-returns', undefined, tokens.admin);
+    row = summary.payload.users.find((user) => user.dni === users.lateBlock.dni);
+    assert.equal(row.tardanzas, 5);
+    assert.equal(row.bloqueo_automatico, true);
+    assert.equal(row.baneado, true);
+    assert.equal(row.baneo_origen, 'automatico');
+
+    const audit = await pool.query(`SELECT COUNT(*)::integer AS total FROM audit_log
+      WHERE accion = 'bloqueo_automatico' AND detalle::jsonb->>'user_id' = $1`, [String(users.lateBlock.id)]);
+    assert.equal(audit.rows[0].total, 1, 'el bloqueo automático se audita una sola vez');
+
+    await registerLateReturn();
+    const auditAfterSixth = await pool.query(`SELECT COUNT(*)::integer AS total FROM audit_log
+      WHERE accion = 'bloqueo_automatico' AND detalle::jsonb->>'user_id' = $1`, [String(users.lateBlock.id)]);
+    assert.equal(auditAfterSixth.rows[0].total, 1, 'una demora extra estando bloqueado no duplica el bloqueo');
+
+    const unblocked = await request('PATCH', `/api/admin/users/${users.lateBlock.dni}`, {
+      baneado: false
+    }, tokens.admin);
+    assert.equal(unblocked.status, 200);
+    const resetUser = await pool.query(`SELECT baneado, baneo_origen, tardanzas_reset_at
+      FROM users WHERE id = $1`, [users.lateBlock.id]);
+    assert.equal(resetUser.rows[0].baneado, false);
+    assert.equal(resetUser.rows[0].baneo_origen, null);
+    assert.ok(resetUser.rows[0].tardanzas_reset_at);
+    summary = await request('GET', '/api/admin/late-returns', undefined, tokens.admin);
+    row = summary.payload.users.find((user) => user.dni === users.lateBlock.dni);
+    assert.equal(row.tardanzas, 0, 'el desbloqueo reinicia el contador sin borrar el historial');
+    assert.equal((await request('POST', '/api/auth/login', {
+      email: users.lateBlock.email, password: users.lateBlock.password
+    })).status, 200);
+
+    await pool.query(`UPDATE users SET baneado = TRUE, baneo_origen = 'automatico',
+      baneado_hasta = now() - interval '1 minute' WHERE id = $1`, [users.lateBlock.id]);
+    assert.equal((await request('POST', '/api/auth/login', {
+      email: users.lateBlock.email, password: users.lateBlock.password
+    })).status, 200, 'el vencimiento del bloqueo permite ingresar');
+    const expired = await pool.query(`SELECT baneado, baneo_origen, tardanzas_reset_at
+      FROM users WHERE id = $1`, [users.lateBlock.id]);
+    assert.equal(expired.rows[0].baneado, false);
+    assert.equal(expired.rows[0].baneo_origen, null);
+    assert.ok(expired.rows[0].tardanzas_reset_at, 'el vencimiento también reinicia el contador');
   });
 }
 

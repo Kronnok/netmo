@@ -1997,6 +1997,15 @@ test('la devolución administrativa es transaccional, idempotente y libera segú
       }
       if (sql.includes('INSERT INTO returns')) return { rowCount: 1, rows: [] };
       if (sql.includes('UPDATE notebooks AS n SET')) return { rowCount: 1, rows: [] };
+      if (sql.includes('SELECT id, rol, baneado, baneado_hasta, eliminado_at')) {
+        return { rowCount: 1, rows: [{
+          id: '7', rol: 'alumno', baneado: false, baneado_hasta: null,
+          eliminado_at: null, tardanzas_reset_at: null
+        }] };
+      }
+      if (sql.includes('SELECT COUNT(*)::integer AS total FROM late_returns')) {
+        return { rowCount: 1, rows: [{ total: 1 }] };
+      }
       throw new Error(`Consulta no prevista: ${sql}`);
     }
   });
@@ -2067,6 +2076,15 @@ test('la devolución por lote confirma cada equipo y conserva su préstamo aunqu
         notebookUpdates.push(params);
         return { rowCount: 1, rows: [] };
       }
+      if (sql.includes('SELECT id, rol, baneado, baneado_hasta, eliminado_at')) {
+        return { rowCount: 1, rows: [{
+          id: String(params[0]), rol: 'alumno', baneado: false, baneado_hasta: null,
+          eliminado_at: null, tardanzas_reset_at: null
+        }] };
+      }
+      if (sql.includes('SELECT COUNT(*)::integer AS total FROM late_returns')) {
+        return { rowCount: 1, rows: [{ total: 1 }] };
+      }
       throw new Error(`Consulta no prevista: ${sql}`);
     }
   });
@@ -2113,6 +2131,15 @@ test('la confirmación de devoluciones antiguas sigue usando la ruta compatible'
       if (sql.includes("UPDATE loans SET estado = 'devuelto'")) return { rowCount: 1, rows: [{ devuelta_at: new Date() }] };
       if (sql.includes('INSERT INTO returns')) return { rowCount: 1, rows: [] };
       if (sql.includes('UPDATE notebooks AS n SET')) return { rowCount: 1, rows: [] };
+      if (sql.includes('SELECT id, rol, baneado, baneado_hasta, eliminado_at')) {
+        return { rowCount: 1, rows: [{
+          id: '7', rol: 'alumno', baneado: false, baneado_hasta: null,
+          eliminado_at: null, tardanzas_reset_at: null
+        }] };
+      }
+      if (sql.includes('SELECT COUNT(*)::integer AS total FROM late_returns')) {
+        return { rowCount: 1, rows: [{ total: 1 }] };
+      }
       throw new Error(`Consulta no prevista: ${sql}`);
     }
   });

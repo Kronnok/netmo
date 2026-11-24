@@ -764,13 +764,14 @@
   <section class="view" id="view-admin-tardanzas">
     <div class="search-bar-wrap"><input type="search" id="lateReturnsSearch" class="search-bar" maxlength="50" placeholder="Buscar por usuario, DNI, equipo o rol" oninput="filterLateReturns()">
       <button type="button" class="btn btn-sm" onclick="document.getElementById('lateReturnsSearch').value='';filterLateReturns()">Limpiar</button><span id="lateReturnsResultsCount" class="hint" aria-live="polite"></span></div>
+    <p id="lateReturnsBlockInfo" class="hint" style="margin:0 0 1rem;"></p>
     <div class="card" style="margin-bottom:1.5rem;">
-      <div class="card-header"><div><h3>Usuarios bloqueados</h3><p>Cuentas que no pueden reservar ni retirar equipos hasta que las desbloquees o venza el plazo.</p></div></div>
+      <div class="card-header"><div><h3>Usuarios bloqueados</h3><p>Cuentas que no pueden iniciar sesión hasta que las desbloquees o venza el plazo. Al desbloquearse, el contador de demoras vuelve a 0.</p></div></div>
       <div id="usuariosBloqueadosWrap"></div>
     </div>
 
     <div class="card" style="margin-bottom:1.5rem;">
-      <div class="card-header"><div><h3>Resumen por usuario</h3><p>Demoras registradas, estado de la cuenta y elegibilidad para evaluación de sanción.</p></div></div>
+      <div class="card-header"><div><h3>Resumen por usuario</h3><p>Demoras registradas, avance hacia las 5 entregas tardías y estado de la cuenta. Al llegar a 5 se bloquea automáticamente por 7 días.</p></div></div>
       <table>
         <thead><tr><th>Usuario</th><th>Rol</th><th>DNI</th><th>Devoluciones tardías</th><th>Candidato a sanción</th><th>Cuenta</th></tr></thead>
         <tbody id="historialPorUsuarioTable"></tbody>

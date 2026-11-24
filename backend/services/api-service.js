@@ -21,6 +21,12 @@ const { sendMail } = require('./mail-service');
 const { notifyRegistrationDecision } = require('./registration-service');
 const { mapTicketRow } = require('./ticket-mapper');
 const { anonymizeUser } = require('./user-anonymization');
+const {
+  AUTOMATIC_BLOCK_DAYS,
+  AUTOMATIC_BLOCK_THRESHOLD,
+  activeBan,
+  shouldBlockAutomatically
+} = require('./automatic-block');
 
 const TICKET_AUTO_REPLY_MESSAGE = 'Recibimos tu reporte. El equipo de NetMO lo va a revisar y te responderá por este medio. Si querés, podés agregar más información en esta conversación.';
 
@@ -51,6 +57,21 @@ async function notifyLoanReturnByEmail(loanId) {
   } catch {
     console.error('No se pudo enviar una notificación por correo.');
   }
+}
+
+async function notifyAutomaticBlockByEmail(userId, baneadoHasta) {
+  const until = baneadoHasta
+    ? new Date(baneadoHasta).toLocaleString('es-AR', {
+      timeZone: 'America/Argentina/Buenos_Aires',
+      dateStyle: 'short',
+      timeStyle: 'short'
+    })
+    : null;
+  await notifyByEmail(
+    userId,
+    'Cuenta bloqueada por devoluciones tardías',
+    `<p>Tu cuenta fue bloqueada automáticamente porque acumulaste ${AUTOMATIC_BLOCK_THRESHOLD} devoluciones tardías.</p>${until ? `<p>Podés volver a ingresar a partir del ${until}.</p>` : ''}<p>Si creés que se trata de un error, comunicate con administración.</p>`
+  );
 }
 
 async function notifyLoanCheckoutByEmail(userId, deliveries) {
@@ -275,6 +296,47 @@ async function completeReservationCheckout(client, id) {
   };
 }
 
+async function applyAutomaticLateReturnBlock(client, userId) {
+  const userResult = await client.query(`SELECT id, rol, baneado, baneado_hasta, eliminado_at,
+    tardanzas_reset_at FROM users WHERE id = $1 FOR UPDATE`, [userId]);
+  const user = userResult.rows[0];
+  if (!user || user.eliminado_at || user.rol === 'admin') return null;
+
+  if (user.baneado && user.baneado_hasta && !activeBan(true, user.baneado_hasta, new Date())) {
+    const cleared = await client.query(`UPDATE users SET baneado = FALSE, baneado_hasta = NULL,
+      baneo_origen = NULL, tardanzas_reset_at = now() WHERE id = $1 RETURNING tardanzas_reset_at`, [userId]);
+    user.baneado = false;
+    user.baneado_hasta = null;
+    user.tardanzas_reset_at = cleared.rows[0].tardanzas_reset_at;
+  }
+
+  const countResult = await client.query(`SELECT COUNT(*)::integer AS total FROM late_returns
+    WHERE user_id = $1 AND ($2::timestamptz IS NULL OR returned_at >= $2)`,
+  [userId, user.tardanzas_reset_at]);
+  const total = Number(countResult.rows[0]?.total || 0);
+  const shouldBlock = shouldBlockAutomatically({
+    role: user.rol,
+    totalLateReturns: total,
+    banned: user.baneado,
+    banExpiresAt: user.baneado_hasta
+  });
+  if (!shouldBlock) return null;
+
+  const blocked = await client.query(`UPDATE users SET baneado = TRUE,
+    baneado_hasta = now() + ($2::text || ' days')::interval,
+    baneo_origen = 'automatico'
+    WHERE id = $1 RETURNING baneado_hasta`, [userId, AUTOMATIC_BLOCK_DAYS]);
+  const baneadoHasta = blocked.rows[0].baneado_hasta;
+  await client.query(`INSERT INTO audit_log (user_id, accion, detalle)
+    VALUES (NULL, 'bloqueo_automatico', $1)`, [JSON.stringify({
+    user_id: String(userId),
+    tardanzas: total,
+    dias: AUTOMATIC_BLOCK_DAYS,
+    baneado_hasta: baneadoHasta
+  })]);
+  return { userId, tardanzas: total, baneadoHasta };
+}
+
 async function completeLoanReturn(client, loanId, adminId) {
   const loanResult = await client.query(`SELECT id, user_id, notebook_id, estado, vence_at
     FROM loans WHERE id = $1 FOR UPDATE`, [loanId]);
@@ -304,7 +366,17 @@ async function completeLoanReturn(client, loanId, adminId) {
         FROM carros c WHERE c.id = n.carro_id), n.ubicacion) END,
     prestado_a = NULL, updated_at = now()
     WHERE n.id = $1::bigint`, [loan.notebook_id]);
-  return { message: 'Devolución registrada', loanId, userId: loan.user_id, notebookId: loan.notebook_id };
+  const devueltaAt = updated.rows[0]?.devuelta_at;
+  const blocked = devueltaAt && new Date(devueltaAt).getTime() > new Date(loan.vence_at).getTime()
+    ? await applyAutomaticLateReturnBlock(client, loan.user_id)
+    : null;
+  return {
+    message: 'Devolución registrada',
+    loanId,
+    userId: loan.user_id,
+    notebookId: loan.notebook_id,
+    blocked
+  };
 }
 
 function reservationPayload(body, user) {
@@ -971,6 +1043,9 @@ const actions = {
     requireAdmin(user, 'Solo admin puede registrar devoluciones');
     const result = await db.transaction((client) => completeLoanReturn(client, id, user.id));
     await notifyLoanReturnByEmail(result.loanId);
+    if (result.blocked) {
+      await notifyAutomaticBlockByEmail(result.blocked.userId, result.blocked.baneadoHasta);
+    }
     return { message: result.message };
   },
   async adminReturnLoans(body, user) {
@@ -989,6 +1064,11 @@ const actions = {
       return returns;
     });
     for (const item of result) await notifyLoanReturnByEmail(item.loanId);
+    for (const item of result) {
+      if (item.blocked) {
+        await notifyAutomaticBlockByEmail(item.blocked.userId, item.blocked.baneadoHasta);
+      }
+    }
     return { message: `Se registraron ${result.length} devoluciones` };
   },
   async requestReturn(body, user, { id }) {
@@ -1064,6 +1144,9 @@ const actions = {
       return completeLoanReturn(client, pending.rows[0].loan_id, user.id);
     });
     await notifyLoanReturnByEmail(result.loanId);
+    if (result.blocked) {
+      await notifyAutomaticBlockByEmail(result.blocked.userId, result.blocked.baneadoHasta);
+    }
     return { message: 'Devolución confirmada' };
   },
   async ticketNotebooks(_body, user) {
@@ -1227,8 +1310,11 @@ const actions = {
   },
   async lateReturns(_body, user) {
     requireAdmin(user, 'Solo admin puede consultar demoras');
+    await db.query(`UPDATE users SET baneado = FALSE, baneado_hasta = NULL,
+      baneo_origen = NULL, tardanzas_reset_at = now()
+      WHERE baneado AND baneado_hasta IS NOT NULL AND baneado_hasta <= now()`);
     const users = await db.query(`SELECT summary.*, (u.baneado AND (u.baneado_hasta IS NULL OR u.baneado_hasta > now())) AS baneado,
-      u.baneado_hasta
+      u.baneado_hasta, u.baneo_origen
       FROM user_late_return_summary summary JOIN users u ON u.id = summary.id
       WHERE u.eliminado_at IS NULL AND u.estado_registro = 'aprobado'
       ORDER BY summary.tardanzas DESC, summary.nombre`);
@@ -1264,9 +1350,11 @@ const actions = {
       if (![1, 3, 7, 15, 30].includes(duration)) throw new AppError('La duración debe ser 1, 3, 7, 15 o 30 días, o indefinida', 400);
     }
     const result = await db.query(`UPDATE users SET baneado = $1,
-      baneado_hasta = CASE WHEN NOT $1 OR $3::integer IS NULL THEN NULL ELSE now() + ($3::text || ' days')::interval END
+      baneado_hasta = CASE WHEN NOT $1 OR $3::integer IS NULL THEN NULL ELSE now() + ($3::text || ' days')::interval END,
+      baneo_origen = CASE WHEN $1 THEN 'manual' ELSE NULL END,
+      tardanzas_reset_at = CASE WHEN $1 THEN tardanzas_reset_at ELSE now() END
       WHERE dni = $2 AND rol <> 'admin' AND eliminado_at IS NULL
-      RETURNING dni, nombre, baneado, baneado_hasta`, [body.baneado, dni, duration]);
+      RETURNING dni, nombre, baneado, baneado_hasta, baneo_origen, tardanzas_reset_at`, [body.baneado, dni, duration]);
     if (!result.rowCount) throw new AppError('Usuario no encontrado o no modificable', 404);
     return { user: result.rows[0] };
   },

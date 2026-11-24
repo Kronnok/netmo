@@ -35,7 +35,7 @@ El seed contiene cuentas de ejemplo para instalaciones nuevas. Cualquier persona
 | Administración: Entregas y devoluciones | Busca usuarios y préstamos activos, registra devoluciones individuales o de un lote y actualiza la lista periódicamente. |
 | Administración: Préstamos | Lista reservas individuales y por lote, permite aprobar lotes y registrar entrega; notebooks disponibles pueden asignarse al entregar. |
 | Administración: Fallas | Consulta tickets, cambia su estado y responde; notebooks prestadas con tickets abiertos vuelven a mantenimiento al devolverse. |
-| Administración: Devoluciones tardías | Lista todos los alumnos y profesores con su total de tardanzas, permite banear por duración o desbanear y muestra el historial real. |
+| Administración: Bloqueos | Lista todos los alumnos y profesores con su total de tardanzas, bloquea automáticamente al llegar a cinco por siete días, permite banear por duración o desbanear (reiniciando el contador) y muestra el historial real. |
 | Tema y sesión | Permite alternar tema claro/oscuro, elegir si se mantiene la sesión y cerrar sesión. El tema se guarda en `localStorage`; los tokens se guardan en `localStorage` solo si el usuario elige mantener la sesión, o en `sessionStorage` en caso contrario. La identidad visual combina rol y tema: alumno en verde, profesor en violeta y administración en grafito, con sidebar y hero propios en ambos temas. |
 
 ## 4. Flujos principales y reglas
@@ -71,9 +71,9 @@ Las reglas de año, día y horario usan `America/Argentina/Buenos_Aires` tanto e
 1. El préstamo se crea al registrar la entrega de una reserva; los lotes pendientes se pueden aprobar y entregar en una transacción. Al registrar la entrega se envía como máximo un correo transaccional con las notebooks, el curso y la fecha/hora de devolución, solo si el usuario tiene activadas las notificaciones por correo.
 2. El usuario solo consulta el préstamo, vencimiento y cuenta regresiva; no inicia una devolución.
 3. Administración registra la recepción directamente. El préstamo pasa a `devuelto`; la notebook queda en mantenimiento si tiene un ticket abierto o en progreso, o disponible en caso contrario.
-4. Un trigger registra la demora si la hora efectiva de devolución supera el vencimiento. Una vista cuenta tardanzas y marca candidato a sanción desde tres.
+4. Un trigger registra la demora si la hora efectiva de devolución supera el vencimiento. Una vista cuenta tardanzas, marca candidato a sanción desde tres y bloqueo automático desde cinco.
 
-El cómputo de demora ocurre al confirmar la devolución, no al solicitarla. La interfaz presenta el umbral de tres como aviso para que administración evalúe una sanción; no hay sanción automática.
+El cómputo de demora ocurre al confirmar la devolución, no al solicitarla. La interfaz presenta el umbral de tres como aviso para que administración evalúe una sanción. Al acumular cinco devoluciones tardías la cuenta se bloquea automáticamente durante siete días e impide iniciar sesión. Al desbloquearla manualmente o al vencer el plazo, el contador vuelve a cero sin borrar el historial de demoras. Los administradores nunca se bloquean automáticamente.
 
 ### Fallas y tickets
 
@@ -220,7 +220,7 @@ PostgreSQL usa `citext` para emails y `pgcrypto` para hash de contraseñas. Las 
 
 Enums: `user_role` = alumno/profesor/admin; `notebook_status` = disponible/prestada/mantenimiento/pendiente_devolucion; `reservation_type` = individual/lote; `reservation_status` = confirmada/pendiente_aprobacion/aprobada/retirada/rechazada/cancelada; `loan_status` = activo/devolucion_pendiente/devuelto; `ticket_status` = abierto/progreso/resuelto.
 
-La vista `user_late_return_summary` cuenta tardanzas y marca `candidato_a_sancion` desde tres, excluyendo administradores. Al consultar tardanzas se excluyen las cuentas dadas de baja, aunque su historial permanece registrado. Hay triggers para año, horario y fecha futura de reservas y para registrar devoluciones tardías.
+La vista `user_late_return_summary` cuenta tardanzas desde el último reinicio del contador, marca `candidato_a_sancion` desde tres y `bloqueo_automatico` desde cinco, excluyendo administradores. Al consultar tardanzas se excluyen las cuentas dadas de baja, aunque su historial permanece registrado. Hay triggers para año, horario y fecha futura de reservas y para registrar devoluciones tardías.
 
 ## 8. Autenticación y seguridad
 

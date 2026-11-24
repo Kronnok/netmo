@@ -57,7 +57,7 @@ test('crea exportación con conteos, versión, checksum y registro de auditoría
     async query(sql) {
       if (sql.includes('information_schema.tables')) return { rows: tableNames.map((table_name) => ({ table_name })) };
       if (sql.includes('FROM schema_migrations')) return { rows: [{ version: '006-admin-backup-audit.sql' }] };
-      const table = sql.match(/^SELECT \* FROM "([^"]+)"$/)?.[1];
+      const table = sql.match(/^SELECT \* FROM "([^"]+)"(?: ORDER BY .+)?$/)?.[1];
       if (table === 'users') return { rows: [{ id: '1', rol: 'admin', created_at: new Date('2026-10-25T10:00:00.000Z') }], rowCount: 1 };
       if (table) return { rows: [], rowCount: 0 };
       return { rows: [], rowCount: 0 };

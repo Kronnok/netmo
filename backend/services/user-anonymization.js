@@ -8,6 +8,8 @@ async function anonymizeUser(client, userId) {
     password_hash = crypt(encode(gen_random_bytes(32), 'hex'), gen_salt('bf')),
     baneado = FALSE,
     baneado_hasta = NULL,
+    baneo_origen = NULL,
+    tardanzas_reset_at = NULL,
     eliminado_at = COALESCE(eliminado_at, now()),
     estado_registro = 'rechazado',
     registro_revisado_at = COALESCE(registro_revisado_at, now())
